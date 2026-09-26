@@ -16,3 +16,11 @@ def dense_week_dir(tmp_path_factory: pytest.TempPathFactory) -> Path:
     week = widen_rollover(dense_ticks(*DENSE_WEEK, seed=21, mean_interval_s=10))
     write_mt5(week, directory / "XAUUSD_dense_week.csv")
     return directory
+
+
+@pytest.fixture(scope="session")
+def clean_week_dir(tmp_path_factory: pytest.TempPathFactory) -> Path:
+    """A directory with one MT5 export: a week of 6-second ticks and no defects."""
+    directory = tmp_path_factory.mktemp("clean_week")
+    write_mt5(dense_ticks(*DENSE_WEEK, seed=22, mean_interval_s=6), directory / "XAUUSD_week.csv")
+    return directory

@@ -113,6 +113,13 @@ IDs from `docs/specs/development-plan.md`.
   hours on holidays and early closes, missing minutes across all market hours, and first/last-tick
   distance from the calendar's open and close (clock errors show up an hour off; data-coverage
   edges are skipped). ADR 0011 accepted.
+- DQ-006: quality runs and report (`xq.quality.validate`, `xq.quality.report`, `xq validate`) —
+  per-trading-day partitions with clean ticks, 1-minute bars, calendar row, spread statistics,
+  tick-rate norms (4+ weeks of history), dropped counts and data coverage; results stored in
+  `quality_runs` / `quality_results` (migration 0002); `reports/quality/<run_id>/` with
+  `report.md` (summary, failing days, per-check statistics, top anomalies), `summary.json`, a
+  missing-minutes heatmap and a spread heatmap; pre-vault days only unless `--include-vault`.
+  ADR 0012.
 
 ### Changed
 

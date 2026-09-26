@@ -207,6 +207,8 @@ class TickRateAnomalies:
         if hours is None or norm is None or norm.empty:
             return None
         opens, closes = hours
+        if data.coverage is not None:  # hours the source's data does not reach are not quiet
+            opens, closes = max(opens, data.coverage[0]), min(closes, data.coverage[1] + 1)
         first_hour = -(-opens // _HOUR_NS) * _HOUR_NS  # first whole UTC hour inside the market
         starts = np.arange(first_hour, closes - _HOUR_NS + 1, _HOUR_NS, dtype=np.int64)
         if len(starts) == 0:

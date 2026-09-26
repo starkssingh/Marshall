@@ -28,6 +28,7 @@ from xq.data.bars import build_bar_sets
 from xq.data.clean import build_clean
 from xq.data.raw_store import ingest, rebuild_mirror, verify_raw_store
 from xq.data.spreads import build_spread_stats
+from xq.quality.validate import validate_source
 from xq.tracking.db import current_revision, engine_for, head_revision, upgrade_to_head
 
 EXIT_USAGE_ERROR = 2
@@ -249,6 +250,43 @@ def spread_stats_command(
         f"spread statistics for {result.hours} hour(s) of week from {result.ticks} ticks, "
         f"{result.computed_from} to {result.computed_to}"
     )
+
+
+@app.command("validate")
+def validate_command(
+    ctx: typer.Context,
+    source: SourceOption,
+    start: StartOption = None,
+    end: EndOption = None,
+    include_vault: Annotated[
+        bool,
+        typer.Option(
+            "--include-vault",
+            help="Also validate vault days (release-gate procedure only; recorded on the run).",
+        ),
+    ] = False,
+) -> None:
+    """Grade every data-quality check per trading day and write a report."""
+    with pipeline_run(ctx.obj, source=source) as run:
+        result = validate_source(
+            run.cfg,
+            run.engine,
+            source,
+            run_id=run.run_id,
+            git_sha=run.git_sha,
+            start=start.date() if start else None,
+            end=end.date() if end else None,
+            include_vault=include_vault,
+        )
+    totals = result.summary["totals"]
+    typer.echo(
+        f"quality run {result.run_id}: {len(result.days)} trading day(s); "
+        f"{totals['pass']} pass, {totals['warn']} warn, {totals['fail']} fail"
+    )
+    for check_id, row in result.summary["checks"].items():
+        if row["warn"] or row["fail"]:
+            typer.echo(f"  {check_id}: {row['warn']} warn, {row['fail']} fail")
+    typer.echo(f"report: {result.report_path}")
 
 
 @app.command("verify-raw")

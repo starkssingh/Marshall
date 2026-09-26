@@ -56,6 +56,7 @@ checks:
     params:
       low_ratio: 0.1            # proposed: fewer than 10% of the norm
       high_ratio: 10.0          # proposed: more than 10x the norm
+      min_weeks: 4              # proposed: an hour needs 4 weeks of history to have a norm
 
   # --- Bar checks on 1-minute bars (DQ-003) ---
   bar.ohlc_consistency:         # bars whose high/low do not bound open and close, any basis

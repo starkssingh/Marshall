@@ -217,3 +217,15 @@ def test_checks_never_change_the_data(
     for check_id in TICK_CHECKS:
         run(check_id, data, cfg)
     pd.testing.assert_frame_equal(data.ticks, before)
+
+
+def test_tick_rate_ignores_hours_beyond_the_data(
+    base: pd.DataFrame, context: dict[str, Any], cfg: AppConfig
+) -> None:
+    # The source's data ends at 10:00 UTC this day: later hours are missing data, not quiet hours.
+    cut = int(pd.Timestamp("2024-03-12 10:00", tz="UTC").value)
+    early = base[base["ts_utc"] < cut]
+    coverage = (int(base["ts_utc"].min()), cut - 1)
+    result = run("tick.rate_anomalies", build(early, context, coverage=coverage), cfg)
+    assert result.metric == 0
+    assert result.details["hours_compared"] == 11  # 23:00 .. 09:00 UTC, whole hours only
