@@ -1,0 +1,4 @@
+# Local development: readable console logs, verbose.
+logging:
+  level: DEBUG
+  console_format: console

@@ -1,0 +1,28 @@
+# Base configuration shared by every profile. Profiles override keys from this file; environment
+# variables (XQ_SECTION__KEY) and CLI overrides (--set section.key=value) override both.
+# Secrets are never set here: use XQ_SECRETS__* environment variables.
+
+project:
+  name: xq
+
+paths:
+  root: .
+  data_dir: data
+  reports_dir: reports
+  logs_dir: logs
+  migrations_dir: migrations
+
+database:
+  url: null            # null = SQLite at <data_dir>/metadata.sqlite (research tier)
+
+logging:
+  level: INFO
+  console: true
+  console_format: json
+  file: logs/xq.jsonl
+
+vault:
+  # Untouchable holdout: the most recent 12 months at project start (2026-09-26) plus all later
+  # data. This instant is the start of trading day 2025-09-26 (17:00 America/New_York on
+  # 2025-09-25, EDT). Changing it requires an ADR.
+  start: "2025-09-25T21:00:00Z"

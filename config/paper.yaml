@@ -1,0 +1,4 @@
+# Paper trading (Sprint 14+). Database, live feed and broker settings arrive with PAPER-002..004.
+logging:
+  level: INFO
+  console_format: json

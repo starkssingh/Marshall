@@ -1,0 +1,4 @@
+# Production (Sprint 16+). The live adapter stays disabled until a GATE-004 record exists.
+logging:
+  level: INFO
+  console_format: json

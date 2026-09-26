@@ -1,0 +1,4 @@
+# Research runs: JSON logs everywhere so runs can be audited.
+logging:
+  level: INFO
+  console_format: json

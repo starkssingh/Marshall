@@ -17,3 +17,8 @@ IDs from `docs/specs/development-plan.md`.
   (whitespace hygiene, gitleaks, ruff and mypy from the locked environment), pytest markers
   `unit`, `integration`, `property`, `leakage`, `slow`, `research` applied automatically by
   directory, warnings treated as errors.
+- ARCH-003: layered configuration (`xq.core.config`) — `config/base.yaml` → profile YAML
+  (`dev`, `research`, `paper`, `prod`) → `XQ_` environment variables → explicit overrides,
+  validated into a frozen pydantic-settings `AppConfig`; `config_hash()` over canonical JSON
+  (secrets excluded); secrets typed `SecretStr` and accepted only from `XQ_SECRETS__*` variables;
+  vault start fixed at the start of trading day 2025-09-26 (2025-09-25T21:00:00Z).
