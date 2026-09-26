@@ -1,0 +1,15 @@
+# Versioned target sets (TGT-001, ADR 0024). The first dataset built with a version locks its
+# definition (target_sets table); to change a definition, add a new version.
+
+fwd_returns:
+  v1:
+    kind: forward_return      # TGT-002: execution-aware forward log returns (ADR 0025)
+    # The plan's default horizons. EDA-006 (Sprint 5) decides which are admitted; horizons are
+    # calendar durations, so a label whose exit falls in a market closure has no value.
+    horizons: [15m, 1h, 4h, 1d]
+    price_refs: [long, short, mid]
+    params:
+      execution_latency_ms: 1000   # decision to order arrival; provisional until BT-001 / paper data
+      max_fill_delay_s: 300        # no quote within 5 minutes of the intended fill time: no label
+      sigma_span_bars: 96          # EWMA span of the interim sigma-hat (VOL-006 replaces it)
+      vol_normalized: true         # also emit <name>_vol = return / (sigma-hat * sqrt(horizon))

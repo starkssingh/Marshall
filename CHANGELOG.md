@@ -219,6 +219,13 @@ IDs from `docs/specs/development-plan.md`.
   definitions are hash-locked in `target_sets` (migration 0006) and part of the dataset id; the
   schema guard `check_feature_matrix` refuses target columns and reserved prefixes (`tgt_`,
   `fwd_`) in feature matrices. ADR 0024.
+- TGT-002: execution-aware forward returns (`xq.targets.returns`, target set `fwd_returns.v1` in
+  `config/targets.yaml`) — entry at the first usable tick at or after t + 1 s latency and exit at
+  the first at or after t + h + latency; long buys the ask and sells the bid, short sells the bid
+  and buys the ask, mid is the research variant; no label when a fill would be more than 300 s
+  late (daily break, weekend, excluded day, end of data); `_vol` variants divide by the interim
+  EWMA sigma-hat (span 96 bars) scaled to the horizon; horizons 15m, 1h, 4h, 1d (24 targets).
+  Every target passes the leakage bound checks; `ds_base.yaml` includes the set. ADR 0025.
 
 ### Changed
 

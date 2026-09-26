@@ -38,7 +38,9 @@ uv run xq clean --source mt5_primary          # flag bad ticks into versioned cl
 uv run xq build-bars --source mt5_primary     # bid/ask/mid bars on 7 timeframes
 uv run xq spread-stats --source mt5_primary   # hour-of-week spread percentiles (pre-vault)
 uv run xq validate --source mt5_primary       # data-quality checks (pre-vault) in reports/quality/
-uv run xq dataset build experiments/configs/ds_base.yaml   # versioned dataset (needs a quality run)
+uv run xq dataset build experiments/configs/ds_base.yaml   # versioned dataset with targets
+uv run xq exp register experiments/hypotheses/H-0001.yaml  # pre-register a hypothesis
+uv run xq exp trials                          # trial counts for multiple-testing corrections
 uv run xq verify-raw                          # re-hash every raw file against the manifest
 uv run xq config show                         # resolved configuration, secrets masked
 ```

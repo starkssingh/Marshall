@@ -398,7 +398,7 @@ def _targets(
     the vault), without ticks the bars exclude and without ticks of excluded trading days.
     """
     close = pd.Series(base["close"].to_numpy(), index=decision_index(base))
-    sigma = kind.sigma(close, definition).reindex(decisions)
+    sigma = kind.sigma(close, definition, spec.base_timeframe.duration).reindex(decisions)
     lookahead = kind.lookahead(definition)
     vault = vault_start(cfg)
     mask = exclude_mask(cfg.bars_config())

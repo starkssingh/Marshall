@@ -1,7 +1,8 @@
 # The base research dataset (Sprint 3: `xq dataset build experiments/configs/ds_base.yaml`).
 #
 # One row per complete 15-minute mid bar; decision time = the bar's available_at. Context bars
-# (1h, 4h, 1d) are joined on availability. The builder pins the bar build, the quality run and a
+# (1h, 4h, 1d) are joined on availability; targets are forward returns filled on the correct side
+# of the quote after the execution latency. The builder pins the bar build, the quality run and a
 # config digest when it resolves this spec, and stores the resolved spec with the dataset.
 #
 # The window is about four years before the vault, as the plan asks; confirm `start` against the
@@ -17,4 +18,5 @@ end: "2025-09-25T21:00:00Z"     # vault.start
 warmup: 10D
 context_timeframes: [1h, 4h, 1d]
 feature_set: {name: base, version: v1}
+target_set: {name: fwd_returns, version: v1}   # execution-aware forward returns (TGT-002)
 exclusions: []

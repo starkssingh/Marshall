@@ -59,7 +59,7 @@ class TargetSpec:
 
 
 TargetFn = Callable[[TargetSpec, pd.DataFrame, pd.Series], pd.DataFrame]
-SigmaFn = Callable[[pd.Series, TargetSetConfig], pd.Series]
+SigmaFn = Callable[[pd.Series, TargetSetConfig, pd.Timedelta], pd.Series]
 
 
 @dataclass(frozen=True)
@@ -70,8 +70,9 @@ class TargetKind:
         name: Kind name used in ``config/targets.yaml``.
         code_version: Part of every dataset id that uses the kind.
         expand: Target specs of a target set definition (validates its params).
-        sigma: Volatility scale per decision time from the base close series (indexed by
-            decision time); must be causal.
+        sigma: ``sigma(close, definition, bar)``: volatility rate per square-root minute at each
+            decision time, from the base close series (indexed by decision time) and the base
+            bar length; must be causal. A kind scales it to a horizon h by sqrt(h in minutes).
         compute: ``compute(spec, quotes, sigma)`` returning `VALUE_COLUMNS` indexed by the
             decision times of `sigma`; `quotes` has ``ts_utc`` (tz-aware), ``bid`` and ``ask``.
         lookahead: How far after a decision time the kind may read quotes.

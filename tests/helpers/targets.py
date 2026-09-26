@@ -35,7 +35,7 @@ STUB_KIND = TargetKind(
     name="stub",
     code_version=1,
     expand=_expand,
-    sigma=lambda close, definition: pd.Series(1.0, index=close.index),
+    sigma=lambda close, definition, bar: pd.Series(1.0, index=close.index),
     compute=stub_compute,
     lookahead=lambda definition: max(pd.Timedelta(h) for h in definition.horizons),
 )

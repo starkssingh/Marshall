@@ -1,6 +1,6 @@
 """The target kinds known to the dataset builder (TGT-001).
 
-A static mapping, filled explicitly here as kinds are implemented (TGT-002 adds forward returns).
+A static mapping, filled explicitly here as kinds are implemented.
 """
 
 from __future__ import annotations
@@ -10,8 +10,9 @@ from types import MappingProxyType
 
 from xq.core.errors import ConfigError
 from xq.targets.base import TargetKind
+from xq.targets.returns import FORWARD_RETURN
 
-TARGET_KINDS: Mapping[str, TargetKind] = MappingProxyType({})
+TARGET_KINDS: Mapping[str, TargetKind] = MappingProxyType({FORWARD_RETURN.name: FORWARD_RETURN})
 
 
 def target_kind(name: str) -> TargetKind:
