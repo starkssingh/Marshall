@@ -40,3 +40,24 @@ sources:
     clock: "NY+7"          # server time UTC+2 / UTC+3, switching on US DST dates
     instrument: xauusd
     file_patterns: ["*.csv", "*.txt"]
+
+cleaning:
+  # Non-destructive tick cleaning (DATA-007, ADR 0006). Every rule sets a flag bit; the rules
+  # version written to data/clean/.../rules=<version>/ is this label plus a hash of the parameters
+  # below and of the cleaning code version, so changing any of them creates a new clean store.
+  version: c1
+  drop: []                   # only DUP_EXACT, NONPOSITIVE, CROSSED may be listed
+  log_flag_actions: true     # also log flags (drops are always logged) in cleaning_actions
+  spread_outlier:
+    window_ticks: 500
+    min_periods: 50
+    multiple: 10.0           # matches the DQ spread check (10x the hour-of-week median)
+  spike:
+    window_ticks: 500
+    min_periods: 100
+    z_threshold: 8.0         # matches the DQ spike check (reverting spikes above 8 robust sigma)
+    reversal_ticks: 5
+    reversal_fraction: 0.5
+    min_scale_bps: 0.05      # floor on the robust return scale in quiet markets
+  stale:
+    seconds: 120             # matches the DQ stale-quote limit

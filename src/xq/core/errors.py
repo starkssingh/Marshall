@@ -31,3 +31,7 @@ class ProvenanceError(XQError):
 
 class RawStoreIntegrityError(XQError):
     """A file in the immutable raw store differs from its manifest entry."""
+
+
+class MirrorVersionError(XQError):
+    """A raw-store mirror part predates the schema a later stage needs; rebuild the mirror."""

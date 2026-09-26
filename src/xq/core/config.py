@@ -34,6 +34,7 @@ from pydantic import (
     BaseModel,
     BeforeValidator,
     ConfigDict,
+    Field,
     SecretStr,
     ValidationError,
     field_validator,
@@ -299,6 +300,54 @@ class SessionsConfig(FrozenModel):
         return self
 
 
+DroppableRule = Literal["DUP_EXACT", "NONPOSITIVE", "CROSSED"]
+
+
+class SpreadOutlierRule(FrozenModel):
+    """SPREAD_OUTLIER: spread above `multiple` x the median of the previous `window_ticks`."""
+
+    window_ticks: int = Field(gt=0)
+    min_periods: int = Field(gt=0)
+    multiple: float = Field(gt=1)
+
+
+class SpikeRule(FrozenModel):
+    """SPIKE: |mid log return| / robust scale above `z_threshold`, reverting within a few ticks.
+
+    The robust scale is 1.4826 x the median absolute return of the previous `window_ticks`
+    returns, floored at `min_scale_bps`. A candidate is confirmed if, within `reversal_ticks`
+    later ticks, the mid comes back by at least `reversal_fraction` of the jump.
+    """
+
+    window_ticks: int = Field(gt=0)
+    min_periods: int = Field(gt=0)
+    z_threshold: float = Field(gt=0)
+    reversal_ticks: int = Field(gt=0)
+    reversal_fraction: float = Field(gt=0, le=1)
+    min_scale_bps: float = Field(gt=0)
+
+
+class StaleRule(FrozenModel):
+    """STALE: the quote repeats unchanged for longer than `seconds`."""
+
+    seconds: float = Field(gt=0)
+
+
+class CleaningConfig(FrozenModel):
+    """Versioned, non-destructive cleaning rules (DATA-007).
+
+    Every rule flags. Only exact duplicates, non-positive and crossed quotes may additionally be
+    dropped, and only if listed in `drop`.
+    """
+
+    version: str
+    drop: list[DroppableRule] = []
+    log_flag_actions: bool = True
+    spread_outlier: SpreadOutlierRule
+    spike: SpikeRule
+    stale: StaleRule
+
+
 class SourceConfig(FrozenModel):
     """A declared market-data source (DATA-003). The clock convention is part of its identity."""
 
@@ -353,6 +402,7 @@ class AppConfig(BaseSettings):
     instruments: dict[str, InstrumentSpec] = {}
     sessions: SessionsConfig | None = None
     sources: dict[str, SourceConfig] = {}
+    cleaning: CleaningConfig | None = None
     secrets: SecretsConfig = SecretsConfig()
 
     @classmethod
@@ -395,6 +445,12 @@ class AppConfig(BaseSettings):
         except KeyError:
             known = ", ".join(sorted(self.sources)) or "none"
             raise ConfigError(f"unknown source {source_id!r}; configured: {known}") from None
+
+    def cleaning_config(self) -> CleaningConfig:
+        """Return the cleaning rules; raise if they are not configured."""
+        if self.cleaning is None:
+            raise ConfigError("no cleaning configuration (cleaning: in config/base.yaml)")
+        return self.cleaning
 
     def sessions_config(self) -> SessionsConfig:
         """Return the calendar and session configuration; raise if it is not configured."""

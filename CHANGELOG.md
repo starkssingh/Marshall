@@ -71,6 +71,15 @@ IDs from `docs/specs/development-plan.md`.
   with `raw_file_id` and `row_num`, `raw_files` / `ingest_runs` / `data_sources` / `instruments`
   manifest rows, recovery of interrupted runs, refusal to change a source's clock after ingest
   (`xq.data.provenance`), and `xq verify-raw` integrity checks. ADR 0005.
+- DATA-007: non-destructive tick cleaning (`xq.data.clean`, `xq clean`) — versioned rules
+  `DUP_EXACT`, `DUP_TS_DIFF_PRICE`, `NONPOSITIVE`, `CROSSED`, `SPREAD_OUTLIER`, `SPIKE`,
+  `CLOSED_MARKET` and `STALE` set flag bits (bits 16–23) on per-trading-day clean partitions under
+  `data/clean/<source>/<instrument>/rules=<version>/`; drops only for exact duplicates,
+  non-positive and crossed quotes when configured; every rule hit logged in `cleaning_actions`
+  with original values; `clean_partitions` rows with contributing raw files and sha256;
+  unchanged partitions skipped, rebuilds bit-identical. Rules are causal except `SPIKE`, which is
+  confirmed by later ticks. The raw mirror (schema v2) now stores each row's canonical quote;
+  `xq rebuild-mirror` regenerates older mirrors. ADR 0006.
 
 ### Changed
 

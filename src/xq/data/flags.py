@@ -22,5 +22,23 @@ class TickFlag(IntFlag):
     #: Bid or ask unknown at this row (e.g. an MT5 file starting with a one-sided update).
     MISSING_QUOTE = 1 << 3
 
+    # Cleaning rules (DATA-007, `xq.data.clean`).
+    #: Same timestamp and quote as an earlier tick of the partition.
+    DUP_EXACT = 1 << 16
+    #: Same timestamp as an earlier tick, different quote.
+    DUP_TS_DIFF_PRICE = 1 << 17
+    #: Bid or ask is zero or negative.
+    NONPOSITIVE = 1 << 18
+    #: Bid above ask.
+    CROSSED = 1 << 19
+    #: Spread above a multiple of the trailing median spread.
+    SPREAD_OUTLIER = 1 << 20
+    #: Mid jump beyond a robust z threshold that reverts within a few ticks (uses later ticks).
+    SPIKE = 1 << 21
+    #: Outside the calendar's market hours.
+    CLOSED_MARKET = 1 << 22
+    #: Quote unchanged for longer than the stale limit.
+    STALE = 1 << 23
+
 
 FLAG_DTYPE = "uint32"
