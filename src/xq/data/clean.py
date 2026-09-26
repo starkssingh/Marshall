@@ -14,7 +14,8 @@ Rules, in the order they are evaluated (`RULES`):
   timestamp, different quote;
 - ``CLOSED_MARKET`` — outside the calendar's market hours for the trading day;
 - ``SPREAD_OUTLIER`` — spread above a multiple of the median of the previous spreads;
-- ``SPIKE`` — a mid jump beyond a robust z threshold that reverts within a few ticks;
+- ``SPIKE`` — a whole-quote jump beyond a robust, time-scaled z threshold that reverts within a
+  few ticks (ADR 0008);
 - ``STALE`` — the quote repeats unchanged for longer than the stale limit.
 
 All rules except ``SPIKE`` are *causal*: whether a tick is flagged depends only on that tick and
@@ -54,7 +55,7 @@ from xq.tracking.db import session_factory
 from xq.tracking.models import CleaningAction, CleanPartition, RawFile
 
 #: Bump when rule logic changes; it is part of every rules version hash.
-CLEAN_CODE_VERSION = 1
+CLEAN_CODE_VERSION = 2
 CLEAN_DIR = "clean"
 RULES_VERSION_KEY = b"xq.rules_version"
 _MAD_TO_SIGMA = 1.4826
@@ -177,7 +178,8 @@ def clean_ticks(ticks: pd.DataFrame, cfg: CleaningConfig, market: MarketWindow) 
 
     usable = known & ~masks["NONPOSITIVE"] & ~masks["CROSSED"] & ~masks["DUP_EXACT"]
     masks["SPREAD_OUTLIER"] = _spread_outliers(bid, ask, usable, cfg, details["SPREAD_OUTLIER"])
-    masks["SPIKE"] = _spikes(bid, ask, usable & ~masks["SPREAD_OUTLIER"], cfg, details["SPIKE"])
+    spike_candidates = usable & ~masks["SPREAD_OUTLIER"]
+    masks["SPIKE"] = _spikes(ts, bid, ask, spike_candidates, cfg, details["SPIKE"])
     masks["STALE"] = _stale(ts, bid, ask, usable, cfg, details["STALE"])
 
     flags = base.copy()
@@ -452,32 +454,39 @@ def _spread_outliers(
 
 
 def _spikes(
+    ts: npt.NDArray[np.int64],
     bid: npt.NDArray[np.float64],
     ask: npt.NDArray[np.float64],
     usable: npt.NDArray[np.bool_],
     cfg: CleaningConfig,
     details: dict[int, dict[str, Any]],
 ) -> npt.NDArray[np.bool_]:
+    """Whole-quote jumps that revert (ADR 0008).
+
+    The candidate return is the *common* move of bid and ask (both sides moving the same way,
+    sized by the smaller move), so one-sided spread widening, e.g. at the rollover, is not a
+    spike. It is scaled by the robust per-tick mid-return scale times sqrt(elapsed time / trailing
+    median tick spacing), so a move across a pause is judged on the pause's length.
+    """
     rule = cfg.spike
     positions = np.flatnonzero(usable)
     mask = np.zeros(len(bid), dtype=bool)
     if len(positions) < 2:
         return mask
-    mid = (bid[positions] + ask[positions]) / 2
-    returns = np.empty(len(mid))
-    returns[0] = np.nan
-    returns[1:] = np.diff(np.log(mid))
-    scale = (
-        pd.Series(np.abs(returns))
-        .rolling(rule.window_ticks, min_periods=rule.min_periods)
-        .median()
-        .shift(1)
-        .to_numpy()
-        * _MAD_TO_SIGMA
-    )
-    scale = np.maximum(scale, rule.min_scale_bps * 1e-4)
-    with np.errstate(invalid="ignore"):
-        z = returns / scale
+    b, a, t = bid[positions], ask[positions], ts[positions].astype(np.float64)
+    mid = (b + a) / 2
+    bid_move, ask_move, mid_move = (_log_returns(v) for v in (b, a, mid))
+    same_way = (np.sign(bid_move) == np.sign(ask_move)) & (bid_move != 0)
+    common = np.where(same_way, np.sign(bid_move) * np.minimum(abs(bid_move), abs(ask_move)), 0.0)
+    common[0] = np.nan
+
+    scale = _trailing_median(np.abs(mid_move), rule.window_ticks, rule.min_periods)
+    scale = np.maximum(scale * _MAD_TO_SIGMA, rule.min_scale_bps * 1e-4)
+    elapsed = np.concatenate(([np.nan], np.diff(t)))
+    spacing = _trailing_median(elapsed, rule.window_ticks, rule.min_periods)
+    with np.errstate(invalid="ignore", divide="ignore"):
+        time_factor = np.sqrt(np.maximum(1.0, elapsed / spacing))
+        z = common / (scale * time_factor)
         candidates = np.flatnonzero(np.abs(z) > rule.z_threshold)
 
     resume_at = 0
@@ -492,10 +501,31 @@ def _spikes(
             if reverted:
                 mask[positions[c:j]] = True
                 for k in range(c, j):
-                    details[int(positions[k])] = {"z": float(z[c]), "reverted_after_ticks": j - c}
+                    details[int(positions[k])] = {
+                        "z": float(z[c]),
+                        "time_factor": float(time_factor[c]),
+                        "reverted_after_ticks": j - c,
+                    }
                 resume_at = j + 1
                 break
     return mask
+
+
+def _log_returns(values: npt.NDArray[np.float64]) -> npt.NDArray[np.float64]:
+    returns = np.empty(len(values))
+    returns[0] = np.nan
+    returns[1:] = np.diff(np.log(values))
+    return returns
+
+
+def _trailing_median(
+    values: npt.NDArray[np.float64], window: int, min_periods: int
+) -> npt.NDArray[np.float64]:
+    """Median of the previous `window` values (the current one excluded)."""
+    median: npt.NDArray[np.float64] = (
+        pd.Series(values).rolling(window, min_periods=min_periods).median().shift(1).to_numpy()
+    )
+    return median
 
 
 def _stale(

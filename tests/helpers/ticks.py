@@ -8,12 +8,13 @@ test knows exactly which ticks must be flagged: injected rows carry ``row_num`` 
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
 
 import numpy as np
 import pandas as pd
 
-from helpers.mt5_fixtures import synthetic_ticks
+from helpers.mt5_fixtures import BOTH, synthetic_ticks, to_mt5_text
 from xq.data.adapters.base import TICK_SCHEMA
 
 INJECTED = 1_000_000
@@ -129,3 +130,37 @@ def flagged_ids(frame: pd.DataFrame, flag: int) -> set[int]:
     """``row_num`` of rows carrying `flag`."""
     hit = (frame["flags"].to_numpy() & np.uint32(flag)) != 0
     return set(frame.loc[hit, "row_num"].tolist())
+
+
+def widen_rollover(frame: pd.DataFrame, factor: float = 6.0) -> pd.DataFrame:
+    """Widen spreads around the 17:00 New York rollover, as retail XAUUSD feeds do.
+
+    Ticks in the ten minutes before the close (16:50-17:00) and the first half hour after the
+    reopen (18:00-18:30 New York) get their ask moved up so the spread is `factor` times wider.
+    """
+    local = pd.DatetimeIndex(pd.to_datetime(frame["ts_utc"], unit="ns", utc=True)).tz_convert(
+        "America/New_York"
+    )
+    minutes = np.asarray(local.hour * 60 + local.minute)
+    around = ((minutes >= 16 * 60 + 50) & (minutes < 17 * 60)) | (
+        (minutes >= 18 * 60) & (minutes < 18 * 60 + 30)
+    )
+    widened = frame.copy()
+    spread = widened["ask"] - widened["bid"]
+    widened.loc[around, "ask"] = np.round(widened.loc[around, "bid"] + spread[around] * factor, 2)
+    return widened
+
+
+def write_mt5(frame: pd.DataFrame, path: Path) -> Path:
+    """Write canonical ticks as an MT5 tick export (both sides on every row, NY+7 server time)."""
+    ticks = pd.DataFrame(
+        {
+            "ts_utc": pd.to_datetime(frame["ts_utc"], unit="ns", utc=True),
+            "bid": frame["bid"],
+            "ask": frame["ask"],
+            "changed": BOTH,
+        }
+    )
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(to_mt5_text(ticks), encoding="utf-8")
+    return path

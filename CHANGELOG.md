@@ -102,3 +102,7 @@ IDs from `docs/specs/development-plan.md`.
 - Ingest: a file whose SHA-256 is already stored under a *different* source is still skipped (the
   bytes are stored once) but now logs a `raw_file_already_ingested_under_other_source` warning
   naming both source ids, instead of skipping silently.
+- DATA-007 `SPIKE` rule: the candidate is now the common move of bid and ask (one-sided spread
+  widening, e.g. at the rollover, no longer looks like a spike) and its scale grows with the square
+  root of the elapsed time (moves across pauses are judged on the pause). Cleaning code version 2;
+  ADR 0008 supersedes the `SPIKE` definition in ADR 0006.

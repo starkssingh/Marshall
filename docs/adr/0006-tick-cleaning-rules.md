@@ -1,6 +1,6 @@
 # ADR 0006 — Tick cleaning rules, partitions and versioning
 
-- **Status:** accepted
+- **Status:** accepted; the `SPIKE` definition in §3 is superseded by ADR 0008
 - **Date:** 2026-09-26
 - **Tasks:** DATA-007 (and the raw-mirror change it required)
 

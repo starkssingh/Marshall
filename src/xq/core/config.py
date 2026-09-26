@@ -312,11 +312,13 @@ class SpreadOutlierRule(FrozenModel):
 
 
 class SpikeRule(FrozenModel):
-    """SPIKE: |mid log return| / robust scale above `z_threshold`, reverting within a few ticks.
+    """SPIKE: a whole-quote jump beyond `z_threshold` that reverts within a few ticks (ADR 0008).
 
-    The robust scale is 1.4826 x the median absolute return of the previous `window_ticks`
-    returns, floored at `min_scale_bps`. A candidate is confirmed if, within `reversal_ticks`
-    later ticks, the mid comes back by at least `reversal_fraction` of the jump.
+    The jump is the common move of bid and ask (same direction, smaller magnitude). Its scale is
+    1.4826 x the median absolute mid return of the previous `window_ticks` returns, floored at
+    `min_scale_bps`, times sqrt(elapsed time / median tick spacing). A candidate is confirmed if,
+    within `reversal_ticks` later ticks, the mid comes back by at least `reversal_fraction` of the
+    jump.
     """
 
     window_ticks: int = Field(gt=0)

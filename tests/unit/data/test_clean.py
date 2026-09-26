@@ -20,6 +20,7 @@ from helpers.ticks import (
     row_like,
     same_time_other_price,
     wide_spread,
+    widen_rollover,
 )
 from xq.core.config import CleaningConfig, load_config
 from xq.core.time import to_ns
@@ -27,7 +28,13 @@ from xq.data.clean import CLEANING_FLAGS, RULES, MarketWindow, clean_ticks, rule
 from xq.data.flags import TickFlag
 
 REPO_CONFIG = Path(__file__).resolve().parents[3] / "config"
+
+
 # Trading day Monday 2024-03-11 (EDT): market 2024-03-10 22:00 UTC to 2024-03-11 21:00 UTC.
+def ns(text: str) -> int:
+    return to_ns(pd.Timestamp(text, tz="UTC"))
+
+
 MARKET = MarketWindow(
     to_ns(pd.Timestamp("2024-03-10 22:00", tz="UTC")),
     to_ns(pd.Timestamp("2024-03-11 21:00", tz="UTC")),
@@ -233,3 +240,34 @@ def test_rules_version_tracks_parameters(cfg: CleaningConfig) -> None:
     changed = cfg.model_dump()
     changed["spike"]["z_threshold"] = 9.0
     assert rules_version(CleaningConfig.model_validate(changed)) != version
+
+
+def test_rollover_spread_widening_is_not_a_spike(cfg: CleaningConfig) -> None:
+    # One-sided ask widening moves the mid but not the whole quote: not a price spike.
+    week = widen_rollover(
+        dense_ticks("2024-03-11 00:00", "2024-03-14 00:00", seed=21, mean_interval_s=10)
+    )
+    days = [
+        MarketWindow(ns("2024-03-10 22:00"), ns("2024-03-11 21:00")),
+        MarketWindow(ns("2024-03-11 22:00"), ns("2024-03-12 21:00")),
+        MarketWindow(ns("2024-03-12 22:00"), ns("2024-03-13 21:00")),
+    ]
+    for market in days:
+        in_day = (week["ts_utc"] >= market.open_ns - 3600 * SECOND_NS) & (
+            week["ts_utc"] < market.close_ns
+        )
+        cleaned = clean_ticks(week.loc[in_day], cfg, market).ticks
+        assert not flagged_ids(cleaned, TickFlag.SPIKE)
+
+
+def test_move_across_a_gap_is_judged_on_the_gap_length(
+    base: pd.DataFrame, cfg: CleaningConfig
+) -> None:
+    # After a one-hour pause the quote reopens 3.00 higher and gives back half within two ticks.
+    # Measured per tick that is a >8 sigma jump that reverts; scaled by the hour it is not.
+    frame = base.copy()
+    gap_at = 2000
+    frame.loc[gap_at:, "ts_utc"] += 3600 * SECOND_NS
+    frame.loc[gap_at:, ["bid", "ask"]] += 3.00
+    frame.loc[gap_at + 2 :, ["bid", "ask"]] -= 1.50
+    assert not flagged_ids(clean_ticks(frame, cfg, MARKET).ticks, TickFlag.SPIKE)
