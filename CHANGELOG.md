@@ -100,6 +100,11 @@ IDs from `docs/specs/development-plan.md`.
   thresholds, severity and check parameters in `config/quality.yaml` (`AppConfig.quality`),
   grading FAIL above `fail` / WARN above `warn`, validation that thresholds and registered checks
   match one to one, `run_checks` over trading-day partitions keeping the top anomalies.
+- DQ-002: tick-level checks (`xq.quality.checks.ticks`) — timestamp ordering, exact and
+  same-time duplicates, non-positive or crossed quotes, spread outliers against the hour-of-week
+  p50, reverting spike events, stale-quote time in the active sessions, and tick-rate anomalies
+  against hour-of-week norms; dropped rows are counted back in; thresholds in
+  `config/quality.yaml` (plan defaults where given, proposed values marked). ADR 0011 (draft).
 
 ### Changed
 

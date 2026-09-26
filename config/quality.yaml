@@ -1,8 +1,58 @@
 # Data-quality checks (DQ-001..DQ-006). Each check is measured per trading day (partition) and
 # graded: FAIL if metric > fail, WARN if metric > warn, else PASS; null means "never". A warn of 0
 # means "warn on any". Thresholds are fixed before results are seen and change only with an ADR.
+# "plan" marks the development plan's defaults (Phase 2 table); "proposed" marks values chosen
+# here where the plan gives none, to be confirmed or changed (with an ADR) after DQ-008.
 
 active_sessions: [london, new_york]   # sessions (config/sessions.yaml) where liquidity is expected
 top_anomalies: 20                     # anomalies kept per check and day for the report and review
 
-checks: {}
+checks:
+  # --- Tick checks (DQ-002) ---
+  tick.ordering:                # share of ticks out of order in their file or at DST-odd times
+    severity: major
+    unit: share of ticks
+    warn: 0.0                   # proposed: a feed clock should never run backwards
+    fail: 0.001                 # proposed
+  tick.duplicates_exact:        # share of ticks repeating an earlier tick (overlapping exports)
+    severity: minor
+    unit: share of ticks
+    warn: 0.01                  # proposed: expected with overlapping exports, harmless once excluded
+    fail: 0.2                   # proposed
+  tick.duplicates_diff_price:   # same timestamp as an earlier tick, different quote
+    severity: major
+    unit: share of ticks
+    warn: 0.001                 # plan
+    fail: 0.01                  # plan
+  tick.nonpositive_crossed:
+    severity: critical
+    unit: share of ticks
+    warn: 0.0                   # plan: any
+    fail: 0.0001                # plan
+  tick.spread_outliers:         # spread above `multiple` x the hour-of-week p50 (DATA-009)
+    severity: major
+    unit: share of ticks
+    warn: 0.001                 # plan
+    fail: 0.01                  # plan
+    params:
+      multiple: 10.0            # plan
+  tick.spikes:                  # reverting spike events (cleaning rule SPIKE, 8 robust sigma)
+    severity: major
+    unit: events per day
+    warn: 5                     # plan
+    fail: 50                    # plan
+  tick.stale_quotes:            # seconds in active sessions covered by quote-unchanged periods
+    severity: major
+    unit: seconds per day
+    warn: 0                     # plan: any stale quote over the limit
+    fail: 1800                  # plan: 30 minutes per day
+    params:
+      stale_seconds: 120        # plan
+  tick.rate_anomalies:          # full market hours with tick counts far from the hour-of-week norm
+    severity: minor
+    unit: market hours per day
+    warn: 0                     # proposed
+    fail: 3                     # proposed
+    params:
+      low_ratio: 0.1            # proposed: fewer than 10% of the norm
+      high_ratio: 10.0          # proposed: more than 10x the norm

@@ -41,6 +41,7 @@ def partition(
     spread_stats: pd.DataFrame | None = None,
     hourly_tick_norm: pd.Series | None = None,
     bars_1m: pd.DataFrame | None = None,
+    dropped: dict[str, int] | None = None,
 ) -> PartitionData:
     """A partition of `ticks` for trading day `day`, cleaned with the repository's rules."""
     cfg = cfg or repo_config()
@@ -65,4 +66,5 @@ def partition(
         day=row,
         spread_stats=spread_stats,
         hourly_tick_norm=hourly_tick_norm,
+        dropped=dropped or {},
     )

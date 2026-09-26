@@ -70,6 +70,7 @@ class PartitionData:
         day: The trading day's row of the session table (`xq.data.sessions`).
         spread_stats: Hour-of-week spread percentiles (``hour_of_week``, ``p50``...), if any.
         hourly_tick_norm: Typical tick count per New York hour of week, if enough history exists.
+        dropped: Ticks removed by cleaning, per rule id (only rules configured to drop).
     """
 
     source_id: str
@@ -80,6 +81,7 @@ class PartitionData:
     day: pd.Series
     spread_stats: pd.DataFrame | None = None
     hourly_tick_norm: pd.Series | None = None
+    dropped: Mapping[str, int] = field(default_factory=dict)
 
     @property
     def partition_id(self) -> str:
@@ -111,7 +113,10 @@ class Check(Protocol):
     description: str
 
     def measure(self, data: PartitionData, params: Mapping[str, Any]) -> Measurement | None:
-        """Measure one partition; return None when the check does not apply to it."""
+        """Measure one partition; return None when the check does not apply to it.
+
+        `params` holds the check's configured parameters plus ``active_sessions``.
+        """
         ...
 
 
@@ -176,7 +181,8 @@ def grade(metric: float, threshold: CheckThreshold) -> Status:
 def evaluate(check: Check, data: PartitionData, cfg: QualityConfig) -> CheckResult | None:
     """Measure and grade one check on one partition (None when it does not apply)."""
     threshold = cfg.checks[check.check_id]
-    measurement = check.measure(data, threshold.params)
+    params = {"active_sessions": list(cfg.active_sessions), **threshold.params}
+    measurement = check.measure(data, params)
     if measurement is None:
         return None
     anomalies = sorted(measurement.anomalies, key=lambda a: -abs(a.value))[: cfg.top_anomalies]
