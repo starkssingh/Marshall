@@ -39,8 +39,14 @@ TABLES = {
     "vault_tokens",
     "vault_access_log",
     "dataset_versions",
+    "hypotheses",
+    "experiments",
+    "runs",
+    "trials",
+    "metrics",
+    "artifacts",
 }
-LATEST = "0004"
+LATEST = "0005"
 NOW = pd.Timestamp("2026-09-26 01:00:00.123456789", tz="UTC")
 
 

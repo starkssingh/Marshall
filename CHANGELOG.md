@@ -182,6 +182,12 @@ IDs from `docs/specs/development-plan.md`.
   dropped from every timeframe; the manifest records `included_partitions`, `warn_partitions`
   (with warning checks) and `excluded_partitions` (with reason and failing checks). A test injects
   an OHLC error into 1-minute bars and shows the gate blocking that day. ADR 0019.
+- EXP-001: experiment registry schema and API (`xq.tracking.registry`) — tables `hypotheses`
+  (versioned by text hash, with the exact YAML of every version), `experiments` (bound to a
+  hypothesis version), `runs` (git sha, config hash and JSON, dataset id, lock hash, seed, host,
+  timings, status), `trials`, `metrics` (optionally per fold) and `artifacts` (with SHA-256),
+  migration 0005; append-only API returning frozen records — create, read and one-way lifecycle
+  updates (hypothesis superseded, run finished or failed), no deletes. ADR 0020.
 
 ### Changed
 

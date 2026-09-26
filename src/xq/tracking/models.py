@@ -26,6 +26,7 @@ from sqlalchemy import (
     Dialect,
     Float,
     ForeignKey,
+    ForeignKeyConstraint,
     Integer,
     MetaData,
     String,
@@ -317,3 +318,104 @@ class DatasetVersion(Base):
     git_sha: Mapped[str] = mapped_column(String(64))
     path: Mapped[str] = mapped_column(Text)
     created_at: Mapped[pd.Timestamp]
+
+
+class Hypothesis(Base):
+    """One version of a pre-registered hypothesis (EXP-001, EXP-002).
+
+    The YAML text is stored with its SHA-256; an edited file becomes a new version and the previous
+    one is marked superseded, so every version stays visible.
+    """
+
+    __tablename__ = "hypotheses"
+
+    hypothesis_id: Mapped[str] = mapped_column(String(16), primary_key=True)
+    version: Mapped[int] = mapped_column(Integer, primary_key=True)
+    title: Mapped[str] = mapped_column(Text)
+    family_id: Mapped[str] = mapped_column(String(64))
+    yaml_hash: Mapped[str] = mapped_column(String(64))
+    yaml_text: Mapped[str] = mapped_column(Text)
+    status: Mapped[str] = mapped_column(String(16))
+    created_at: Mapped[pd.Timestamp]
+
+
+class Experiment(Base):
+    """An experiment testing one hypothesis version (EXP-001)."""
+
+    __tablename__ = "experiments"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["hypothesis_id", "hypothesis_version"],
+            ["hypotheses.hypothesis_id", "hypotheses.version"],
+            name="fk_experiments_hypothesis_hypotheses",
+        ),
+    )
+
+    experiment_id: Mapped[str] = mapped_column(String(26), primary_key=True)
+    hypothesis_id: Mapped[str] = mapped_column(String(16))
+    hypothesis_version: Mapped[int] = mapped_column(Integer)
+    title: Mapped[str] = mapped_column(Text)
+    status: Mapped[str] = mapped_column(String(16))
+    verdict: Mapped[str | None] = mapped_column(String(16))
+    created_at: Mapped[pd.Timestamp]
+    closed_at: Mapped[pd.Timestamp | None]
+
+
+class Run(Base):
+    """One execution inside an experiment, with everything needed to reproduce it (EXP-001/003)."""
+
+    __tablename__ = "runs"
+
+    run_id: Mapped[str] = mapped_column(String(26), primary_key=True)
+    experiment_id: Mapped[str] = mapped_column(ForeignKey("experiments.experiment_id"))
+    kind: Mapped[str] = mapped_column(String(32))
+    confirmatory: Mapped[bool] = mapped_column(Boolean)
+    git_sha: Mapped[str] = mapped_column(String(64))
+    config_hash: Mapped[str] = mapped_column(String(64))
+    config_json: Mapped[dict[str, Any]]
+    dataset_id: Mapped[str | None] = mapped_column(String(32))
+    lock_hash: Mapped[str] = mapped_column(String(64))
+    seed: Mapped[int] = mapped_column(BigInteger)
+    host: Mapped[str] = mapped_column(String(255))
+    started_at: Mapped[pd.Timestamp]
+    finished_at: Mapped[pd.Timestamp | None]
+    status: Mapped[str] = mapped_column(String(16))
+
+
+class Trial(Base):
+    """One evaluated configuration, counted for multiple-testing corrections (EXP-001/004)."""
+
+    __tablename__ = "trials"
+
+    trial_id: Mapped[str] = mapped_column(String(26), primary_key=True)
+    run_id: Mapped[str] = mapped_column(ForeignKey("runs.run_id"))
+    family_id: Mapped[str] = mapped_column(String(64))
+    config_hash: Mapped[str] = mapped_column(String(64))
+    evaluated_on_test: Mapped[bool] = mapped_column(Boolean)
+    sharpe: Mapped[float | None] = mapped_column(Float)
+    returns_path: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[pd.Timestamp]
+
+
+class Metric(Base):
+    """A named value logged by a run, optionally per walk-forward fold (EXP-001)."""
+
+    __tablename__ = "metrics"
+
+    metric_id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    run_id: Mapped[str] = mapped_column(ForeignKey("runs.run_id"))
+    fold_id: Mapped[str | None] = mapped_column(String(64))
+    name: Mapped[str] = mapped_column(String(128))
+    value: Mapped[float] = mapped_column(Float)
+
+
+class Artifact(Base):
+    """A file a run produced, with its SHA-256 (EXP-001)."""
+
+    __tablename__ = "artifacts"
+
+    artifact_id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    run_id: Mapped[str] = mapped_column(ForeignKey("runs.run_id"))
+    kind: Mapped[str] = mapped_column(String(64))
+    path: Mapped[str] = mapped_column(Text)
+    sha256: Mapped[str] = mapped_column(String(64))
