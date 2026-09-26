@@ -188,6 +188,13 @@ IDs from `docs/specs/development-plan.md`.
   timings, status), `trials`, `metrics` (optionally per fold) and `artifacts` (with SHA-256),
   migration 0005; append-only API returning frozen records — create, read and one-way lifecycle
   updates (hypothesis superseded, run finished or failed), no deletes. ADR 0020.
+- EXP-002: hypothesis pre-registration (`xq.tracking.hypotheses`, `xq exp register <path>`,
+  `xq exp hypotheses`) — `HypothesisDoc` with the plan's fields plus title and trial family;
+  registration requires non-empty success and falsification criteria and planned tests, a positive
+  trial budget, a discovery window that ends before the evaluation window, an evaluation window
+  that ends by `vault.start`, and a file named after its id; the exact file text is locked by
+  SHA-256 and any edit becomes a new version (the old one superseded but readable). Template in
+  `experiments/hypotheses/TEMPLATE.yaml`. ADR 0021.
 
 ### Changed
 

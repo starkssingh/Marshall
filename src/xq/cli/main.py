@@ -32,6 +32,8 @@ from xq.datasets.builder import build_dataset, verify_dataset
 from xq.datasets.spec import load_spec
 from xq.quality.validate import validate_source
 from xq.tracking.db import current_revision, engine_for, head_revision, upgrade_to_head
+from xq.tracking.hypotheses import register_hypothesis
+from xq.tracking.registry import list_hypotheses
 
 EXIT_USAGE_ERROR = 2
 
@@ -355,6 +357,37 @@ def dataset_show(
     typer.echo(json.dumps(manifest, indent=2))
 
 
+exp_app = typer.Typer(
+    help="Hypotheses, experiment runs and trial counts (EXP-001..004).", no_args_is_help=True
+)
+app.add_typer(exp_app, name="exp")
+
+
+@exp_app.command("register")
+def exp_register(
+    ctx: typer.Context,
+    path: Annotated[Path, typer.Argument(help="Hypothesis file (H-XXXX.yaml).")],
+) -> None:
+    """Pre-register a hypothesis; an edited file becomes a new, visible version."""
+    with pipeline_run(ctx.obj) as run:
+        before = {(h.hypothesis_id, h.version) for h in list_hypotheses(run.engine)}
+        ref = register_hypothesis(run.cfg, run.engine, path)
+    state = "unchanged" if (ref.hypothesis_id, ref.version) in before else "registered"
+    typer.echo(
+        f"{ref.hypothesis_id} version {ref.version} {state} "
+        f"(family {ref.family_id}, sha256 {ref.yaml_hash[:16]})"
+    )
+
+
+@exp_app.command("hypotheses")
+def exp_hypotheses(ctx: typer.Context) -> None:
+    """List every registered hypothesis version."""
+    with pipeline_run(ctx.obj) as run:
+        rows = list_hypotheses(run.engine)
+    for h in rows:
+        typer.echo(f"{h.hypothesis_id}\tv{h.version}\t{h.status}\t{h.family_id}\t{h.title}")
+
+
 db_app = typer.Typer(help="Metadata database migrations.", no_args_is_help=True)
 app.add_typer(db_app, name="db")
 
@@ -391,7 +424,6 @@ def db_current(ctx: typer.Context) -> None:
 # Command groups for later phases. Each is registered now so the CLI surface is stable; the
 # commands arrive in the sprint named in the help text.
 _PLANNED_GROUPS = {
-    "exp": "Hypotheses, experiment runs and reproduction (Sprint 3: EXP-001..006).",
     "baselines": "Walk-forward baseline board (Sprint 4: BASE-001..006).",
     "research": "Exploratory, statistical and volatility research (Sprints 5-8).",
     "robustness": "Robustness stress tests (Sprint 9: ROB-001..008).",
