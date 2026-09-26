@@ -166,6 +166,9 @@ IDs from `docs/specs/development-plan.md`.
 
 ### Fixed
 
+- `asof_join` no longer fails with an `IndexError` when the right frame is empty (for example,
+  context bars truncated before the first one is available); every row gets no match. Found by
+  the DS-006 leakage harness.
 - MT5 adapter: a file that mixes times with and without milliseconds is parsed row by row instead
   of being rejected (ADR 0004 already promised both forms).
 - Ingest: a file whose SHA-256 is already stored under a *different* source is still skipped (the

@@ -79,18 +79,21 @@ def asof_join(
     # Index of the last right row with available_at <= decision time (-1 if none).
     position = np.searchsorted(sorted_keys, left_keys, side="right") - 1
     valid = (position >= 0) & (left_keys != _NAT)
+    rows = np.full(len(left_keys), -1, dtype=np.int64)
+    matched = np.full(len(left_keys), _NAT, dtype=np.int64)
+    matched[valid] = sorted_keys[position[valid]]
     if tolerance is not None:
-        limit = pd.Timedelta(tolerance).value
-        lag = np.where(valid, left_keys - sorted_keys[np.clip(position, 0, None)], 0)
-        valid &= lag <= limit
-    rows = np.where(valid, order[np.clip(position, 0, None)], -1)
+        stale = np.zeros(len(left_keys), dtype=bool)
+        stale[valid] = left_keys[valid] - matched[valid] > pd.Timedelta(tolerance).value
+        valid &= ~stale
+        matched[stale] = _NAT
+    rows[valid] = order[position[valid]]
 
     result = left.copy()
     for name, column in zip(joined_names[:-1], chosen, strict=True):
         # -1 is not a label of the reset index, so unmatched rows become missing (ints -> float).
         taken = right[column].reset_index(drop=True).reindex(rows)
         result[name] = pd.Series(taken.array, index=left.index)
-    matched = np.where(valid, sorted_keys[np.clip(position, 0, None)], _NAT)
     result[provenance] = pd.Series(pd.to_datetime(matched, unit="ns", utc=True), index=left.index)
     return result
 

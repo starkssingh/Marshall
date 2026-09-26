@@ -129,3 +129,17 @@ def test_non_utc_zones_are_compared_as_instants() -> None:
     )
     joined = asof_join(left, hourly_bars(), on_right="available_at_utc", columns=["close"])
     assert joined["close"].iloc[0] == 100.0  # 06:00 EDT = 10:00 UTC
+
+
+def test_empty_right_matches_nothing() -> None:
+    empty = hourly_bars().iloc[0:0]
+    joined = asof_join(
+        decisions(["2024-03-12 10:30", "2024-03-12 12:30"]),
+        empty,
+        on_right="available_at_utc",
+        prefix="h1_",
+    )
+    assert joined["h1_close"].isna().all()
+    assert joined["h1_tick_count"].isna().all()
+    assert joined["h1_available_at"].isna().all()
+    assert str(joined["h1_available_at"].dtype) == "datetime64[ns, UTC]"
