@@ -138,6 +138,14 @@ IDs from `docs/specs/development-plan.md`.
   bins labelled by their end); tz-aware increasing time order enforced. A hypothesis test proves
   truncation invariance for every primitive, and a lint test bans centered windows and backward
   fills in `src/`, and negative shifts outside `src/xq/targets/`.
+- DS-004: vault enforcement with one-time gate tokens (`xq.datasets.vault`) — `check_window`
+  lets pre-vault windows through and refuses any window past `vault.start` without a valid
+  `GateToken` (`<token_id>.<secret>`); tokens are verified against `vault_tokens` (secret stored
+  as SHA-256), refused when unknown, revoked, expired or redeemed by another run, and every
+  granted read logs a `vault_access_granted` warning and a `vault_access_log` row (migration
+  0003). The catalog's `load_ticks` / `load_bars` take `vault_token=` (replacing the always-failing
+  `allow_vault=`) and an optional `engine` and `run_id`. Nothing in the library issues tokens yet
+  (GATE-002). ADR 0015.
 
 ### Changed
 

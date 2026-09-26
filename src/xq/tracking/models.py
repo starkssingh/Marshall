@@ -1,7 +1,8 @@
 """Metadata database models (DATA-005).
 
 The metadata database records provenance: where every file came from, which run ingested it,
-and — from Sprint 2 — how clean ticks, bars and spread statistics were derived. It is SQLite in the
+and — from Sprint 2 — how clean ticks, bars and spread statistics were derived; from Sprint 3 it
+also holds vault gate tokens and every vault access (DS-004). It is SQLite in the
 research tier and moves to PostgreSQL with paper trading (PAPER-004); the models use only portable
 types.
 
@@ -260,3 +261,37 @@ class QualityResultRecord(Base):
     fail_threshold: Mapped[float | None] = mapped_column(Float)
     status: Mapped[str] = mapped_column(String(8))
     details_json: Mapped[dict[str, Any]]
+
+
+class VaultToken(Base):
+    """A one-time gate token that unlocks the vault for one run (DS-004; issued by GATE-002).
+
+    Only the SHA-256 of the secret is stored. A token is redeemed by the first run that uses it
+    and refused for every other run.
+    """
+
+    __tablename__ = "vault_tokens"
+
+    token_id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    secret_sha256: Mapped[str] = mapped_column(String(64))
+    bundle_id: Mapped[str] = mapped_column(String(128))
+    issued_by: Mapped[str] = mapped_column(String(128))
+    issued_at: Mapped[pd.Timestamp]
+    expires_at: Mapped[pd.Timestamp]
+    revoked: Mapped[bool] = mapped_column(Boolean, default=False)
+    redeemed_at: Mapped[pd.Timestamp | None]
+    redeemed_by_run: Mapped[str | None] = mapped_column(String(26))
+
+
+class VaultAccess(Base):
+    """One granted read of vault data: which token, run, purpose and window (DS-004)."""
+
+    __tablename__ = "vault_access_log"
+
+    access_id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    token_id: Mapped[str] = mapped_column(ForeignKey("vault_tokens.token_id"))
+    run_id: Mapped[str] = mapped_column(String(26))
+    purpose: Mapped[str] = mapped_column(Text)
+    window_start_utc: Mapped[pd.Timestamp]
+    window_end_utc: Mapped[pd.Timestamp]
+    accessed_at: Mapped[pd.Timestamp]
