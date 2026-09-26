@@ -195,6 +195,13 @@ IDs from `docs/specs/development-plan.md`.
   that ends by `vault.start`, and a file named after its id; the exact file text is locked by
   SHA-256 and any edit becomes a new version (the old one superseded but readable). Template in
   `experiments/hypotheses/TEMPLATE.yaml`. ADR 0021.
+- EXP-003: run context (`xq.tracking.runs.experiment_run`) — records git sha, a hash of the
+  run's configuration with the application config hash, the dataset id (verified against its
+  manifest), the `uv.lock` SHA-256, the seed (global seeding plus a seeded generator), host and
+  timings on the hypothesis's open experiment; logs metrics and artifacts; marks the run failed if
+  the block raises. Confirmatory runs (the default) are refused on a dirty or unidentifiable git
+  tree or without `uv.lock`; `exploratory=True` records a non-confirmatory run (`+dirty` sha).
+  ADR 0022.
 
 ### Changed
 
