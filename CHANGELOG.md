@@ -126,6 +126,11 @@ IDs from `docs/specs/development-plan.md`.
   bar build and quality run pinned on resolution); `dataset_id` = `ds-` + SHA-256 over the
   canonical spec JSON and the builder code versions, defined only for resolved specs;
   `load_spec` / `dump_spec`. ADR 0014.
+- DS-002: `xq.datasets.asof.asof_join` — backward point-in-time join of a right frame onto
+  decision times on availability (`right.available_at <= decision_time`, exact matches allowed,
+  optional tolerance, last row wins among ties); keeps the matched row's `available_at` as a
+  provenance column for the leakage audit; refuses keys that are not availability columns (no
+  joins on bar start), naive timestamps and column collisions. Unit and property tests.
 
 ### Changed
 
