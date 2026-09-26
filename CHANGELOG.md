@@ -131,6 +131,13 @@ IDs from `docs/specs/development-plan.md`.
   optional tolerance, last row wins among ties); keeps the matched row's `available_at` as a
   provenance column for the leakage audit; refuses keys that are not availability columns (no
   joins on bar start), naive timestamps and column collisions. Unit and property tests.
+- DS-003: causal primitives (`xq.datasets.primitives`) — trailing `rolling` over rows or time
+  spans, `expanding`, `ewm_mean` / `ewm_std`, `log_returns`, `simple_returns`, `vol_normalized`
+  (scaled by the estimate known before the return), `realized_volatility`, `ewma_volatility`
+  (interim sigma-hat until VOL-006), positive-only `lag`, and `resample_causal` (epoch-aligned
+  bins labelled by their end); tz-aware increasing time order enforced. A hypothesis test proves
+  truncation invariance for every primitive, and a lint test bans centered windows and backward
+  fills in `src/`, and negative shifts outside `src/xq/targets/`.
 
 ### Changed
 
