@@ -148,10 +148,15 @@ def _numeric(values: pd.Series, column: str, path: Path) -> pd.Series:
 
 
 def _parse_local(ts_raw: pd.Series) -> pd.DatetimeIndex:
+    """Parse each row with the first format that fits it, so a file may mix both formats."""
+    parsed = pd.Series(pd.NaT, index=ts_raw.index, dtype="datetime64[ns]")
     for fmt in TIME_FORMATS:
-        parsed = pd.to_datetime(ts_raw, format=fmt, errors="coerce")
-        if not parsed.isna().any():
-            return pd.DatetimeIndex(parsed).as_unit("ns")
-    parsed = pd.to_datetime(ts_raw, format=TIME_FORMATS[0], errors="coerce")
-    row = int(np.flatnonzero(parsed.isna().to_numpy())[0])
-    raise SourceFormatError(f"unparseable timestamp {ts_raw.iloc[row]!r} at data row {row}")
+        missing = parsed.isna()
+        if not missing.any():
+            break
+        parsed[missing] = pd.to_datetime(ts_raw[missing], format=fmt, errors="coerce")
+    unparsed = np.flatnonzero(parsed.isna().to_numpy())
+    if len(unparsed):
+        row = int(unparsed[0])
+        raise SourceFormatError(f"unparseable timestamp {ts_raw.iloc[row]!r} at data row {row}")
+    return pd.DatetimeIndex(parsed).as_unit("ns")

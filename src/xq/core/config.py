@@ -3,7 +3,7 @@
 Layers, from lowest to highest precedence:
 
 1. ``config/base.yaml`` plus the section files next to it (``instruments/<id>.yaml``,
-   ``sessions.yaml``)
+   ``sessions.yaml``, ``quality.yaml``)
 2. ``config/<profile>.yaml`` (for example ``dev``, ``research``, ``paper``, ``prod``)
 3. environment variables prefixed ``XQ_``; nested keys are separated by ``__``,
    e.g. ``XQ_LOGGING__LEVEL=DEBUG``
@@ -34,6 +34,7 @@ from pydantic import (
     BaseModel,
     BeforeValidator,
     ConfigDict,
+    Field,
     SecretStr,
     ValidationError,
     field_validator,
@@ -58,7 +59,7 @@ SECRETS_SECTION = "secrets"
 # Sections kept in their own files: one YAML per entry in a directory (keyed by file stem).
 FRAGMENT_DIRS = {"instruments": "instruments"}
 # Sections kept in a single YAML file next to base.yaml.
-FRAGMENT_FILES = {"sessions": "sessions.yaml"}
+FRAGMENT_FILES = {"sessions": "sessions.yaml", "quality": "quality.yaml"}
 
 _HH_MM = re.compile(r"^(?P<h>[01]\d|2[0-3]):(?P<m>[0-5]\d)(:(?P<s>[0-5]\d))?$")
 _MONTH_DAY = re.compile(r"^(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])$")
@@ -299,6 +300,122 @@ class SessionsConfig(FrozenModel):
         return self
 
 
+DroppableRule = Literal["DUP_EXACT", "NONPOSITIVE", "CROSSED"]
+
+
+class SpreadOutlierRule(FrozenModel):
+    """SPREAD_OUTLIER: spread above `multiple` x the median of the previous `window_ticks`."""
+
+    window_ticks: int = Field(gt=0)
+    min_periods: int = Field(gt=0)
+    multiple: float = Field(gt=1)
+
+
+class SpikeRule(FrozenModel):
+    """SPIKE: a whole-quote jump beyond `z_threshold` that reverts within a few ticks (ADR 0008).
+
+    The jump is the common move of bid and ask (same direction, smaller magnitude). Its scale is
+    1.4826 x the median absolute mid return of the previous `window_ticks` returns, floored at
+    `min_scale_bps`, times sqrt(elapsed time / median tick spacing). A candidate is confirmed if,
+    within `reversal_ticks` later ticks, the mid comes back by at least `reversal_fraction` of the
+    jump.
+    """
+
+    window_ticks: int = Field(gt=0)
+    min_periods: int = Field(gt=0)
+    z_threshold: float = Field(gt=0)
+    reversal_ticks: int = Field(gt=0)
+    reversal_fraction: float = Field(gt=0, le=1)
+    min_scale_bps: float = Field(gt=0)
+
+
+class StaleRule(FrozenModel):
+    """STALE: the quote repeats unchanged for longer than `seconds`."""
+
+    seconds: float = Field(gt=0)
+
+
+class CleaningConfig(FrozenModel):
+    """Versioned, non-destructive cleaning rules (DATA-007).
+
+    Every rule flags. Only exact duplicates, non-positive and crossed quotes may additionally be
+    dropped, and only if listed in `drop`.
+    """
+
+    version: str
+    drop: list[DroppableRule] = []
+    log_flag_actions: bool = True
+    spread_outlier: SpreadOutlierRule
+    spike: SpikeRule
+    stale: StaleRule
+
+
+BarExcludableFlag = Literal[
+    "MISSING_QUOTE",
+    "NONPOSITIVE",
+    "CROSSED",
+    "DUP_EXACT",
+    "DUP_TS_DIFF_PRICE",
+    "CLOSED_MARKET",
+    "STALE",
+    "SPREAD_OUTLIER",
+    "TS_DST_AMBIGUOUS",
+    "TS_DST_NONEXISTENT",
+    "TS_OUT_OF_ORDER",
+]
+
+
+class BarsConfig(FrozenModel):
+    """Bar construction settings (DATA-008).
+
+    `exclude_flags` lists tick flags whose ticks do not enter bar prices. Only flags a live system
+    could know when the tick arrives are allowed: ``SPIKE`` is confirmed by later ticks, so
+    excluding it would let bars use future information.
+    """
+
+    version: str
+    publication_latency_ms: int = Field(ge=0)
+    exclude_flags: list[BarExcludableFlag]
+
+    @field_validator("exclude_flags", mode="before")
+    @classmethod
+    def _refuse_non_causal(cls, value: object) -> object:
+        if isinstance(value, list) and "SPIKE" in value:
+            raise ValueError(
+                "SPIKE cannot exclude ticks from bars: it is confirmed by later ticks, so bars "
+                "would use information a live system does not have yet"
+            )
+        return value
+
+
+class CheckThreshold(FrozenModel):
+    """Thresholds of one quality check (DQ-001). ``None`` means the level is never reached.
+
+    Status of a measurement: FAIL if ``metric > fail``, else WARN if ``metric > warn``, else PASS.
+    A warn threshold of 0 therefore means "warn on any".
+    """
+
+    severity: Literal["critical", "major", "minor"]
+    unit: str
+    warn: float | None
+    fail: float | None
+    params: dict[str, Any] = {}
+
+    @model_validator(mode="after")
+    def _ordered(self) -> CheckThreshold:
+        if self.warn is not None and self.fail is not None and self.warn > self.fail:
+            raise ValueError("warn threshold must not exceed fail threshold")
+        return self
+
+
+class QualityConfig(FrozenModel):
+    """Data-quality settings (``config/quality.yaml``). Thresholds change only with an ADR."""
+
+    active_sessions: list[str]
+    top_anomalies: int = Field(default=20, gt=0)
+    checks: dict[str, CheckThreshold] = {}
+
+
 class SourceConfig(FrozenModel):
     """A declared market-data source (DATA-003). The clock convention is part of its identity."""
 
@@ -353,6 +470,9 @@ class AppConfig(BaseSettings):
     instruments: dict[str, InstrumentSpec] = {}
     sessions: SessionsConfig | None = None
     sources: dict[str, SourceConfig] = {}
+    cleaning: CleaningConfig | None = None
+    bars: BarsConfig | None = None
+    quality: QualityConfig | None = None
     secrets: SecretsConfig = SecretsConfig()
 
     @classmethod
@@ -395,6 +515,24 @@ class AppConfig(BaseSettings):
         except KeyError:
             known = ", ".join(sorted(self.sources)) or "none"
             raise ConfigError(f"unknown source {source_id!r}; configured: {known}") from None
+
+    def cleaning_config(self) -> CleaningConfig:
+        """Return the cleaning rules; raise if they are not configured."""
+        if self.cleaning is None:
+            raise ConfigError("no cleaning configuration (cleaning: in config/base.yaml)")
+        return self.cleaning
+
+    def bars_config(self) -> BarsConfig:
+        """Return the bar construction settings; raise if they are not configured."""
+        if self.bars is None:
+            raise ConfigError("no bars configuration (bars: in config/base.yaml)")
+        return self.bars
+
+    def quality_config(self) -> QualityConfig:
+        """Return the data-quality thresholds; raise if they are not configured."""
+        if self.quality is None:
+            raise ConfigError("no quality configuration (config/quality.yaml) was loaded")
+        return self.quality
 
     def sessions_config(self) -> SessionsConfig:
         """Return the calendar and session configuration; raise if it is not configured."""

@@ -132,6 +132,27 @@ def test_times_without_milliseconds(adapter: Mt5TickAdapter, tmp_path: Path) -> 
     )
 
 
+def test_file_mixing_times_with_and_without_milliseconds(
+    adapter: Mt5TickAdapter, tmp_path: Path
+) -> None:
+    content = "\n".join(
+        [
+            HEADER,
+            "2024.03.11\t10:00:01\t2170.10\t2170.30\t\t\t6",
+            "2024.03.11\t10:00:01.250\t2170.15\t\t\t\t2",
+            "2024.03.11\t10:00:02\t\t2170.40\t\t\t4",
+            "",
+        ]
+    )
+    ticks = adapter.to_canonical(adapter.read(write(tmp_path, "t.csv", content)))
+    stamps = [pd.Timestamp(int(ns), unit="ns", tz="UTC") for ns in ticks["ts_utc"]]
+    assert stamps == [
+        pd.Timestamp("2024-03-11 07:00:01", tz="UTC"),
+        pd.Timestamp("2024-03-11 07:00:01.250", tz="UTC"),
+        pd.Timestamp("2024-03-11 07:00:02", tz="UTC"),
+    ]
+
+
 def test_header_only_file_gives_empty_frames(adapter: Mt5TickAdapter, tmp_path: Path) -> None:
     raw = adapter.read(write(tmp_path, "t.csv", HEADER + "\n"))
     assert raw.empty

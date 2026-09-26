@@ -1,0 +1,115 @@
+# Data-quality checks (DQ-001..DQ-006). Each check is measured per trading day (partition) and
+# graded: FAIL if metric > fail, WARN if metric > warn, else PASS; null means "never". A warn of 0
+# means "warn on any". Thresholds are fixed before results are seen and change only with an ADR.
+# "plan" marks the development plan's defaults (Phase 2 table); "proposed" marks values chosen
+# here where the plan gives none, to be confirmed or changed (with an ADR) after DQ-008.
+
+active_sessions: [london, new_york]   # sessions (config/sessions.yaml) where liquidity is expected
+top_anomalies: 20                     # anomalies kept per check and day for the report and review
+
+checks:
+  # --- Tick checks (DQ-002) ---
+  tick.ordering:                # share of ticks out of order in their file or at DST-odd times
+    severity: major
+    unit: share of ticks
+    warn: 0.0                   # proposed: a feed clock should never run backwards
+    fail: 0.001                 # proposed
+  tick.duplicates_exact:        # share of ticks repeating an earlier tick (overlapping exports)
+    severity: minor
+    unit: share of ticks
+    warn: 0.01                  # proposed: expected with overlapping exports, harmless once excluded
+    fail: 0.2                   # proposed
+  tick.duplicates_diff_price:   # same timestamp as an earlier tick, different quote
+    severity: major
+    unit: share of ticks
+    warn: 0.001                 # plan
+    fail: 0.01                  # plan
+  tick.nonpositive_crossed:
+    severity: critical
+    unit: share of ticks
+    warn: 0.0                   # plan: any
+    fail: 0.0001                # plan
+  tick.spread_outliers:         # spread above `multiple` x the hour-of-week p50 (DATA-009)
+    severity: major
+    unit: share of ticks
+    warn: 0.001                 # plan
+    fail: 0.01                  # plan
+    params:
+      multiple: 10.0            # plan
+  tick.spikes:                  # reverting spike events (cleaning rule SPIKE, 8 robust sigma)
+    severity: major
+    unit: events per day
+    warn: 5                     # plan
+    fail: 50                    # plan
+  tick.stale_quotes:            # seconds in active sessions covered by quote-unchanged periods
+    severity: major
+    unit: seconds per day
+    warn: 0                     # plan: any stale quote over the limit
+    fail: 1800                  # plan: 30 minutes per day
+    params:
+      stale_seconds: 120        # plan
+  tick.rate_anomalies:          # full market hours with tick counts far from the hour-of-week norm
+    severity: minor
+    unit: market hours per day
+    warn: 0                     # proposed
+    fail: 3                     # proposed
+    params:
+      low_ratio: 0.1            # proposed: fewer than 10% of the norm
+      high_ratio: 10.0          # proposed: more than 10x the norm
+      min_weeks: 4              # proposed: an hour needs 4 weeks of history to have a norm
+
+  # --- Bar checks on 1-minute bars (DQ-003) ---
+  bar.ohlc_consistency:         # bars whose high/low do not bound open and close, any basis
+    severity: critical
+    unit: bars per day
+    warn: null
+    fail: 0                     # plan: any
+  bar.missing_minutes:          # share of whole minutes in active sessions without a bar
+    severity: major
+    unit: share of session minutes
+    warn: 0.01                  # plan
+    fail: 0.05                  # plan
+  bar.duplicate_starts:
+    severity: critical
+    unit: bars per day
+    warn: null
+    fail: 0                     # proposed: any; bars are keyed by start
+  bar.extreme_returns:          # adjacent-minute mid returns beyond z robust sigma of the day
+    severity: major
+    unit: returns per day
+    warn: 2                     # proposed: news releases produce a few legitimately
+    fail: 10                    # proposed
+    params:
+      z: 10.0                   # proposed
+  bar.zero_range:               # share of session bars whose mid never moved
+    severity: minor
+    unit: share of session bars
+    warn: 0.1                   # proposed
+    fail: 0.5                   # proposed
+  bar.basis_consistency:        # ask < bid, mid outside bid/ask, mid open/close != average
+    severity: critical
+    unit: bars per day
+    warn: null
+    fail: 0                     # proposed: any; these are construction invariants
+
+  # --- Calendar checks (DQ-004) ---
+  cal.closed_market_ticks:      # share of the day's ticks outside the calendar's market hours
+    severity: major
+    unit: share of ticks
+    warn: 0.0                   # plan: any
+    fail: 0.001                 # plan
+  cal.holiday_behaviour:        # ticks outside hours on holidays / early-close days
+    severity: major
+    unit: ticks per day
+    warn: 0                     # proposed: any disagreement with the holiday calendar
+    fail: 100                   # proposed
+  cal.missing_open_data:        # share of whole market-hours minutes without a 1-minute bar
+    severity: major
+    unit: share of market minutes
+    warn: 0.05                  # proposed: the Asian hours are thinner than the sessions
+    fail: 0.2                   # proposed
+  cal.gap_location:             # minutes between calendar open/close and first/last tick
+    severity: critical
+    unit: minutes
+    warn: 10                    # proposed
+    fail: 45                    # proposed: a clock-convention error moves boundaries by 60
