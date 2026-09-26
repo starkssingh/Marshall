@@ -80,6 +80,12 @@ IDs from `docs/specs/development-plan.md`.
   unchanged partitions skipped, rebuilds bit-identical. Rules are causal except `SPIKE`, which is
   confirmed by later ticks. The raw mirror (schema v2) now stores each row's canonical quote;
   `xq rebuild-mirror` regenerates older mirrors. ADR 0006.
+- DATA-008: bar builder (`xq.data.bars`, `xq build-bars`) — bid, ask and mid OHLC on 1m, 5m,
+  15m, 30m, 1h, 4h and 1d built from clean ticks, with `available_at`, tick count, spread
+  mean/median/max/close, `n_flagged`, `n_excluded`, trading day and `is_complete`; 4h/1d aligned
+  to the 17:00 New York trading day; no bars for empty intervals, which become `bar_gaps` rows
+  with `expected_open`; `bar_sets` rows per timeframe; versioned, bit-identical monthly files;
+  causal-only tick exclusions (`SPIKE` refused). ADR 0007.
 
 ### Changed
 

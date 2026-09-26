@@ -348,6 +348,44 @@ class CleaningConfig(FrozenModel):
     stale: StaleRule
 
 
+BarExcludableFlag = Literal[
+    "MISSING_QUOTE",
+    "NONPOSITIVE",
+    "CROSSED",
+    "DUP_EXACT",
+    "DUP_TS_DIFF_PRICE",
+    "CLOSED_MARKET",
+    "STALE",
+    "SPREAD_OUTLIER",
+    "TS_DST_AMBIGUOUS",
+    "TS_DST_NONEXISTENT",
+    "TS_OUT_OF_ORDER",
+]
+
+
+class BarsConfig(FrozenModel):
+    """Bar construction settings (DATA-008).
+
+    `exclude_flags` lists tick flags whose ticks do not enter bar prices. Only flags a live system
+    could know when the tick arrives are allowed: ``SPIKE`` is confirmed by later ticks, so
+    excluding it would let bars use future information.
+    """
+
+    version: str
+    publication_latency_ms: int = Field(ge=0)
+    exclude_flags: list[BarExcludableFlag]
+
+    @field_validator("exclude_flags", mode="before")
+    @classmethod
+    def _refuse_non_causal(cls, value: object) -> object:
+        if isinstance(value, list) and "SPIKE" in value:
+            raise ValueError(
+                "SPIKE cannot exclude ticks from bars: it is confirmed by later ticks, so bars "
+                "would use information a live system does not have yet"
+            )
+        return value
+
+
 class SourceConfig(FrozenModel):
     """A declared market-data source (DATA-003). The clock convention is part of its identity."""
 
@@ -403,6 +441,7 @@ class AppConfig(BaseSettings):
     sessions: SessionsConfig | None = None
     sources: dict[str, SourceConfig] = {}
     cleaning: CleaningConfig | None = None
+    bars: BarsConfig | None = None
     secrets: SecretsConfig = SecretsConfig()
 
     @classmethod
@@ -451,6 +490,12 @@ class AppConfig(BaseSettings):
         if self.cleaning is None:
             raise ConfigError("no cleaning configuration (cleaning: in config/base.yaml)")
         return self.cleaning
+
+    def bars_config(self) -> BarsConfig:
+        """Return the bar construction settings; raise if they are not configured."""
+        if self.bars is None:
+            raise ConfigError("no bars configuration (bars: in config/base.yaml)")
+        return self.bars
 
     def sessions_config(self) -> SessionsConfig:
         """Return the calendar and session configuration; raise if it is not configured."""

@@ -24,6 +24,7 @@ from xq.core.config import AppConfig, config_as_dict, config_hash, load_config, 
 from xq.core.errors import XQError
 from xq.core.ids import git_sha, new_ulid
 from xq.core.logging import configure_logging, shutdown_logging
+from xq.data.bars import build_bar_sets
 from xq.data.clean import build_clean
 from xq.data.raw_store import ingest, rebuild_mirror, verify_raw_store
 from xq.tracking.db import current_revision, engine_for, head_revision, upgrade_to_head
@@ -207,6 +208,26 @@ def clean_command(
         f"rules {result.rules_version}: built {len(result.built)} trading day(s) with "
         f"{result.rows} ticks ({result.flagged} flagged, {result.dropped} dropped); "
         f"skipped {len(result.skipped)} unchanged"
+    )
+
+
+@app.command("build-bars")
+def build_bars_command(
+    ctx: typer.Context, source: SourceOption, start: StartOption = None, end: EndOption = None
+) -> None:
+    """Build bid/ask/mid bars on all seven timeframes from the source's clean partitions."""
+    with pipeline_run(ctx.obj, source=source) as run:
+        result = build_bar_sets(
+            run.cfg,
+            run.engine,
+            source,
+            start=start.date() if start else None,
+            end=end.date() if end else None,
+        )
+    counts = ", ".join(f"{tf} {rows}" for tf, rows in result.rows.items())
+    typer.echo(
+        f"build {result.build_version} (clean rules {result.clean_rules_version}): "
+        f"{len(result.months)} month(s); bars per timeframe: {counts}"
     )
 
 

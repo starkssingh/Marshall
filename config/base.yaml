@@ -61,3 +61,13 @@ cleaning:
     min_scale_bps: 0.05      # floor on the robust return scale in quiet markets
   stale:
     seconds: 120             # matches the DQ stale-quote limit
+
+bars:
+  # Bid/ask/mid bars on 7 timeframes (DATA-008, ADR 0007). The build version in
+  # data/bars/.../build=<version>/ is this label plus a hash of these settings, the bar code
+  # version and the clean rules version.
+  version: b1
+  publication_latency_ms: 0   # available_at = bar end + this delay
+  # Ticks carrying any of these flags do not enter bar prices (they are counted in n_excluded).
+  # Only causal flags are allowed; SPIKE is refused because it is confirmed by later ticks.
+  exclude_flags: [MISSING_QUOTE, NONPOSITIVE, CROSSED, DUP_EXACT]
