@@ -105,6 +105,10 @@ IDs from `docs/specs/development-plan.md`.
   p50, reverting spike events, stale-quote time in the active sessions, and tick-rate anomalies
   against hour-of-week norms; dropped rows are counted back in; thresholds in
   `config/quality.yaml` (plan defaults where given, proposed values marked). ADR 0011 (draft).
+- DQ-003: bar-level checks on 1-minute bars (`xq.quality.checks.bars`) — OHLC consistency,
+  missing minutes in the active sessions, duplicate starts, extreme adjacent-minute returns in
+  robust sigma, zero-range session bars, and bid/ask/mid consistency; thresholds in
+  `config/quality.yaml`. ADR 0011 (draft) extended.
 
 ### Changed
 

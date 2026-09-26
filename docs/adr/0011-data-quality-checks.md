@@ -46,3 +46,24 @@ Notes:
 - The tick-rate norm is the median tick count for each New York hour of week over the validated
   window. With less than one week of history every hour is its own norm, so the check finds
   nothing; it becomes informative with several weeks of data.
+
+## Decision — bar checks on 1-minute bars (DQ-003)
+
+| Check | Metric | Warn | Fail | Source |
+| --- | --- | --- | --- | --- |
+| `bar.ohlc_consistency` | bars whose high/low do not bound open and close, any basis | — | any | plan |
+| `bar.missing_minutes` | share of whole minutes in London ∪ New York sessions without a bar | > 1% | > 5% | plan |
+| `bar.duplicate_starts` | bars sharing a start with an earlier bar | — | any | proposed |
+| `bar.extreme_returns` | adjacent-minute mid close-to-close returns beyond 10 robust σ of the day | > 2 | > 10 | proposed |
+| `bar.zero_range` | share of session bars whose mid never moved | > 10% | > 50% | proposed |
+| `bar.basis_consistency` | ask < bid (close, high or low), mid outside bid/ask, mid open/close ≠ average | — | any | proposed |
+
+Notes:
+
+- Returns are taken only between adjacent minutes; a return across a missing minute is not a
+  1-minute return. The robust σ is 1.4826 × the day's median absolute deviation of those returns.
+  This is a diagnostic over the whole day, not a feature, so using the full day is acceptable.
+  News releases legitimately produce a few extreme minutes, hence the warn level of 2.
+- An extreme return is labelled with the start of the bar whose close moved.
+- Duplicate starts and bid/ask/mid mismatches cannot come out of the bar builder, so any
+  occurrence means a corrupted or foreign bar file and fails.

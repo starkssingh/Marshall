@@ -56,3 +56,37 @@ checks:
     params:
       low_ratio: 0.1            # proposed: fewer than 10% of the norm
       high_ratio: 10.0          # proposed: more than 10x the norm
+
+  # --- Bar checks on 1-minute bars (DQ-003) ---
+  bar.ohlc_consistency:         # bars whose high/low do not bound open and close, any basis
+    severity: critical
+    unit: bars per day
+    warn: null
+    fail: 0                     # plan: any
+  bar.missing_minutes:          # share of whole minutes in active sessions without a bar
+    severity: major
+    unit: share of session minutes
+    warn: 0.01                  # plan
+    fail: 0.05                  # plan
+  bar.duplicate_starts:
+    severity: critical
+    unit: bars per day
+    warn: null
+    fail: 0                     # proposed: any; bars are keyed by start
+  bar.extreme_returns:          # adjacent-minute mid returns beyond z robust sigma of the day
+    severity: major
+    unit: returns per day
+    warn: 2                     # proposed: news releases produce a few legitimately
+    fail: 10                    # proposed
+    params:
+      z: 10.0                   # proposed
+  bar.zero_range:               # share of session bars whose mid never moved
+    severity: minor
+    unit: share of session bars
+    warn: 0.1                   # proposed
+    fail: 0.5                   # proposed
+  bar.basis_consistency:        # ask < bid, mid outside bid/ask, mid open/close != average
+    severity: critical
+    unit: bars per day
+    warn: null
+    fail: 0                     # proposed: any; these are construction invariants
