@@ -38,6 +38,10 @@ IDs from `docs/specs/development-plan.md`.
   `TZ=Asia/Tokyo` to catch hidden local-time dependencies.
 - ARCH-008: development Docker image (`docker/Dockerfile`: python 3.12-slim, uv from PyPI, locked
   dependencies, non-root user), `docker-compose.yml` with the `research` profile, `.env.example`.
+- DATA-001: instrument specification — `config/instruments/xauusd.yaml` (tick 0.01, 100 oz per
+  lot, lot step/min 0.01, max 100, 17:00 New York rollover; values to be confirmed against the
+  chosen broker), loaded as `AppConfig.instruments` from one YAML per instrument, with
+  per-venue overrides and exact `Decimal` lot maths (`round_lots` always rounds down).
 
 ### Changed
 

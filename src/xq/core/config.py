@@ -2,7 +2,7 @@
 
 Layers, from lowest to highest precedence:
 
-1. ``config/base.yaml``
+1. ``config/base.yaml`` plus the section files next to it (``instruments/<id>.yaml``, ...)
 2. ``config/<profile>.yaml`` (for example ``dev``, ``research``, ``paper``, ``prod``)
 3. environment variables prefixed ``XQ_``; nested keys are separated by ``__``,
    e.g. ``XQ_LOGGING__LEVEL=DEBUG``
@@ -20,6 +20,7 @@ import json
 import os
 from collections.abc import Mapping
 from datetime import UTC, datetime
+from decimal import ROUND_FLOOR, Decimal
 from pathlib import Path
 from typing import Any, Literal
 
@@ -31,6 +32,7 @@ from pydantic import (
     SecretStr,
     ValidationError,
     field_validator,
+    model_validator,
 )
 from pydantic_settings import (
     BaseSettings,
@@ -47,6 +49,8 @@ CONFIG_DIR_ENV = "XQ_CONFIG_DIR"
 DEFAULT_CONFIG_DIR = Path("config")
 BASE_FILE = "base.yaml"
 SECRETS_SECTION = "secrets"
+# Sections kept in their own files: one YAML per entry in a directory (keyed by file stem).
+FRAGMENT_DIRS = {"instruments": "instruments"}
 
 
 class FrozenModel(BaseModel):
@@ -101,6 +105,89 @@ class VaultConfig(FrozenModel):
         return value.astimezone(UTC)
 
 
+class RolloverConfig(FrozenModel):
+    """Daily rollover (financing) time in its local time zone."""
+
+    time: str = "17:00"
+    tz: str = "America/New_York"
+
+
+class VenueOverride(FrozenModel):
+    """Contract terms that differ at a particular venue (broker)."""
+
+    tick_size: Decimal | None = None
+    contract_size: Decimal | None = None
+    lot_step: Decimal | None = None
+    min_lot: Decimal | None = None
+    max_lot: Decimal | None = None
+
+
+class InstrumentSpec(FrozenModel):
+    """Contract terms of a tradable instrument (DATA-001).
+
+    Quantities are `Decimal` so lot rounding is exact. `contract_size` is units of the base asset
+    per lot (troy ounces for XAUUSD), so a price move of 1 quote-currency unit on one lot changes
+    P&L by `contract_size` units of the quote currency.
+    """
+
+    symbol: str
+    base_ccy: str
+    quote_ccy: str
+    tick_size: Decimal
+    contract_size: Decimal
+    lot_step: Decimal
+    min_lot: Decimal
+    max_lot: Decimal
+    rollover: RolloverConfig = RolloverConfig()
+    venues: dict[str, VenueOverride] = {}
+
+    @model_validator(mode="after")
+    def _check_terms(self) -> InstrumentSpec:
+        for name in ("tick_size", "contract_size", "lot_step", "min_lot", "max_lot"):
+            if getattr(self, name) <= 0:
+                raise ValueError(f"{name} must be positive")
+        if self.min_lot > self.max_lot:
+            raise ValueError("min_lot must not exceed max_lot")
+        for name in ("min_lot", "max_lot"):
+            if getattr(self, name) % self.lot_step != 0:
+                raise ValueError(f"{name} must be a multiple of lot_step")
+        return self
+
+    def for_venue(self, venue: str | None) -> InstrumentSpec:
+        """Return the spec with `venue`'s overrides applied (unchanged if it has none)."""
+        override = self.venues.get(venue) if venue is not None else None
+        if override is None:
+            return self
+        changes = override.model_dump(exclude_none=True)
+        return InstrumentSpec.model_validate({**self.model_dump(), **changes})
+
+    def round_lots(self, requested: Decimal | float | str) -> Decimal:
+        """Round a requested size down to the lot step, capped at `max_lot`.
+
+        Returns 0 when the rounded size is below `min_lot` (the trade cannot be placed). Rounding is
+        always down, so a size never exceeds what risk sizing asked for.
+        """
+        lots = Decimal(str(requested))
+        if lots < 0:
+            raise ValueError(f"lot size must be non-negative, got {requested!r}")
+        capped = min(lots, self.max_lot)
+        steps = (capped / self.lot_step).to_integral_value(rounding=ROUND_FLOOR)
+        rounded = steps * self.lot_step
+        return rounded if rounded >= self.min_lot else Decimal(0)
+
+    def value_per_price_unit(self, lots: Decimal) -> Decimal:
+        """P&L in quote currency for a 1.0 quote-currency price move on `lots` lots."""
+        return self.contract_size * lots
+
+    def notional(self, price: Decimal, lots: Decimal) -> Decimal:
+        """Position value in quote currency."""
+        return price * self.contract_size * lots
+
+    def price_to_ticks(self, price_distance: Decimal) -> Decimal:
+        """Express a price distance in ticks."""
+        return price_distance / self.tick_size
+
+
 class SecretsConfig(FrozenModel):
     """Credentials. Only ever supplied through ``XQ_SECRETS__*`` environment variables."""
 
@@ -125,6 +212,7 @@ class AppConfig(BaseSettings):
     database: DatabaseConfig = DatabaseConfig()
     logging: LoggingConfig = LoggingConfig()
     vault: VaultConfig
+    instruments: dict[str, InstrumentSpec] = {}
     secrets: SecretsConfig = SecretsConfig()
 
     @classmethod
@@ -139,6 +227,17 @@ class AppConfig(BaseSettings):
         # `load_config` merges every layer itself so the precedence is explicit and testable;
         # constructing AppConfig only validates what it is given.
         return (init_settings,)
+
+    def instrument(self, instrument_id: str, venue: str | None = None) -> InstrumentSpec:
+        """Return the spec for `instrument_id`, with `venue` overrides applied if given."""
+        try:
+            spec = self.instruments[instrument_id]
+        except KeyError:
+            known = ", ".join(sorted(self.instruments)) or "none"
+            raise ConfigError(
+                f"unknown instrument {instrument_id!r}; configured: {known}"
+            ) from None
+        return spec.for_venue(venue)
 
     def database_url(self) -> str:
         """Return the metadata database URL, defaulting to SQLite under the data directory."""
@@ -166,7 +265,8 @@ def load_config(
             or the merged values fail validation.
     """
     directory = _config_dir(config_dir)
-    file_layers = [_read_yaml(directory / BASE_FILE), _read_profile(directory, profile)]
+    base_layer = deep_merge(_read_fragments(directory), _read_yaml(directory / BASE_FILE))
+    file_layers = [base_layer, _read_profile(directory, profile)]
     for path, layer in zip((BASE_FILE, f"{profile}.yaml"), file_layers, strict=True):
         _reject_secrets(layer, where=f"config file {path}")
 
@@ -239,6 +339,15 @@ def _config_dir(config_dir: Path | None) -> Path:
     if not directory.is_dir():
         raise ConfigError(f"config directory not found: {directory}")
     return directory
+
+
+def _read_fragments(directory: Path) -> dict[str, Any]:
+    layer: dict[str, Any] = {}
+    for section, dirname in FRAGMENT_DIRS.items():
+        folder = directory / dirname
+        if folder.is_dir():
+            layer[section] = {path.stem: _read_yaml(path) for path in sorted(folder.glob("*.yaml"))}
+    return layer
 
 
 def _read_profile(directory: Path, profile: str) -> dict[str, Any]:

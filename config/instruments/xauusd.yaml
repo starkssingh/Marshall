@@ -1,0 +1,19 @@
+# XAUUSD — spot gold against the US dollar, traded as a retail CFD (DATA-001).
+# Values are typical retail terms. The execution broker is not yet chosen: confirm every value
+# against its contract specification and record venue differences under `venues`.
+symbol: XAUUSD
+base_ccy: XAU
+quote_ccy: USD
+tick_size: "0.01"        # USD per troy ounce
+contract_size: "100"     # troy ounces per lot (common on CFDs; some brokers differ)
+lot_step: "0.01"
+min_lot: "0.01"
+max_lot: "100"
+rollover:
+  time: "17:00"          # financing is charged at the New York 17:00 rollover
+  tz: America/New_York
+venues: {}
+# Example venue override:
+# venues:
+#   some_broker:
+#     contract_size: "10"
