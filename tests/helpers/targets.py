@@ -1,0 +1,42 @@
+"""A stub target kind for testing the target framework without a real target computation."""
+
+from __future__ import annotations
+
+import numpy as np
+import pandas as pd
+
+from xq.core.config import TargetSetConfig
+from xq.targets.base import TargetKind, TargetSpec
+
+
+def stub_compute(spec: TargetSpec, quotes: pd.DataFrame, sigma: pd.Series) -> pd.DataFrame:
+    """Value = horizon in minutes; labels span exactly the horizon from the decision time."""
+    index = pd.DatetimeIndex(sigma.index)
+    return pd.DataFrame(
+        {
+            "value": np.full(len(index), spec.horizon / pd.Timedelta(minutes=1)),
+            "label_start": index,
+            "label_end": index + spec.horizon,
+            "scale": np.nan,
+        },
+        index=index,
+    )
+
+
+def _expand(definition: TargetSetConfig) -> list[TargetSpec]:
+    return [
+        TargetSpec(f"stub_{ref}_{h}", pd.Timedelta(h), ref, definition.params)
+        for h in definition.horizons
+        for ref in definition.price_refs
+    ]
+
+
+STUB_KIND = TargetKind(
+    name="stub",
+    code_version=1,
+    expand=_expand,
+    sigma=lambda close, definition, bar: pd.Series(1.0, index=close.index),
+    compute=stub_compute,
+    lookahead=lambda definition: max(pd.Timedelta(h) for h in definition.horizons),
+)
+STUB_DEFINITION = TargetSetConfig(kind="stub", horizons=["15m", "1h"], price_refs=["long", "mid"])

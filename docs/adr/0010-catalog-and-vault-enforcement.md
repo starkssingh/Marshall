@@ -1,6 +1,6 @@
 # ADR 0010 — Research catalog and vault enforcement
 
-- **Status:** accepted
+- **Status:** accepted; §4 superseded by ADR 0015 (gate tokens)
 - **Date:** 2026-09-26
 - **Tasks:** DATA-010 (DS-004 and GATE-002 build on it)
 
@@ -21,7 +21,7 @@ Gate tokens arrive with DS-004 (Sprint 3) and the one-time procedure with GATE-0
    `available_at_utc <= vault.start` for bars. A bar that straddles the boundary (for example the
    daily bar of the vault's first trading day) contains vault ticks and is never returned.
 4. **No bypass yet.** `allow_vault=True` raises until DS-004 provides gate tokens; there is no
-   interim flag.
+   interim flag. (Superseded: DS-004 replaced the flag with one-time gate tokens, ADR 0015.)
 5. **Pipeline stages are not research reads.** Ingestion, cleaning, bar building and the quality
    checks process every partition, including vault ones, because the release gate needs validated
    vault data. They write derived stores and never hand data back to research code. Research

@@ -6,6 +6,7 @@ from pathlib import Path
 import pandas as pd
 import pytest
 
+from helpers.vault import seed_token
 from xq.core.config import AppConfig, load_config
 from xq.core.errors import ConfigError, NaiveTimestampError, VaultAccessError
 from xq.core.types import Timeframe
@@ -104,9 +105,37 @@ def test_requests_into_the_vault_are_refused(catalog: Catalog) -> None:
             "mt5_primary", "xauusd", "1m", "mid", utc("2024-03-13 11:00"), utc("2024-03-13 12:01")
         )
     with pytest.raises(VaultAccessError, match="gate token"):
-        catalog.load_ticks(
-            "mt5_primary", "xauusd", utc("2024-03-11"), utc("2024-03-12"), allow_vault=True
+        catalog.load_ticks("mt5_primary", "xauusd", utc("2024-03-13"), utc("2024-03-14"))
+
+
+def test_a_gate_token_opens_the_vault_for_its_run(cfg: AppConfig) -> None:
+    engine = create_db_engine(cfg.database_url())
+    token = seed_token(engine, token_id="vt-catalog")
+    opened = Catalog(cfg, engine=engine, run_id="01RUNV0000000000000000000V")
+    ticks = opened.load_ticks(
+        "mt5_primary", "xauusd", utc("2024-03-13"), utc("2024-03-14"), vault_token=token
+    )
+    assert ticks["ts_utc"].max() >= utc(VAULT)
+    days = opened.load_bars(
+        "mt5_primary",
+        "xauusd",
+        "1d",
+        "mid",
+        utc("2024-03-10"),
+        utc("2024-03-15"),
+        vault_token=token,
+    )
+    assert pd.Timestamp("2024-03-13").date() in days["trading_day"].tolist()
+    # Without the engine and run the token cannot be verified; another run cannot reuse it.
+    with pytest.raises(VaultAccessError, match="metadata database"):
+        Catalog(cfg).load_ticks(
+            "mt5_primary", "xauusd", utc("2024-03-13"), utc("2024-03-14"), vault_token=token
         )
+    with pytest.raises(VaultAccessError, match="already used"):
+        Catalog(cfg, engine=engine, run_id="01RUNW0000000000000000000W").load_ticks(
+            "mt5_primary", "xauusd", utc("2024-03-13"), utc("2024-03-14"), vault_token=token
+        )
+    engine.dispose()
 
 
 def test_nothing_from_the_vault_leaks_up_to_its_start(catalog: Catalog) -> None:

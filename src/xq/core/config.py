@@ -27,6 +27,7 @@ from pathlib import Path
 from typing import Annotated, Any, Literal
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
+import pandas as pd
 import yaml
 from pydantic import (
     AfterValidator,
@@ -59,7 +60,11 @@ SECRETS_SECTION = "secrets"
 # Sections kept in their own files: one YAML per entry in a directory (keyed by file stem).
 FRAGMENT_DIRS = {"instruments": "instruments"}
 # Sections kept in a single YAML file next to base.yaml.
-FRAGMENT_FILES = {"sessions": "sessions.yaml", "quality": "quality.yaml"}
+FRAGMENT_FILES = {
+    "sessions": "sessions.yaml",
+    "quality": "quality.yaml",
+    "targets": "targets.yaml",
+}
 
 _HH_MM = re.compile(r"^(?P<h>[01]\d|2[0-3]):(?P<m>[0-5]\d)(:(?P<s>[0-5]\d))?$")
 _MONTH_DAY = re.compile(r"^(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])$")
@@ -282,14 +287,25 @@ class EventAnchor(FrozenModel):
     require_open: bool = True
 
 
+class EventWindow(FrozenModel):
+    """A window around an event anchor: ``[anchor - before_min, anchor + after_min)``."""
+
+    before_min: int = Field(ge=0)
+    after_min: int = Field(ge=0)
+
+
 class SessionsConfig(FrozenModel):
-    """Calendar, sessions and event anchors (``config/sessions.yaml``)."""
+    """Calendar, sessions and event anchors (``config/sessions.yaml``).
+
+    `event_windows` defines the ``in_<anchor>_window`` dataset columns (DS-007).
+    """
 
     market: MarketHoursConfig
     holidays: HolidayConfig
     sessions: dict[str, SessionWindow]
     overlaps: dict[str, list[str]] = {}
     event_anchors: dict[str, EventAnchor] = {}
+    event_windows: dict[str, EventWindow] = {}
 
     @model_validator(mode="after")
     def _check_overlaps(self) -> SessionsConfig:
@@ -297,6 +313,9 @@ class SessionsConfig(FrozenModel):
             unknown = [m for m in members if m not in self.sessions]
             if len(members) < 2 or unknown:
                 raise ValueError(f"overlap {name!r} needs two or more known sessions: {members}")
+        unknown_windows = sorted(set(self.event_windows) - set(self.event_anchors))
+        if unknown_windows:
+            raise ValueError(f"event windows for unknown anchors: {unknown_windows}")
         return self
 
 
@@ -416,6 +435,49 @@ class QualityConfig(FrozenModel):
     checks: dict[str, CheckThreshold] = {}
 
 
+PriceRef = Literal["long", "short", "mid"]
+
+
+class TargetSetConfig(FrozenModel):
+    """A versioned target set (``config/targets.yaml``, TGT-001).
+
+    It expands to one target per horizon and price reference; `params` are validated by the
+    target kind (for example execution latency for forward returns).
+    """
+
+    kind: str
+    horizons: list[str] = Field(min_length=1)
+    price_refs: list[PriceRef] = Field(min_length=1)
+    params: dict[str, Any] = {}
+
+    @field_validator("horizons")
+    @classmethod
+    def _positive_horizons(cls, value: list[str]) -> list[str]:
+        for text in value:
+            try:
+                horizon = pd.Timedelta(text)
+            except ValueError as exc:
+                raise ValueError(f"invalid horizon {text!r}") from exc
+            if horizon <= pd.Timedelta(0):
+                raise ValueError(f"horizon {text!r} must be positive")
+        if len(set(value)) != len(value):
+            raise ValueError("horizons must be unique")
+        return value
+
+
+class TrialClusteringConfig(FrozenModel):
+    """How the effective number of independent trials is estimated (EXP-004)."""
+
+    correlation_threshold: float = Field(gt=0, lt=1)
+    min_overlap: int = Field(gt=1)
+
+
+class ExperimentsConfig(FrozenModel):
+    """Experiment registry settings (``experiments:`` in ``config/base.yaml``)."""
+
+    trial_clustering: TrialClusteringConfig
+
+
 class SourceConfig(FrozenModel):
     """A declared market-data source (DATA-003). The clock convention is part of its identity."""
 
@@ -473,6 +535,8 @@ class AppConfig(BaseSettings):
     cleaning: CleaningConfig | None = None
     bars: BarsConfig | None = None
     quality: QualityConfig | None = None
+    experiments: ExperimentsConfig | None = None
+    targets: dict[str, dict[str, TargetSetConfig]] = {}
     secrets: SecretsConfig = SecretsConfig()
 
     @classmethod
@@ -533,6 +597,22 @@ class AppConfig(BaseSettings):
         if self.quality is None:
             raise ConfigError("no quality configuration (config/quality.yaml) was loaded")
         return self.quality
+
+    def target_set(self, name: str, version: str) -> TargetSetConfig:
+        """Return the definition of target set `name` / `version`; raise if unknown."""
+        try:
+            return self.targets[name][version]
+        except KeyError:
+            known = ", ".join(f"{n}.{v}" for n, vs in sorted(self.targets.items()) for v in vs)
+            raise ConfigError(
+                f"unknown target set {name}.{version}; configured: {known or 'none'}"
+            ) from None
+
+    def experiments_config(self) -> ExperimentsConfig:
+        """Return the experiment registry settings; raise if they are not configured."""
+        if self.experiments is None:
+            raise ConfigError("no experiments configuration (experiments: in config/base.yaml)")
+        return self.experiments
 
     def sessions_config(self) -> SessionsConfig:
         """Return the calendar and session configuration; raise if it is not configured."""

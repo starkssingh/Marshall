@@ -7,6 +7,7 @@ from typer.testing import CliRunner
 
 import xq
 from xq.cli.main import app
+from xq.tracking.db import head_revision
 
 REPO_CONFIG = str(Path(__file__).resolve().parents[3] / "config")
 runner = CliRunner()
@@ -74,14 +75,15 @@ def test_db_upgrade_and_current(tmp_path: Path) -> None:
         "--set",
         f"paths.migrations_dir={migrations}",
     ]
+    head = head_revision(Path(migrations))
     result = runner.invoke(app, [*common, "db", "current"])
     assert result.exit_code == 0, result.output
-    assert result.stdout.splitlines() == ["current: none", "head: 0002"]
+    assert result.stdout.splitlines() == ["current: none", f"head: {head}"]
 
     result = runner.invoke(app, [*common, "db", "upgrade"])
     assert result.exit_code == 0, result.output
-    assert "revision 0002" in result.stdout
+    assert f"revision {head}" in result.stdout
     assert (tmp_path / "data" / "metadata.sqlite").is_file()
 
     result = runner.invoke(app, [*common, "db", "current"])
-    assert result.stdout.splitlines() == ["current: 0002", "head: 0002"]
+    assert result.stdout.splitlines() == [f"current: {head}", f"head: {head}"]

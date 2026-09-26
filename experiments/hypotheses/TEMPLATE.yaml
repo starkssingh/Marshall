@@ -1,0 +1,34 @@
+# Hypothesis pre-registration template (EXP-002). Copy to H-XXXX.yaml (the next free number),
+# fill in every field BEFORE looking at evaluation data, then run `xq exp register <path>`.
+# Registration locks the file's exact text; editing it later creates a visible new version.
+id: H-XXXX                      # must match the file name
+title: One-line name of the hypothesis
+family: momentum                # trial family for multiple-testing corrections (lowercase)
+statement: >
+  A falsifiable claim, e.g. "15-minute mid returns during the London-New York overlap have
+  positive first-order autocorrelation after conditioning on the volatility regime."
+rationale: >
+  Why this might hold (market mechanism, prior evidence), and why it might not.
+target: fwd_ret_long_1h          # target name from the target set the dataset uses
+information_set:                 # what the model may know at decision time
+  - base.v1 bar and context columns
+horizon: 1h
+timeframe: 15m
+discovery_window:                # data you may look at while forming the idea
+  start: "2021-09-26T21:00:00Z"
+  end: "2023-09-24T21:00:00Z"
+evaluation_window:               # later data for walk-forward testing; must end by vault.start
+  start: "2023-09-24T21:00:00Z"
+  end: "2025-09-25T21:00:00Z"
+primary_metric: net Sharpe after costs (walk-forward test folds)
+success_criteria:
+  - Net Sharpe CI excludes zero and DSR >= 0.95 with the registered trial count
+falsification_criteria:
+  - Net Sharpe CI includes zero, or the effect reverses in more than half of the folds
+trial_budget: 20                 # configurations you may evaluate on test folds
+planned_tests:
+  - Deflated Sharpe ratio
+  - Diebold-Mariano against the best baseline
+slices:                          # pre-declared subsets to report
+  - session
+  - volatility regime

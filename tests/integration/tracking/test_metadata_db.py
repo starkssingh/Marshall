@@ -36,7 +36,18 @@ TABLES = {
     "spread_stats",
     "quality_runs",
     "quality_results",
+    "vault_tokens",
+    "vault_access_log",
+    "dataset_versions",
+    "hypotheses",
+    "experiments",
+    "runs",
+    "trials",
+    "metrics",
+    "artifacts",
+    "target_sets",
 }
+LATEST = "0006"
 NOW = pd.Timestamp("2026-09-26 01:00:00.123456789", tz="UTC")
 
 
@@ -113,11 +124,11 @@ def test_upgrade_creates_every_table_and_downgrade_removes_them(tmp_path: Path) 
     assert current_revision(engine) is None
 
     upgrade_to_head(engine, MIGRATIONS)
-    assert current_revision(engine) == head_revision(MIGRATIONS) == "0002"
+    assert current_revision(engine) == head_revision(MIGRATIONS) == LATEST
     assert set(inspect(engine).get_table_names()) >= TABLES
 
     upgrade_to_head(engine, MIGRATIONS)  # idempotent
-    assert current_revision(engine) == "0002"
+    assert current_revision(engine) == LATEST
 
     downgrade_to(engine, MIGRATIONS, "base")
     assert current_revision(engine) is None

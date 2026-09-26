@@ -120,6 +120,112 @@ IDs from `docs/specs/development-plan.md`.
   `report.md` (summary, failing days, per-check statistics, top anomalies), `summary.json`, a
   missing-minutes heatmap and a spread heatmap; pre-vault days only unless `--include-vault`.
   ADR 0012.
+- DS-001: dataset specifications (`xq.datasets.spec`) — frozen pydantic `DatasetSpec` (source,
+  instrument, base timeframe, price basis, UTC window, warm-up, context timeframes, feature and
+  target sets by name and version, exclusions with reasons, `exclude`-only vault policy, and the
+  bar build and quality run pinned on resolution); `dataset_id` = `ds-` + SHA-256 over the
+  canonical spec JSON and the builder code versions, defined only for resolved specs;
+  `load_spec` / `dump_spec`. ADR 0014.
+- DS-002: `xq.datasets.asof.asof_join` — backward point-in-time join of a right frame onto
+  decision times on availability (`right.available_at <= decision_time`, exact matches allowed,
+  optional tolerance, last row wins among ties); keeps the matched row's `available_at` as a
+  provenance column for the leakage audit; refuses keys that are not availability columns (no
+  joins on bar start), naive timestamps and column collisions. Unit and property tests.
+- DS-003: causal primitives (`xq.datasets.primitives`) — trailing `rolling` over rows or time
+  spans, `expanding`, `ewm_mean` / `ewm_std`, `log_returns`, `simple_returns`, `vol_normalized`
+  (scaled by the estimate known before the return), `realized_volatility`, `ewma_volatility`
+  (interim sigma-hat until VOL-006), positive-only `lag`, and `resample_causal` (epoch-aligned
+  bins labelled by their end); tz-aware increasing time order enforced. A hypothesis test proves
+  truncation invariance for every primitive, and a lint test bans centered windows and backward
+  fills in `src/`, and negative shifts outside `src/xq/targets/`.
+- DS-004: vault enforcement with one-time gate tokens (`xq.datasets.vault`) — `check_window`
+  lets pre-vault windows through and refuses any window past `vault.start` without a valid
+  `GateToken` (`<token_id>.<secret>`); tokens are verified against `vault_tokens` (secret stored
+  as SHA-256), refused when unknown, revoked, expired or redeemed by another run, and every
+  granted read logs a `vault_access_granted` warning and a `vault_access_log` row (migration
+  0003). The catalog's `load_ticks` / `load_bars` take `vault_token=` (replacing the always-failing
+  `allow_vault=`) and an optional `engine` and `run_id`. Nothing in the library issues tokens yet
+  (GATE-002). ADR 0015.
+- DS-006: leakage harness (`xq.datasets.leakage`) — `check_feature_causality` runs truncation
+  invariance and future perturbation at 25 seeded decision times plus an availability audit of
+  provenance columns; `correlation_scan` fails features with |corr| > 0.9 to a target at lag 0
+  unless the pair is explicitly allowed after review; `check_target_bounds` proves a target uses
+  no quotes after `label_end`, none before the decision time and no sigma-hat other than at t.
+  `tests/leakage/` catches all five planted leaks from the plan (centered rolling mean,
+  full-sample z-score, `bfill`, higher-timeframe join on bar start, target shifted into features)
+  and three planted target leaks, passes their correct counterparts, and runs every DS-003
+  primitive and the availability join through the harness (`assert_causal` fixture). ADR 0016.
+- DS-005: dataset builder (`xq.datasets.builder`, `xq dataset build <spec>`, `xq dataset show`)
+  — resolves a spec (configured bar build, latest overlapping non-vault quality run, digest of the
+  calendar and instrument config), reads bars only through the vault-enforcing catalog, drops
+  incomplete bars and excluded trading days, computes the spec's feature set, and writes
+  `data/datasets/<id>/{features.parquet, spec.yaml, manifest.json}` atomically; the manifest has
+  row count, decision-time range, column types, per-file and combined SHA-256, git sha, code
+  versions, bar set ids, quality run ids and exclusions; `dataset_versions` table (migration
+  0004). Rebuilding an existing id verifies it: identical content is a no-op, different content
+  or a tampered file raises `DatasetIntegrityError`; `load_dataset` re-hashes before reading.
+  Built-in feature set `base.v1` (decision-bar values plus context bars joined on availability)
+  passes the leakage harness. `experiments/configs/ds_base.yaml` is the base research spec.
+  ADR 0017.
+- DS-007: calendar and session columns known in advance (`xq.datasets.calendar_columns`, part of
+  `base.v1`) — trading day and weekday of the decision time, open / early-close / US and UK
+  holiday flags, minutes to market close, `in_<session>` and minutes since open for Tokyo, London,
+  New York and the London–New York overlap, minutes to and since every event anchor (LBMA AM/PM,
+  COMEX open, US 08:30 release, rollover; seven-day lookup cap), and `in_<anchor>_window` flags
+  from `event_windows` in `config/sessions.yaml` (US release −5/+30 min, rollover ±15 min,
+  proposed). Tested against the session table across US and UK DST and a US holiday, and through
+  the leakage harness. ADR 0018.
+- DQ-007: quality gate in the dataset builder (`xq.quality.gate.gate_partitions`) — every
+  trading day a dataset reads (warm-up, window, context timeframes, explicit exclusions) is checked
+  against the pinned quality run; FAIL or unvalidated days refuse the build with a message naming
+  each day and failing check unless the spec excludes them with a reason; excluded days are
+  dropped from every timeframe; the manifest records `included_partitions`, `warn_partitions`
+  (with warning checks) and `excluded_partitions` (with reason and failing checks). A test injects
+  an OHLC error into 1-minute bars and shows the gate blocking that day. ADR 0019.
+- EXP-001: experiment registry schema and API (`xq.tracking.registry`) — tables `hypotheses`
+  (versioned by text hash, with the exact YAML of every version), `experiments` (bound to a
+  hypothesis version), `runs` (git sha, config hash and JSON, dataset id, lock hash, seed, host,
+  timings, status), `trials`, `metrics` (optionally per fold) and `artifacts` (with SHA-256),
+  migration 0005; append-only API returning frozen records — create, read and one-way lifecycle
+  updates (hypothesis superseded, run finished or failed), no deletes. ADR 0020.
+- EXP-002: hypothesis pre-registration (`xq.tracking.hypotheses`, `xq exp register <path>`,
+  `xq exp hypotheses`) — `HypothesisDoc` with the plan's fields plus title and trial family;
+  registration requires non-empty success and falsification criteria and planned tests, a positive
+  trial budget, a discovery window that ends before the evaluation window, an evaluation window
+  that ends by `vault.start`, and a file named after its id; the exact file text is locked by
+  SHA-256 and any edit becomes a new version (the old one superseded but readable). Template in
+  `experiments/hypotheses/TEMPLATE.yaml`. ADR 0021.
+- EXP-003: run context (`xq.tracking.runs.experiment_run`) — records git sha, a hash of the
+  run's configuration with the application config hash, the dataset id (verified against its
+  manifest), the `uv.lock` SHA-256, the seed (global seeding plus a seeded generator), host and
+  timings on the hypothesis's open experiment; logs metrics and artifacts; marks the run failed if
+  the block raises. Confirmatory runs (the default) are refused on a dirty or unidentifiable git
+  tree or without `uv.lock`; `exploratory=True` records a non-confirmatory run (`+dirty` sha).
+  ADR 0022.
+- EXP-004: trial counter (`xq.tracking.trials`, `RunContext.record_trial`, `xq exp trials`) —
+  every evaluated configuration of a live run is recorded (family, config hash, test-fold flag,
+  Sharpe, return series under `data/artifacts/`); `trial_count` gives per-family and global trial
+  and test-evaluation counts, the Sharpe variance, and the effective number of independent trials
+  (average-linkage clustering of return correlations, cut at rho 0.7, at least 20 common
+  observations; trials without returns count as independent), with parameters in
+  `experiments.trial_clustering` (proposed). New dependency `scipy` (hierarchical clustering). ADR
+  0023.
+- TGT-001: target framework (`xq.targets.base`, `xq.targets.kinds`) — target sets defined in
+  `config/targets.yaml` (`kind`, `horizons`, `price_refs`, `params`), expanded into `TargetSpec`s
+  and computed by a `TargetKind` (`expand`, causal `sigma`, `compute`, `lookahead`, code
+  version); every target carries `value`, `label_start`, `label_end` and `scale`; datasets with a
+  target set write `targets.parquet` in long form, computed month by month from clean ticks
+  (unusable and excluded-day ticks removed, never past the vault, quote days gated by DQ-007);
+  definitions are hash-locked in `target_sets` (migration 0006) and part of the dataset id; the
+  schema guard `check_feature_matrix` refuses target columns and reserved prefixes (`tgt_`,
+  `fwd_`) in feature matrices. ADR 0024.
+- TGT-002: execution-aware forward returns (`xq.targets.returns`, target set `fwd_returns.v1` in
+  `config/targets.yaml`) — entry at the first usable tick at or after t + 1 s latency and exit at
+  the first at or after t + h + latency; long buys the ask and sells the bid, short sells the bid
+  and buys the ask, mid is the research variant; no label when a fill would be more than 300 s
+  late (daily break, weekend, excluded day, end of data); `_vol` variants divide by the interim
+  EWMA sigma-hat (span 96 bars) scaled to the horizon; horizons 15m, 1h, 4h, 1d (24 targets).
+  Every target passes the leakage bound checks; `ds_base.yaml` includes the set. ADR 0025.
 
 ### Changed
 
@@ -140,6 +246,12 @@ IDs from `docs/specs/development-plan.md`.
 
 ### Fixed
 
+- Dataset targets: a month of decisions whose only decision time is exactly `vault.start` no longer
+  asks the catalog for an empty tick window (which it rejects); those decisions get no label,
+  since every fill would need vault quotes.
+- `asof_join` no longer fails with an `IndexError` when the right frame is empty (for example,
+  context bars truncated before the first one is available); every row gets no match. Found by
+  the DS-006 leakage harness.
 - MT5 adapter: a file that mixes times with and without milliseconds is parsed row by row instead
   of being rejected (ADR 0004 already promised both forms).
 - Ingest: a file whose SHA-256 is already stored under a *different* source is still skipped (the

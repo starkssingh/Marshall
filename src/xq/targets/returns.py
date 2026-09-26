@@ -1,0 +1,168 @@
+"""Execution-aware forward returns (TGT-002).
+
+For a decision at time t (a base bar's ``available_at``) and horizon h:
+
+- the entry is the first usable quote at or after ``t + latency``; the exit is the first usable
+  quote at or after ``t + h + latency``;
+- ``long`` buys at the entry ask and sells at the exit bid: ``log(bid_exit / ask_entry)``;
+  ``short`` sells at the entry bid and buys back at the exit ask: ``log(bid_entry / ask_exit)``;
+  ``mid`` is the symmetric research variant ``log(mid_exit / mid_entry)``;
+- ``label_start`` is the entry quote's time and ``label_end`` the exit quote's time;
+- if either fill would come more than ``max_fill_delay_s`` after its intended time (a weekend, a
+  holiday, an excluded day, the end of the data), there is no label: the value is missing.
+
+Never the signal bar's close and never mid for a trade: the spread is paid on both legs.
+
+With ``vol_normalized`` each target also has a ``<name>_vol`` variant: the return divided by
+``scale = sigma_t * sqrt(h in minutes)``, where ``sigma_t`` is the interim sigma-hat known at t —
+an EWMA of squared 1-bar log returns of the base close (span ``sigma_span_bars``), expressed per
+square-root minute. VOL-006 will replace this estimate.
+"""
+
+from __future__ import annotations
+
+from collections.abc import Mapping
+from typing import Any
+
+import numpy as np
+import numpy.typing as npt
+import pandas as pd
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
+
+from xq.core.config import TargetSetConfig
+from xq.core.errors import ConfigError
+from xq.datasets.primitives import ewma_volatility, log_returns
+from xq.targets.base import TargetKind, TargetSpec
+
+_MINUTE = pd.Timedelta(minutes=1)
+
+
+class ForwardReturnParams(BaseModel):
+    """Parameters of a ``forward_return`` target set."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    execution_latency_ms: int = Field(ge=0)
+    max_fill_delay_s: float = Field(gt=0)
+    sigma_span_bars: int = Field(gt=1)
+    vol_normalized: bool = True
+
+
+def forward_return_params(params: Mapping[str, Any]) -> ForwardReturnParams:
+    """Validate a target set's ``params`` for the ``forward_return`` kind."""
+    try:
+        return ForwardReturnParams.model_validate(dict(params))
+    except ValidationError as exc:
+        raise ConfigError(f"invalid forward_return params:\n{exc}") from exc
+
+
+def expand(definition: TargetSetConfig) -> list[TargetSpec]:
+    """``fwd_ret_<ref>_<horizon>`` (and ``..._vol``) for every horizon and price reference."""
+    params = forward_return_params(definition.params)
+    specs = []
+    for horizon in definition.horizons:
+        for ref in definition.price_refs:
+            base = f"fwd_ret_{ref}_{horizon}"
+            common = params.model_dump()
+            specs.append(
+                TargetSpec(base, pd.Timedelta(horizon), ref, {**common, "normalized": False})
+            )
+            if params.vol_normalized:
+                specs.append(
+                    TargetSpec(
+                        f"{base}_vol", pd.Timedelta(horizon), ref, {**common, "normalized": True}
+                    )
+                )
+    return specs
+
+
+def sigma_rate(close: pd.Series, definition: TargetSetConfig, bar: pd.Timedelta) -> pd.Series:
+    """Interim sigma-hat per square-root minute at each decision time (causal EWMA)."""
+    params = forward_return_params(definition.params)
+    per_bar = ewma_volatility(log_returns(close), span=params.sigma_span_bars, min_periods=2)
+    rate: pd.Series = per_bar / float(np.sqrt(bar / _MINUTE))
+    return rate
+
+
+def lookahead(definition: TargetSetConfig) -> pd.Timedelta:
+    """Longest horizon plus latency plus the allowed fill delay."""
+    params = forward_return_params(definition.params)
+    longest = max(pd.Timedelta(h) for h in definition.horizons)
+    return (
+        longest
+        + pd.Timedelta(milliseconds=params.execution_latency_ms)
+        + pd.Timedelta(seconds=params.max_fill_delay_s)
+    )
+
+
+def compute(spec: TargetSpec, quotes: pd.DataFrame, sigma: pd.Series) -> pd.DataFrame:
+    """Forward return of `spec` at every decision time of `sigma` (see the module docstring)."""
+    t = _ns(pd.DatetimeIndex(sigma.index))
+    ts = _ns(pd.DatetimeIndex(quotes["ts_utc"])) if len(quotes) else np.array([], np.int64)
+    bid = quotes["bid"].to_numpy(dtype=np.float64)
+    ask = quotes["ask"].to_numpy(dtype=np.float64)
+    latency = pd.Timedelta(milliseconds=int(spec.params["execution_latency_ms"])).value
+    delay = pd.Timedelta(seconds=float(spec.params["max_fill_delay_s"])).value
+
+    entry, entry_ok = _fill(ts, t + latency, delay)
+    exit_, exit_ok = _fill(ts, t + spec.horizon.value + latency, delay)
+    ok = entry_ok & exit_ok
+    value = np.full(len(t), np.nan)
+    if ok.any():
+        e, x = entry[ok], exit_[ok]
+        if spec.price_ref == "long":
+            value[ok] = np.log(bid[x] / ask[e])
+        elif spec.price_ref == "short":
+            value[ok] = np.log(bid[e] / ask[x])
+        else:
+            value[ok] = np.log((bid[x] + ask[x]) / (bid[e] + ask[e]))
+
+    scale = np.full(len(t), np.nan)
+    if spec.params["normalized"]:
+        rate = sigma.to_numpy(dtype=np.float64)
+        scale = rate * np.sqrt(spec.horizon / _MINUTE)
+        scale = np.where(scale > 0, scale, np.nan)
+        value = value / scale
+
+    index = pd.DatetimeIndex(sigma.index)
+    stamps = np.full(len(t), np.iinfo(np.int64).min, dtype=np.int64)  # NaT where no label
+    ends = stamps.copy()
+    stamps[ok] = ts[entry[ok]]
+    ends[ok] = ts[exit_[ok]]
+    return pd.DataFrame(
+        {
+            "value": value,
+            "label_start": pd.to_datetime(stamps, unit="ns", utc=True),
+            "label_end": pd.to_datetime(ends, unit="ns", utc=True),
+            "scale": scale,
+        },
+        index=index,
+    )
+
+
+def _fill(
+    ts: npt.NDArray[np.int64], intended: npt.NDArray[np.int64], delay: int
+) -> tuple[npt.NDArray[np.int64], npt.NDArray[np.bool_]]:
+    """Index of the first quote at or after each intended time, and whether it is timely."""
+    index = np.searchsorted(ts, intended, side="left")
+    found = index < len(ts)
+    timely = np.zeros(len(intended), dtype=bool)
+    timely[found] = ts[index[found]] - intended[found] <= delay
+    return index.astype(np.int64), timely
+
+
+def _ns(index: pd.DatetimeIndex) -> npt.NDArray[np.int64]:
+    values: npt.NDArray[np.int64] = (
+        index.tz_convert("UTC").as_unit("ns").to_numpy(dtype="datetime64[ns]").view(np.int64)
+    )
+    return values
+
+
+FORWARD_RETURN = TargetKind(
+    name="forward_return",
+    code_version=1,
+    expand=expand,
+    sigma=sigma_rate,
+    compute=compute,
+    lookahead=lookahead,
+)
