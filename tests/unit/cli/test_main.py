@@ -76,12 +76,12 @@ def test_db_upgrade_and_current(tmp_path: Path) -> None:
     ]
     result = runner.invoke(app, [*common, "db", "current"])
     assert result.exit_code == 0, result.output
-    assert result.stdout.splitlines() == ["current: none", "head: 0001"]
+    assert result.stdout.splitlines() == ["current: none", "head: 0002"]
 
     result = runner.invoke(app, [*common, "db", "upgrade"])
     assert result.exit_code == 0, result.output
-    assert "revision 0001" in result.stdout
+    assert "revision 0002" in result.stdout
     assert (tmp_path / "data" / "metadata.sqlite").is_file()
 
     result = runner.invoke(app, [*common, "db", "current"])
-    assert result.stdout.splitlines() == ["current: 0001", "head: 0001"]
+    assert result.stdout.splitlines() == ["current: 0002", "head: 0002"]

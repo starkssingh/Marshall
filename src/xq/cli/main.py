@@ -10,19 +10,25 @@ import json
 from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
+from datetime import datetime
 from functools import cached_property
 from pathlib import Path
 from typing import Annotated, Literal
 
 import typer
 import yaml
+from sqlalchemy import Engine
 
 import xq
 from xq.core.config import AppConfig, config_as_dict, config_hash, load_config, parse_override
 from xq.core.errors import XQError
 from xq.core.ids import git_sha, new_ulid
 from xq.core.logging import configure_logging, shutdown_logging
-from xq.data.raw_store import ingest, verify_raw_store
+from xq.data.bars import build_bar_sets
+from xq.data.clean import build_clean
+from xq.data.raw_store import ingest, rebuild_mirror, verify_raw_store
+from xq.data.spreads import build_spread_stats
+from xq.quality.validate import validate_source
 from xq.tracking.db import current_revision, engine_for, head_revision, upgrade_to_head
 
 EXIT_USAGE_ERROR = 2
@@ -116,34 +122,181 @@ def config_show(
         typer.echo(yaml.safe_dump(data, sort_keys=False, allow_unicode=True).rstrip())
 
 
-@app.command("ingest")
-def ingest_command(
-    ctx: typer.Context,
-    source: Annotated[str, typer.Option("--source", help="Configured source id.")],
-    path: Annotated[Path, typer.Option("--path", help="File or directory of source files.")],
-) -> None:
-    """Copy source files into the immutable raw store with a Parquet mirror and manifest rows.
+@dataclass(frozen=True)
+class PipelineRun:
+    """What a pipeline command needs: config, a migrated metadata DB and run identifiers."""
 
-    Files already in the raw store (same SHA-256) are skipped, so re-running is a no-op.
-    """
-    state: CliContext = ctx.obj
+    cfg: AppConfig
+    engine: Engine
+    run_id: str
+    git_sha: str
+
+
+@contextmanager
+def pipeline_run(state: CliContext, *, source: str | None = None) -> Iterator[PipelineRun]:
+    """Load config, validate `source`, bind run logging and bring the DB to the latest schema."""
     with cli_errors():
         cfg = state.config
-        cfg.source(source)  # fail on an unknown source before touching anything
+        if source is not None:
+            cfg.source(source)  # fail on an unknown source before touching anything
         run_id = new_ulid()
         sha = git_sha(cfg.paths.resolve(cfg.paths.root))
         configure_logging(cfg, run_id=run_id, git_sha=sha)
         engine = engine_for(cfg)
         try:
             upgrade_to_head(engine, cfg.paths.resolve(cfg.paths.migrations_dir))
-            result = ingest(cfg, source, path, engine=engine, run_id=run_id, git_sha=sha)
+            yield PipelineRun(cfg, engine, run_id, sha)
         finally:
             engine.dispose()
             shutdown_logging()
+
+
+SourceOption = Annotated[str, typer.Option("--source", help="Configured source id.")]
+StartOption = Annotated[
+    datetime | None, typer.Option("--start", formats=["%Y-%m-%d"], help="First trading day.")
+]
+EndOption = Annotated[
+    datetime | None, typer.Option("--end", formats=["%Y-%m-%d"], help="Last trading day.")
+]
+
+
+@app.command("ingest")
+def ingest_command(
+    ctx: typer.Context,
+    source: SourceOption,
+    path: Annotated[Path, typer.Option("--path", help="File or directory of source files.")],
+) -> None:
+    """Copy source files into the immutable raw store with a Parquet mirror and manifest rows.
+
+    Files already in the raw store (same SHA-256) are skipped, so re-running is a no-op.
+    """
+    with pipeline_run(ctx.obj, source=source) as run:
+        result = ingest(
+            run.cfg, source, path, engine=run.engine, run_id=run.run_id, git_sha=run.git_sha
+        )
     typer.echo(
         f"run {result.run_id}: ingested {len(result.ingested)} file(s) with {result.rows} rows; "
         f"skipped {len(result.skipped)} already in the raw store"
     )
+
+
+@app.command("rebuild-mirror")
+def rebuild_mirror_command(ctx: typer.Context, source: SourceOption) -> None:
+    """Rewrite the Parquet mirror of a source's raw files from the stored copies."""
+    with pipeline_run(ctx.obj, source=source) as run:
+        count = rebuild_mirror(run.cfg, run.engine, source)
+    typer.echo(f"rebuilt the mirror of {count} raw file(s)")
+
+
+@app.command("clean")
+def clean_command(
+    ctx: typer.Context,
+    source: SourceOption,
+    start: StartOption = None,
+    end: EndOption = None,
+    force: Annotated[bool, typer.Option("--force", help="Rebuild unchanged partitions.")] = False,
+) -> None:
+    """Flag (and, if configured, drop) bad ticks into versioned per-trading-day partitions."""
+    with pipeline_run(ctx.obj, source=source) as run:
+        result = build_clean(
+            run.cfg,
+            run.engine,
+            source,
+            start=start.date() if start else None,
+            end=end.date() if end else None,
+            force=force,
+        )
+    typer.echo(
+        f"rules {result.rules_version}: built {len(result.built)} trading day(s) with "
+        f"{result.rows} ticks ({result.flagged} flagged, {result.dropped} dropped); "
+        f"skipped {len(result.skipped)} unchanged"
+    )
+
+
+@app.command("build-bars")
+def build_bars_command(
+    ctx: typer.Context, source: SourceOption, start: StartOption = None, end: EndOption = None
+) -> None:
+    """Build bid/ask/mid bars on all seven timeframes from the source's clean partitions."""
+    with pipeline_run(ctx.obj, source=source) as run:
+        result = build_bar_sets(
+            run.cfg,
+            run.engine,
+            source,
+            start=start.date() if start else None,
+            end=end.date() if end else None,
+        )
+    counts = ", ".join(f"{tf} {rows}" for tf, rows in result.rows.items())
+    typer.echo(
+        f"build {result.build_version} (clean rules {result.clean_rules_version}): "
+        f"{len(result.months)} month(s); bars per timeframe: {counts}"
+    )
+
+
+@app.command("spread-stats")
+def spread_stats_command(
+    ctx: typer.Context, source: SourceOption, start: StartOption = None, end: EndOption = None
+) -> None:
+    """Compute p50/p90/p99 spreads per New York hour of week (data before the vault only)."""
+    with pipeline_run(ctx.obj, source=source) as run:
+        result = build_spread_stats(
+            run.cfg,
+            run.engine,
+            source,
+            start=start.date() if start else None,
+            end=end.date() if end else None,
+        )
+    typer.echo(
+        f"spread statistics for {result.hours} hour(s) of week from {result.ticks} ticks, "
+        f"{result.computed_from} to {result.computed_to}"
+    )
+
+
+@app.command("validate")
+def validate_command(
+    ctx: typer.Context,
+    source: SourceOption,
+    start: StartOption = None,
+    end: EndOption = None,
+    include_vault: Annotated[
+        bool,
+        typer.Option(
+            "--include-vault",
+            help="Also validate vault days. Release-gate procedure only (ADR 0013); needs "
+            "--i-understand-vault-access, is logged and is recorded on the run.",
+        ),
+    ] = False,
+    vault_access_confirmed: Annotated[
+        bool,
+        typer.Option(
+            "--i-understand-vault-access",
+            help="Confirm that --include-vault reads the vault (the untouchable holdout).",
+        ),
+    ] = False,
+) -> None:
+    """Grade every data-quality check per trading day and write a report."""
+    with pipeline_run(ctx.obj, source=source) as run:
+        result = validate_source(
+            run.cfg,
+            run.engine,
+            source,
+            run_id=run.run_id,
+            git_sha=run.git_sha,
+            start=start.date() if start else None,
+            end=end.date() if end else None,
+            include_vault=include_vault,
+            vault_access_confirmed=vault_access_confirmed,
+        )
+    totals = result.summary["totals"]
+    vault_note = "; includes vault days" if include_vault else ""
+    typer.echo(
+        f"quality run {result.run_id}: {len(result.days)} trading day(s); "
+        f"{totals['pass']} pass, {totals['warn']} warn, {totals['fail']} fail{vault_note}"
+    )
+    for check_id, row in result.summary["checks"].items():
+        if row["warn"] or row["fail"]:
+            typer.echo(f"  {check_id}: {row['warn']} warn, {row['fail']} fail")
+    typer.echo(f"report: {result.report_path}")
 
 
 @app.command("verify-raw")

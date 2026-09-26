@@ -223,3 +223,40 @@ class SpreadStat(Base):
     p90: Mapped[float] = mapped_column(Float)
     p99: Mapped[float] = mapped_column(Float)
     n: Mapped[int] = mapped_column(BigInteger)
+
+
+class QualityRunRecord(Base):
+    """One `xq validate` run over a source and window (DQ-006)."""
+
+    __tablename__ = "quality_runs"
+
+    run_id: Mapped[str] = mapped_column(String(26), primary_key=True)
+    scope: Mapped[str] = mapped_column(String(32))
+    source_id: Mapped[str] = mapped_column(ForeignKey("data_sources.source_id"))
+    start_utc: Mapped[pd.Timestamp]
+    end_utc: Mapped[pd.Timestamp]
+    rules_version: Mapped[str] = mapped_column(String(32))
+    build_version: Mapped[str] = mapped_column(String(32))
+    includes_vault: Mapped[bool] = mapped_column(Boolean)
+    git_sha: Mapped[str] = mapped_column(String(64))
+    config_hash: Mapped[str] = mapped_column(String(64))
+    report_path: Mapped[str] = mapped_column(Text)
+    summary_json: Mapped[dict[str, Any]]
+    created_at: Mapped[pd.Timestamp]
+
+
+class QualityResultRecord(Base):
+    """One graded check on one partition (trading day) of a quality run."""
+
+    __tablename__ = "quality_results"
+
+    run_id: Mapped[str] = mapped_column(ForeignKey("quality_runs.run_id"), primary_key=True)
+    partition_id: Mapped[str] = mapped_column(String(96), primary_key=True)
+    check_id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    trading_day: Mapped[date] = mapped_column(Date)
+    severity: Mapped[str] = mapped_column(String(16))
+    metric_value: Mapped[float] = mapped_column(Float)
+    warn_threshold: Mapped[float | None] = mapped_column(Float)
+    fail_threshold: Mapped[float | None] = mapped_column(Float)
+    status: Mapped[str] = mapped_column(String(8))
+    details_json: Mapped[dict[str, Any]]

@@ -5,7 +5,8 @@ Ingesting a source file:
 1. hash it (SHA-256); if the hash is already in ``raw_files``, skip it — re-ingest is a no-op;
 2. copy it into ``data/raw/<source>/<instrument>/<yyyy>/<mm>/<raw_file_id>__<original name>``,
    verify the copy's hash and make it read-only; everything downstream reads this copy;
-3. write a faithful Parquet mirror of it — every row, with ``raw_file_id`` and ``row_num`` — to
+3. write a faithful Parquet mirror of it — every row, with ``raw_file_id`` and ``row_num``, plus
+   the canonical quote in force after each row (`mirror_frame`) — to
    ``data/raw_parquet/<source>/<instrument>/year=YYYY/month=MM/day=DD/part-<raw_file_id>.parquet``,
    split by the UTC day of each row;
 4. insert its ``raw_files`` manifest row. A file counts as ingested only once that row exists, so
@@ -43,6 +44,9 @@ from xq.tracking.models import IngestRun, RawFile
 RAW_DIR = "raw"
 MIRROR_DIR = "raw_parquet"
 INCOMING_DIR = ".incoming"
+#: Mirror schema version, stored in each part's Parquet metadata. v2 added the canonical view.
+MIRROR_VERSION = 2
+MIRROR_VERSION_KEY = b"xq.mirror_version"
 READ_ONLY = stat.S_IRUSR | stat.S_IRGRP | stat.S_IROTH
 _CHUNK = 1 << 20
 _DAY_NS = 86_400 * 1_000_000_000
@@ -120,9 +124,7 @@ def ingest(
                 existing = session.scalar(select(RawFile).where(RawFile.sha256 == digest))
                 if existing is not None:
                     skipped.append(existing.raw_file_id)
-                    log.info(
-                        "raw_file_skipped", file=str(ref.path), raw_file_id=existing.raw_file_id
-                    )
+                    _log_skip(ref, existing, source_id)
                     continue
                 record = _ingest_file(
                     session, adapter, ref, digest, data_dir, source_id, source.instrument, run_id
@@ -145,6 +147,24 @@ def ingest(
 
     log.info("ingest_finished", ingested=len(ingested), skipped=len(skipped), rows=rows)
     return IngestResult(run_id=run_id, ingested=ingested, skipped=skipped, rows=rows)
+
+
+def _log_skip(ref: RawFileRef, existing: RawFile, source_id: str) -> None:
+    """A skip is routine for the same source; under another source it may be a mislabelled feed."""
+    if existing.source_id == source_id:
+        log.info("raw_file_skipped", file=str(ref.path), raw_file_id=existing.raw_file_id)
+        return
+    log.warning(
+        "raw_file_already_ingested_under_other_source",
+        file=str(ref.path),
+        raw_file_id=existing.raw_file_id,
+        source_id=source_id,
+        existing_source_id=existing.source_id,
+        detail=(
+            f"identical bytes were ingested as source {existing.source_id!r}; "
+            f"not recorded again under {source_id!r}"
+        ),
+    )
 
 
 def verify_raw_store(cfg: AppConfig, engine: Engine) -> list[IntegrityProblem]:
@@ -187,18 +207,12 @@ def _ingest_file(
         raise RawStoreIntegrityError(f"{ref.path} changed while it was being copied")
 
     raw = adapter.read(RawFileRef(incoming, ref.original_name, ref.size))
-    times = adapter.timestamps(raw)
-    first = from_ns(int(times.ts_utc.min())) if len(raw) else None
-    last = from_ns(int(times.ts_utc.max())) if len(raw) else None
+    mirror = mirror_frame(adapter, raw, raw_file_id)
+    first = from_ns(int(mirror["ts_utc"].min())) if len(raw) else None
+    last = from_ns(int(mirror["ts_utc"].max())) if len(raw) else None
     period = first.strftime("%Y/%m") if first is not None else "undated"
     final = source_root / period / stored_name
     _place_read_only(incoming, final, digest)
-
-    mirror = raw.assign(raw_file_id=raw_file_id, ts_utc=times.ts_utc, ts_flags=times.flags)
-    mirror = mirror[
-        ["raw_file_id", "row_num", "ts_raw", "ts_utc", "ts_flags"]
-        + [c for c in raw.columns if c not in ("row_num", "ts_raw")]
-    ]
     _write_mirror(mirror, data_dir / MIRROR_DIR / source_id / instrument_id, raw_file_id)
 
     record = RawFile(
@@ -231,6 +245,49 @@ def _place_read_only(incoming: Path, final: Path, digest: str) -> None:
     final.chmod(READ_ONLY)
 
 
+def mirror_frame(adapter: SourceAdapter, raw: pd.DataFrame, raw_file_id: str) -> pd.DataFrame:
+    """The mirror of one raw file: its raw frame plus provenance and the canonical view of each row.
+
+    Columns: ``raw_file_id``, ``row_num``, ``ts_raw``, ``ts_utc``, the adapter's typed source
+    columns, then ``c_bid``, ``c_ask``, ``c_bid_size``, ``c_ask_size`` and ``c_flags`` — the quote
+    in force after the row as `SourceAdapter.to_canonical` defines it (for MT5, each side carried
+    forward in file order). Storing the canonical view lets later stages read any day of the
+    mirror on its own, without replaying the file from its first row.
+    """
+    canonical = adapter.to_canonical(raw).set_index("row_num").reindex(raw["row_num"])
+    mirror = raw.assign(raw_file_id=raw_file_id, ts_utc=canonical["ts_utc"].to_numpy())
+    for column in ("bid", "ask", "bid_size", "ask_size", "flags"):
+        mirror[f"c_{column}"] = canonical[column].to_numpy()
+    leading = ["raw_file_id", "row_num", "ts_raw", "ts_utc"]
+    source_columns = [c for c in raw.columns if c not in ("row_num", "ts_raw")]
+    canonical_columns = [f"c_{c}" for c in ("bid", "ask", "bid_size", "ask_size", "flags")]
+    return mirror[leading + source_columns + canonical_columns].reset_index(drop=True)
+
+
+def rebuild_mirror(cfg: AppConfig, engine: Engine, source_id: str) -> int:
+    """Rewrite the Parquet mirror of every raw file of `source_id` from its stored copy.
+
+    The mirror is derived data (ADR 0005); rebuilding it is needed after its schema changes.
+    Returns the number of files rebuilt.
+    """
+    adapter = build_adapter(cfg, source_id)
+    instrument_id = cfg.source(source_id).instrument
+    data_dir = cfg.paths.resolve(cfg.paths.data_dir)
+    root = data_dir / MIRROR_DIR / source_id / instrument_id
+    with session_factory(engine)() as session:
+        records = list(session.scalars(select(RawFile).where(RawFile.source_id == source_id)))
+    for record in records:
+        for stale in root.rglob(f"part-{record.raw_file_id}.parquet"):
+            stale.unlink()
+        stored = data_dir / record.path
+        if sha256_file(stored) != record.sha256:
+            raise RawStoreIntegrityError(f"{stored} does not match its manifest entry")
+        raw = adapter.read(RawFileRef(stored, record.original_name, stored.stat().st_size))
+        _write_mirror(mirror_frame(adapter, raw, record.raw_file_id), root, record.raw_file_id)
+        log.info("mirror_rebuilt", raw_file_id=record.raw_file_id, rows=len(raw))
+    return len(records)
+
+
 def _write_mirror(mirror: pd.DataFrame, root: Path, raw_file_id: str) -> None:
     days = mirror["ts_utc"].to_numpy(dtype=np.int64) // _DAY_NS
     for day in np.unique(days):
@@ -245,6 +302,9 @@ def _write_mirror(mirror: pd.DataFrame, root: Path, raw_file_id: str) -> None:
         target.parent.mkdir(parents=True, exist_ok=True)
         part = mirror[days == day].reset_index(drop=True)
         table = pa.Table.from_pandas(part, preserve_index=False)
+        table = table.replace_schema_metadata(
+            {**(table.schema.metadata or {}), MIRROR_VERSION_KEY: str(MIRROR_VERSION)}
+        )
         temporary = target.with_suffix(".parquet.tmp")
         pq.write_table(table, temporary, compression="zstd")
         os.replace(temporary, target)

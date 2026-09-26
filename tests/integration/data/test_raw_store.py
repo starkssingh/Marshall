@@ -10,6 +10,7 @@ from pathlib import Path
 import pandas as pd
 import pyarrow.parquet as pq
 import pytest
+import structlog.testing
 from sqlalchemy import Engine, select
 from typer.testing import CliRunner
 
@@ -167,6 +168,36 @@ def test_same_content_under_another_name_is_skipped(
     result = run(cfg, engine, renamed, "01RUNB0000000000000000000B")
     assert result.ingested == []
     assert len(result.skipped) == 1
+
+
+def test_same_file_under_another_source_warns_naming_both(
+    tmp_path: Path, cfg: AppConfig, engine: Engine, source_dir: Path
+) -> None:
+    run(cfg, engine, source_dir, "01RUNA0000000000000000000A")
+    primary = cfg.source("mt5_primary").model_dump()
+    other = make_config(tmp_path, **{f"sources.mt5_other.{k}": v for k, v in primary.items()})
+
+    with structlog.testing.capture_logs() as events:
+        result = ingest(
+            other,
+            "mt5_other",
+            source_dir,
+            engine=engine,
+            run_id="01RUNB0000000000000000000B",
+            git_sha="test-sha",
+        )
+    assert result.ingested == []
+    assert len(result.skipped) == 2
+    warnings = [e for e in events if e["log_level"] == "warning"]
+    assert len(warnings) == 2
+    for warning in warnings:
+        assert warning["event"] == "raw_file_already_ingested_under_other_source"
+        assert warning["source_id"] == "mt5_other"
+        assert warning["existing_source_id"] == "mt5_primary"
+    # Same-source re-ingest stays a quiet skip.
+    with structlog.testing.capture_logs() as events:
+        run(cfg, engine, source_dir, "01RUNC0000000000000000000C")
+    assert not [e for e in events if e["log_level"] == "warning"]
 
 
 def test_verify_detects_modified_raw_files(
