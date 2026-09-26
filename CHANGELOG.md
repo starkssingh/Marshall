@@ -76,3 +76,6 @@ IDs from `docs/specs/development-plan.md`.
 
 - Dependencies pinned to `pandas>=2.2,<3` (the plan specifies pandas 2.x; pandas 3 changes datetime
   resolution inference) and `numpy<2.5` (numpy 2.5 raises deprecation errors inside pandas 2.3).
+- `CLAUDE.md` no longer marks `docs/specs/project-instructions.md` as missing: the owner committed
+  it together with the revised development plan (backlog tables back in section 9, STAT-008
+  dependencies, Sprint 13 ordering, critical-path note).

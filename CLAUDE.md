@@ -7,8 +7,7 @@ profitable-looking backtest.
 ## Sources of truth
 
 1. `docs/specs/development-plan.md` — phases, backlog (task IDs), sprint order, gates.
-2. `docs/specs/project-instructions.md` — research philosophy and requirements
-   (**not yet committed**; the owner must add it).
+2. `docs/specs/project-instructions.md` — research philosophy and requirements.
 3. This file — binding invariants.
 4. `docs/adr/` — decisions already made.
 5. `CHANGELOG.md` and `git log` — what is already done.
