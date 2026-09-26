@@ -22,3 +22,6 @@ IDs from `docs/specs/development-plan.md`.
   validated into a frozen pydantic-settings `AppConfig`; `config_hash()` over canonical JSON
   (secrets excluded); secrets typed `SecretStr` and accepted only from `XQ_SECRETS__*` variables;
   vault start fixed at the start of trading day 2025-09-26 (2025-09-25T21:00:00Z).
+- ARCH-004: structured logging (`xq.core.logging`) — structlog JSON lines to stderr and to
+  `logs/xq.jsonl`; standard-library loggers share the same pipeline; `run_id`, `git_sha` and
+  `config_hash` are bound to every line.
