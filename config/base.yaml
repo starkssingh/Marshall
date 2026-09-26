@@ -26,3 +26,17 @@ vault:
   # data. This instant is the start of trading day 2025-09-26 (17:00 America/New_York on
   # 2025-09-25, EDT). Changing it requires an ADR.
   start: "2025-09-25T21:00:00Z"
+
+sources:
+  # Provisional primary feed: the execution broker's MT5 tick export (ADR 0004). The broker is not
+  # yet named; confirm vendor, venue and clock before ingesting real data. Changing `clock` for a
+  # source that already has ingested files is refused: declare a new source id instead.
+  mt5_primary:
+    adapter: mt5_ticks
+    vendor: "MT5 broker (to be named)"
+    feed_type: broker_ticks
+    venue: tbd
+    price_type: bid_ask_ticks
+    clock: "NY+7"          # server time UTC+2 / UTC+3, switching on US DST dates
+    instrument: xauusd
+    file_patterns: ["*.csv", "*.txt"]

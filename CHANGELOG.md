@@ -58,6 +58,13 @@ IDs from `docs/specs/development-plan.md`.
   source-clock timestamps to UTC int64 nanoseconds, flags DST-ambiguous, DST-nonexistent and
   out-of-order rows (`xq.data.flags.TickFlag`) without dropping any, and gives a stable canonical
   order. ADR 0003.
+- DATA-003: source adapters — `SourceAdapter` protocol, canonical tick schema (`TICK_SCHEMA`,
+  `validate_tick_frame`), file discovery, and the provisional primary adapter for MT5 tick exports
+  (UTF-8/UTF-16, partial bid/ask updates carried forward in file order, `MISSING_QUOTE` flag);
+  sources declared in `config/base.yaml` (`mt5_primary`, clock `NY+7`, broker to be named — ADR
+  0004); deterministic synthetic MT5 fixtures around the March and November 2024 DST changes;
+  gap-location tests proving the weekly open, weekly close and daily rollover gaps land at the
+  expected UTC hours, and that a misdeclared `tz:Europe/Athens` clock is detected.
 
 ### Changed
 

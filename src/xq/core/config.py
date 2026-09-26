@@ -46,7 +46,8 @@ from pydantic_settings import (
     SettingsConfigDict,
 )
 
-from xq.core.errors import ConfigError
+from xq.core.errors import ClockConventionError, ConfigError
+from xq.core.time import ClockConvention
 
 ENV_PREFIX = "XQ_"
 ENV_NESTED_DELIMITER = "__"
@@ -298,6 +299,33 @@ class SessionsConfig(FrozenModel):
         return self
 
 
+class SourceConfig(FrozenModel):
+    """A declared market-data source (DATA-003). The clock convention is part of its identity."""
+
+    adapter: Literal["mt5_ticks"]
+    vendor: str
+    feed_type: Literal["broker_ticks", "vendor_ticks", "vendor_bars"]
+    venue: str
+    price_type: Literal["bid_ask_ticks", "bars"]
+    clock: str
+    instrument: str
+    file_patterns: list[str] = ["*.csv"]
+    encoding: str | None = None
+    notes: str = ""
+
+    @field_validator("clock")
+    @classmethod
+    def _canonical_clock(cls, value: str) -> str:
+        try:
+            return str(ClockConvention.parse(value))
+        except ClockConventionError as exc:
+            raise ValueError(str(exc)) from exc
+
+    def clock_convention(self) -> ClockConvention:
+        """The parsed clock convention."""
+        return ClockConvention.parse(self.clock)
+
+
 class SecretsConfig(FrozenModel):
     """Credentials. Only ever supplied through ``XQ_SECRETS__*`` environment variables."""
 
@@ -324,6 +352,7 @@ class AppConfig(BaseSettings):
     vault: VaultConfig
     instruments: dict[str, InstrumentSpec] = {}
     sessions: SessionsConfig | None = None
+    sources: dict[str, SourceConfig] = {}
     secrets: SecretsConfig = SecretsConfig()
 
     @classmethod
@@ -349,6 +378,23 @@ class AppConfig(BaseSettings):
                 f"unknown instrument {instrument_id!r}; configured: {known}"
             ) from None
         return spec.for_venue(venue)
+
+    @model_validator(mode="after")
+    def _check_source_instruments(self) -> AppConfig:
+        for source_id, source in self.sources.items():
+            if source.instrument not in self.instruments:
+                raise ValueError(
+                    f"source {source_id!r} refers to unknown instrument {source.instrument!r}"
+                )
+        return self
+
+    def source(self, source_id: str) -> SourceConfig:
+        """Return the configuration of `source_id`."""
+        try:
+            return self.sources[source_id]
+        except KeyError:
+            known = ", ".join(sorted(self.sources)) or "none"
+            raise ConfigError(f"unknown source {source_id!r}; configured: {known}") from None
 
     def sessions_config(self) -> SessionsConfig:
         """Return the calendar and session configuration; raise if it is not configured."""

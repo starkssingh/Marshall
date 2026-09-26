@@ -19,3 +19,7 @@ class NaiveTimestampError(XQError, ValueError):
 
 class ClockConventionError(XQError, ValueError):
     """A clock convention is malformed, or timestamps are inconsistent with the declared one."""
+
+
+class SourceFormatError(XQError, ValueError):
+    """A source file does not match the format its adapter expects."""
