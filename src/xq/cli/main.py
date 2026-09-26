@@ -34,6 +34,7 @@ from xq.quality.validate import validate_source
 from xq.tracking.db import current_revision, engine_for, head_revision, upgrade_to_head
 from xq.tracking.hypotheses import register_hypothesis
 from xq.tracking.registry import list_hypotheses
+from xq.tracking.trials import trial_count
 
 EXIT_USAGE_ERROR = 2
 
@@ -386,6 +387,24 @@ def exp_hypotheses(ctx: typer.Context) -> None:
         rows = list_hypotheses(run.engine)
     for h in rows:
         typer.echo(f"{h.hypothesis_id}\tv{h.version}\t{h.status}\t{h.family_id}\t{h.title}")
+
+
+@exp_app.command("trials")
+def exp_trials(
+    ctx: typer.Context,
+    family: Annotated[
+        str | None, typer.Option("--family", help="Trial family (default: all families).")
+    ] = None,
+) -> None:
+    """Show trial counts and the effective number of independent trials."""
+    with pipeline_run(ctx.obj) as run:
+        stats = trial_count(run.cfg, run.engine, family)
+    variance = "n/a" if stats.sharpe_variance is None else f"{stats.sharpe_variance:.4g}"
+    typer.echo(
+        f"family {stats.family_id or 'all'}: {stats.n_trials} trial(s), "
+        f"{stats.n_test_evaluations} evaluated on test folds, "
+        f"{stats.effective_n} effectively independent; Sharpe variance {variance}"
+    )
 
 
 db_app = typer.Typer(help="Metadata database migrations.", no_args_is_help=True)

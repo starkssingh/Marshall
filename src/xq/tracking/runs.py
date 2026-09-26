@@ -31,6 +31,7 @@ from pathlib import Path
 from typing import Any
 
 import numpy as np
+import pandas as pd
 import structlog
 from sqlalchemy import Engine
 
@@ -43,6 +44,7 @@ from xq.data.raw_store import sha256_file
 from xq.datasets.builder import verify_dataset
 from xq.tracking import registry
 from xq.tracking.registry import RunRef, RunStatus
+from xq.tracking.trials import record_trial
 
 LOCK_FILE = "uv.lock"
 MISSING_LOCK = "missing"
@@ -59,6 +61,7 @@ class RunContext:
     """Handle to a running experiment run."""
 
     run: RunRef
+    cfg: AppConfig
     engine: Engine
     rng: np.random.Generator
 
@@ -77,6 +80,25 @@ class RunContext:
     def log_artifact(self, path: Path, *, kind: str) -> registry.ArtifactRecord:
         """Record a file this run produced, with its SHA-256."""
         return registry.log_artifact(self.engine, self.run_id, path, kind=kind)
+
+    def record_trial(
+        self,
+        *,
+        family_id: str,
+        config: Mapping[str, Any],
+        evaluated_on_test: bool,
+        sharpe: float | None = None,
+        returns: pd.Series | None = None,
+    ) -> str:
+        """Record one evaluated configuration (see `xq.tracking.trials.record_trial`)."""
+        return record_trial(
+            self,
+            family_id=family_id,
+            config=config,
+            evaluated_on_test=evaluated_on_test,
+            sharpe=sharpe,
+            returns=returns,
+        )
 
 
 def run_config_hash(cfg: AppConfig, config: Mapping[str, Any]) -> str:
@@ -145,7 +167,7 @@ def experiment_run(
         seed=seed,
         host=socket.gethostname(),
     )
-    context = RunContext(run, engine, make_rng(seed))
+    context = RunContext(run, cfg, engine, make_rng(seed))
     log.info(
         "experiment_run_started",
         experiment_run_id=run.run_id,

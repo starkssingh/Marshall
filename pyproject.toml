@@ -17,6 +17,7 @@ dependencies = [
     "pydantic-settings>=2.15.0",
     "python-ulid>=4.0.1",
     "pyyaml>=6.0.3",
+    "scipy>=1.14",
     "sqlalchemy>=2.1.1",
     "structlog>=26.1.0",
     "typer>=0.27.2",
@@ -79,8 +80,9 @@ warn_unreachable = true
 plugins = ["pydantic.mypy"]
 
 [[tool.mypy.overrides]]
-# pyarrow and duckdb ship no complete type information; their use is confined to storage I/O.
-module = ["pyarrow", "pyarrow.*", "duckdb"]
+# pyarrow, duckdb and scipy ship no complete type information; pyarrow and duckdb are confined
+# to storage I/O, scipy to statistics helpers.
+module = ["pyarrow", "pyarrow.*", "duckdb", "scipy", "scipy.*"]
 ignore_missing_imports = true
 
 [tool.pydantic-mypy]

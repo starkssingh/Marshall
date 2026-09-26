@@ -430,6 +430,19 @@ class QualityConfig(FrozenModel):
     checks: dict[str, CheckThreshold] = {}
 
 
+class TrialClusteringConfig(FrozenModel):
+    """How the effective number of independent trials is estimated (EXP-004)."""
+
+    correlation_threshold: float = Field(gt=0, lt=1)
+    min_overlap: int = Field(gt=1)
+
+
+class ExperimentsConfig(FrozenModel):
+    """Experiment registry settings (``experiments:`` in ``config/base.yaml``)."""
+
+    trial_clustering: TrialClusteringConfig
+
+
 class SourceConfig(FrozenModel):
     """A declared market-data source (DATA-003). The clock convention is part of its identity."""
 
@@ -487,6 +500,7 @@ class AppConfig(BaseSettings):
     cleaning: CleaningConfig | None = None
     bars: BarsConfig | None = None
     quality: QualityConfig | None = None
+    experiments: ExperimentsConfig | None = None
     secrets: SecretsConfig = SecretsConfig()
 
     @classmethod
@@ -547,6 +561,12 @@ class AppConfig(BaseSettings):
         if self.quality is None:
             raise ConfigError("no quality configuration (config/quality.yaml) was loaded")
         return self.quality
+
+    def experiments_config(self) -> ExperimentsConfig:
+        """Return the experiment registry settings; raise if they are not configured."""
+        if self.experiments is None:
+            raise ConfigError("no experiments configuration (experiments: in config/base.yaml)")
+        return self.experiments
 
     def sessions_config(self) -> SessionsConfig:
         """Return the calendar and session configuration; raise if it is not configured."""

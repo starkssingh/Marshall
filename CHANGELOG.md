@@ -202,6 +202,14 @@ IDs from `docs/specs/development-plan.md`.
   the block raises. Confirmatory runs (the default) are refused on a dirty or unidentifiable git
   tree or without `uv.lock`; `exploratory=True` records a non-confirmatory run (`+dirty` sha).
   ADR 0022.
+- EXP-004: trial counter (`xq.tracking.trials`, `RunContext.record_trial`, `xq exp trials`) —
+  every evaluated configuration of a live run is recorded (family, config hash, test-fold flag,
+  Sharpe, return series under `data/artifacts/`); `trial_count` gives per-family and global trial
+  and test-evaluation counts, the Sharpe variance, and the effective number of independent trials
+  (average-linkage clustering of return correlations, cut at rho 0.7, at least 20 common
+  observations; trials without returns count as independent), with parameters in
+  `experiments.trial_clustering` (proposed). New dependency `scipy` (hierarchical clustering). ADR
+  0023.
 
 ### Changed
 
