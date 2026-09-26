@@ -1,0 +1,62 @@
+# Trading calendar, sessions and event anchors (DATA-002). Local times are quoted "HH:MM" strings
+# in the stated IANA time zone and are converted to UTC per date, so DST is handled by construction.
+# Market hours and holiday rules are CME-style retail defaults: confirm them against the chosen
+# broker's calendar (ADR 0002). DQ-004 checks them against real data.
+
+market:
+  tz: America/New_York
+  open: "18:00"          # quotes resume after the 17:00-18:00 daily break (on the previous day)
+  close: "17:00"         # daily close; the trading day rolls at 17:00 New York
+  week_open: "18:00"     # Sunday open of the Monday trading day
+  trading_weekdays: [mon, tue, wed, thu, fri]
+
+holidays:
+  us_calendar: NYSE      # `holidays` package financial calendar, observed dates included
+  uk_country: GB
+  uk_subdiv: ENG         # English bank holidays: no LBMA auctions
+  closed:                # US-calendar holidays with no trading at all (prefix match on the name)
+    - New Year's Day
+    - Good Friday
+    - Christmas Day
+  early_close_time: "13:30"   # every other US-calendar holiday trades until this New York time
+  early_close_dates: ["12-24", "12-31"]
+
+sessions:
+  tokyo:
+    tz: Asia/Tokyo
+    open: "09:00"
+    close: "18:00"
+  london:
+    tz: Europe/London
+    open: "08:00"
+    close: "17:00"
+  new_york:
+    tz: America/New_York
+    open: "08:00"
+    close: "17:00"
+
+overlaps:
+  london_new_york: [london, new_york]
+
+event_anchors:
+  lbma_am:
+    tz: Europe/London
+    time: "10:30"
+    skip_on: [uk_holiday]
+  lbma_pm:
+    tz: Europe/London
+    time: "15:00"
+    skip_on: [uk_holiday]
+    skip_dates: ["12-24", "12-31"]   # LBMA holds only the morning auction on these days
+  comex_open:
+    tz: America/New_York
+    time: "08:20"
+    skip_on: [us_holiday]
+  us_data_release:
+    tz: America/New_York
+    time: "08:30"
+    skip_on: [us_holiday]
+  rollover:
+    tz: America/New_York
+    time: "17:00"
+    require_open: false    # financing rolls at 17:00 even after an early close

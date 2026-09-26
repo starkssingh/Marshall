@@ -2,7 +2,8 @@
 
 Layers, from lowest to highest precedence:
 
-1. ``config/base.yaml`` plus the section files next to it (``instruments/<id>.yaml``, ...)
+1. ``config/base.yaml`` plus the section files next to it (``instruments/<id>.yaml``,
+   ``sessions.yaml``)
 2. ``config/<profile>.yaml`` (for example ``dev``, ``research``, ``paper``, ``prod``)
 3. environment variables prefixed ``XQ_``; nested keys are separated by ``__``,
    e.g. ``XQ_LOGGING__LEVEL=DEBUG``
@@ -18,16 +19,20 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 from collections.abc import Mapping
-from datetime import UTC, datetime
+from datetime import UTC, datetime, time
 from decimal import ROUND_FLOOR, Decimal
 from pathlib import Path
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import yaml
 from pydantic import (
+    AfterValidator,
     AwareDatetime,
     BaseModel,
+    BeforeValidator,
     ConfigDict,
     SecretStr,
     ValidationError,
@@ -51,6 +56,42 @@ BASE_FILE = "base.yaml"
 SECRETS_SECTION = "secrets"
 # Sections kept in their own files: one YAML per entry in a directory (keyed by file stem).
 FRAGMENT_DIRS = {"instruments": "instruments"}
+# Sections kept in a single YAML file next to base.yaml.
+FRAGMENT_FILES = {"sessions": "sessions.yaml"}
+
+_HH_MM = re.compile(r"^(?P<h>[01]\d|2[0-3]):(?P<m>[0-5]\d)(:(?P<s>[0-5]\d))?$")
+_MONTH_DAY = re.compile(r"^(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])$")
+
+
+def _parse_hh_mm(value: object) -> time:
+    # YAML 1.1 reads an unquoted 17:00 as the integer 1020 (base-60), which pydantic would then
+    # accept as 00:17:00. Only quoted "HH:MM" strings are accepted.
+    if isinstance(value, time):
+        return value
+    if not isinstance(value, str) or (match := _HH_MM.match(value)) is None:
+        raise ValueError(f'local times must be quoted "HH:MM" strings, got {value!r}')
+    return time(int(match["h"]), int(match["m"]), int(match["s"] or 0))
+
+
+def _check_time_zone(value: str) -> str:
+    try:
+        ZoneInfo(value)
+    except (ZoneInfoNotFoundError, ValueError) as exc:
+        raise ValueError(f"unknown IANA time zone {value!r}") from exc
+    return value
+
+
+def _check_month_day(value: str) -> str:
+    if not _MONTH_DAY.match(value):
+        raise ValueError(f'expected a "MM-DD" string, got {value!r}')
+    return value
+
+
+LocalTime = Annotated[time, BeforeValidator(_parse_hh_mm)]
+TimeZoneName = Annotated[str, AfterValidator(_check_time_zone)]
+MonthDay = Annotated[str, AfterValidator(_check_month_day)]
+Weekday = Literal["mon", "tue", "wed", "thu", "fri", "sat", "sun"]
+WEEKDAYS: tuple[Weekday, ...] = ("mon", "tue", "wed", "thu", "fri", "sat", "sun")
 
 
 class FrozenModel(BaseModel):
@@ -108,8 +149,8 @@ class VaultConfig(FrozenModel):
 class RolloverConfig(FrozenModel):
     """Daily rollover (financing) time in its local time zone."""
 
-    time: str = "17:00"
-    tz: str = "America/New_York"
+    time: LocalTime = time(17, 0)
+    tz: TimeZoneName = "America/New_York"
 
 
 class VenueOverride(FrozenModel):
@@ -188,6 +229,75 @@ class InstrumentSpec(FrozenModel):
         return price_distance / self.tick_size
 
 
+class MarketHoursConfig(FrozenModel):
+    """When the venue quotes, in its local time zone (DATA-002).
+
+    Trading day D runs from 17:00 New York on D-1 to 17:00 New York on D (a fixed convention).
+    `open` and `close` are placed at whichever calendar date puts them inside that interval, so
+    with the defaults the market opens at 18:00 on D-1 and closes at 17:00 on D. `week_open`
+    replaces `open` when the previous calendar day is not a trading weekday (Sunday opens).
+    """
+
+    tz: TimeZoneName = "America/New_York"
+    open: LocalTime
+    close: LocalTime
+    week_open: LocalTime
+    trading_weekdays: list[Weekday]
+
+
+class HolidayConfig(FrozenModel):
+    """Holiday rules. US holidays come from the `holidays` package's financial calendar."""
+
+    us_calendar: str = "NYSE"
+    uk_country: str = "GB"
+    uk_subdiv: str = "ENG"
+    closed: list[str]
+    early_close_time: LocalTime
+    early_close_dates: list[MonthDay] = []
+
+
+class SessionWindow(FrozenModel):
+    """A trading session in local time on the trading day's calendar date."""
+
+    tz: TimeZoneName
+    open: LocalTime
+    close: LocalTime
+
+    @model_validator(mode="after")
+    def _check_order(self) -> SessionWindow:
+        if self.open >= self.close:
+            raise ValueError("session open must be before close in local time")
+        return self
+
+
+class EventAnchor(FrozenModel):
+    """A recurring market event at a local time on the trading day's calendar date."""
+
+    tz: TimeZoneName
+    time: LocalTime
+    skip_on: list[Literal["us_holiday", "uk_holiday"]] = []
+    skip_dates: list[MonthDay] = []
+    require_open: bool = True
+
+
+class SessionsConfig(FrozenModel):
+    """Calendar, sessions and event anchors (``config/sessions.yaml``)."""
+
+    market: MarketHoursConfig
+    holidays: HolidayConfig
+    sessions: dict[str, SessionWindow]
+    overlaps: dict[str, list[str]] = {}
+    event_anchors: dict[str, EventAnchor] = {}
+
+    @model_validator(mode="after")
+    def _check_overlaps(self) -> SessionsConfig:
+        for name, members in self.overlaps.items():
+            unknown = [m for m in members if m not in self.sessions]
+            if len(members) < 2 or unknown:
+                raise ValueError(f"overlap {name!r} needs two or more known sessions: {members}")
+        return self
+
+
 class SecretsConfig(FrozenModel):
     """Credentials. Only ever supplied through ``XQ_SECRETS__*`` environment variables."""
 
@@ -213,6 +323,7 @@ class AppConfig(BaseSettings):
     logging: LoggingConfig = LoggingConfig()
     vault: VaultConfig
     instruments: dict[str, InstrumentSpec] = {}
+    sessions: SessionsConfig | None = None
     secrets: SecretsConfig = SecretsConfig()
 
     @classmethod
@@ -238,6 +349,12 @@ class AppConfig(BaseSettings):
                 f"unknown instrument {instrument_id!r}; configured: {known}"
             ) from None
         return spec.for_venue(venue)
+
+    def sessions_config(self) -> SessionsConfig:
+        """Return the calendar and session configuration; raise if it is not configured."""
+        if self.sessions is None:
+            raise ConfigError("no sessions configuration (config/sessions.yaml) was loaded")
+        return self.sessions
 
     def database_url(self) -> str:
         """Return the metadata database URL, defaulting to SQLite under the data directory."""
@@ -347,6 +464,10 @@ def _read_fragments(directory: Path) -> dict[str, Any]:
         folder = directory / dirname
         if folder.is_dir():
             layer[section] = {path.stem: _read_yaml(path) for path in sorted(folder.glob("*.yaml"))}
+    for section, filename in FRAGMENT_FILES.items():
+        path = directory / filename
+        if path.is_file():
+            layer[section] = _read_yaml(path)
     return layer
 
 

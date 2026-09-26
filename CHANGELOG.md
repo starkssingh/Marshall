@@ -42,6 +42,12 @@ IDs from `docs/specs/development-plan.md`.
   lot, lot step/min 0.01, max 100, 17:00 New York rollover; values to be confirmed against the
   chosen broker), loaded as `AppConfig.instruments` from one YAML per instrument, with
   per-venue overrides and exact `Decimal` lot maths (`round_lots` always rounds down).
+- DATA-002: trading calendar and sessions — `config/sessions.yaml` (`AppConfig.sessions`),
+  `xq.data.calendar.MarketCalendar` (NYSE and English holiday calendars, full closes, early
+  closes, Sunday open) and `xq.data.sessions.build_session_table`, which returns one row per
+  trading day with market hours, Tokyo/London/New York sessions, the London–New York overlap and
+  LBMA, COMEX, US-data and rollover anchors, all in UTC. Local times must be quoted `"HH:MM"`
+  strings. Defaults recorded in ADR 0002.
 
 ### Changed
 
