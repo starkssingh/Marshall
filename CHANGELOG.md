@@ -120,6 +120,12 @@ IDs from `docs/specs/development-plan.md`.
   `report.md` (summary, failing days, per-check statistics, top anomalies), `summary.json`, a
   missing-minutes heatmap and a spread heatmap; pre-vault days only unless `--include-vault`.
   ADR 0012.
+- DS-001: dataset specifications (`xq.datasets.spec`) — frozen pydantic `DatasetSpec` (source,
+  instrument, base timeframe, price basis, UTC window, warm-up, context timeframes, feature and
+  target sets by name and version, exclusions with reasons, `exclude`-only vault policy, and the
+  bar build and quality run pinned on resolution); `dataset_id` = `ds-` + SHA-256 over the
+  canonical spec JSON and the builder code versions, defined only for resolved specs;
+  `load_spec` / `dump_spec`. ADR 0014.
 
 ### Changed
 
