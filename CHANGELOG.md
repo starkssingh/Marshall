@@ -29,6 +29,10 @@ IDs from `docs/specs/development-plan.md`.
   (buy fills at ask, sell at bid), `PriceBasis`; UTC helpers that reject naive timestamps;
   `trading_day` / `trading_days` / `trading_day_bounds` with the 17:00 New York roll; ULID and git
   identifiers; `set_global_seed`, `make_rng` and SHA-256-based `derive_seed`.
+- ARCH-006: `xq` CLI (typer) — `xq --version`, `xq config show [--format yaml|json]` with secrets
+  masked and the config hash, global `--profile`, `--set section.key=value` and `--config-dir`
+  options, and placeholder command groups (`dataset`, `exp`, `baselines`, `research`,
+  `robustness`, `registry`, `gate`) for later sprints.
 
 ### Changed
 
