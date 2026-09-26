@@ -88,6 +88,8 @@ def test_build_materializes_features_manifest_and_record(cfg: AppConfig, engine:
         f"mt5_primary:xauusd:{tf}:{ref.spec.bar_build}" for tf in ("15m", "1h", "4h")
     ]
     assert manifest["excluded_partitions"] == []
+    assert manifest["warn_partitions"] == []
+    assert manifest["included_partitions"] == 5  # warm-up day, window days and context days
     assert manifest["git_sha"] == "abc123"
     assert manifest["code_versions"] == {"dataset": 1, "features:base.v1": 1}
     assert manifest["columns"]["features"]["close"] == "float64"
@@ -143,7 +145,7 @@ def test_excluded_days_are_dropped_and_recorded(cfg: AppConfig, engine: Engine) 
     start = pd.Timestamp("2024-03-12 21:00", tz="UTC")
     assert not ((features.index > start) & (features.index <= day)).any()
     assert len(full) - len(features) == ((full.index > start) & (full.index <= day)).sum()
-    assert ref.manifest["excluded_partitions"] == [excluded]
+    assert ref.manifest["excluded_partitions"] == [{**excluded, "failing_checks": []}]
     assert ref.spec.excluded_days == {date(2024, 3, 13)}
 
 

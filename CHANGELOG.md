@@ -175,6 +175,13 @@ IDs from `docs/specs/development-plan.md`.
   from `event_windows` in `config/sessions.yaml` (US release −5/+30 min, rollover ±15 min,
   proposed). Tested against the session table across US and UK DST and a US holiday, and through
   the leakage harness. ADR 0018.
+- DQ-007: quality gate in the dataset builder (`xq.quality.gate.gate_partitions`) — every
+  trading day a dataset reads (warm-up, window, context timeframes, explicit exclusions) is checked
+  against the pinned quality run; FAIL or unvalidated days refuse the build with a message naming
+  each day and failing check unless the spec excludes them with a reason; excluded days are
+  dropped from every timeframe; the manifest records `included_partitions`, `warn_partitions`
+  (with warning checks) and `excluded_partitions` (with reason and failing checks). A test injects
+  an OHLC error into 1-minute bars and shows the gate blocking that day. ADR 0019.
 
 ### Changed
 

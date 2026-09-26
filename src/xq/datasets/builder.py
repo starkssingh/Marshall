@@ -7,10 +7,14 @@
 - ``spec.yaml`` — the *resolved* spec (bar build, quality run and config digest pinned), from which
   the dataset can be rebuilt with the same id;
 - ``manifest.json`` — row count, decision-time range, column types, per-file and combined SHA-256,
-  git sha, code versions, bar sets, quality runs and excluded partitions.
+  git sha, code versions, bar sets, the quality run, and the quality gate's decision: how many
+  partitions were included, which carried warnings and which were excluded (with reasons and
+  failing checks).
 
 It also records a ``dataset_versions`` row. Data is read only through the catalog, so the vault is
-enforced; excluded trading days and incomplete bars are dropped before features are computed.
+enforced. Every trading day the inputs touch passes the quality gate (DQ-007): FAIL or unvalidated
+days refuse the build unless the spec excludes them. Excluded days and incomplete bars are dropped
+before features are computed.
 
 Building the same resolved spec again reproduces the same bytes. If the dataset already exists,
 the rebuild is compared with it: identical content is a no-op, different content raises
@@ -36,7 +40,6 @@ from xq.core.errors import ConfigError, XQError
 from xq.core.ids import new_ulid
 from xq.core.logging import get_logger
 from xq.core.time import ensure_utc, utc_now
-from xq.core.types import Timeframe
 from xq.data.bars import bar_set_id, build_version
 from xq.data.catalog import Catalog
 from xq.data.clean import rules_version
@@ -44,6 +47,7 @@ from xq.data.raw_store import sha256_file
 from xq.datasets.base_features import BASE_INPUT, DECISION_TIME, FeatureContext, feature_set
 from xq.datasets.spec import DatasetSpec, code_versions, dataset_id, dump_spec
 from xq.datasets.vault import check_window
+from xq.quality.gate import GateDecision, gate_partitions
 from xq.tracking.db import session_factory
 from xq.tracking.models import DatasetVersion, QualityRunRecord
 
@@ -170,7 +174,7 @@ def build_dataset(cfg: AppConfig, engine: Engine, spec: DatasetSpec, *, git_sha:
     resolved = resolve_spec(cfg, engine, spec)
     ds_id = dataset_id(resolved, code_versions_for(resolved))
 
-    inputs = _load_inputs(cfg, resolved)
+    inputs, decision = _load_inputs(cfg, engine, resolved)
     base = inputs[BASE_INPUT]
     context = FeatureContext(
         resolved.base_timeframe, tuple(resolved.context_timeframes), cfg.sessions_config()
@@ -191,7 +195,7 @@ def build_dataset(cfg: AppConfig, engine: Engine, spec: DatasetSpec, *, git_sha:
     try:
         _write_frame(features, staging / FEATURES_FILE)
         (staging / SPEC_FILE).write_text(dump_spec(resolved), encoding="utf-8")
-        manifest = _manifest(ds_id, resolved, features, staging, git_sha)
+        manifest = _manifest(ds_id, resolved, features, decision, staging, git_sha)
         (staging / MANIFEST_FILE).write_text(json.dumps(manifest, indent=2) + "\n")
         final = root / ds_id
         reproduced = final.exists()
@@ -275,12 +279,18 @@ def _verify_files(directory: Path, manifest: dict[str, Any]) -> None:
             )
 
 
-def _load_inputs(cfg: AppConfig, spec: DatasetSpec) -> dict[str, pd.DataFrame]:
+def _load_inputs(
+    cfg: AppConfig, engine: Engine, spec: DatasetSpec
+) -> tuple[dict[str, pd.DataFrame], GateDecision]:
+    """Complete bars of every input timeframe, gated by the spec's quality run (DQ-007)."""
     catalog = Catalog(cfg)
     load_start = ensure_utc(spec.start - spec.warmup)
-    excluded = spec.excluded_days
-
-    def usable(tf: Timeframe, start: pd.Timestamp) -> pd.DataFrame:
+    starts = {spec.base_timeframe: load_start}
+    for tf in spec.context_timeframes:
+        # Start one context bar earlier so one is already available when the window opens.
+        starts[tf] = load_start - tf.duration
+    loaded: dict[str, pd.DataFrame] = {}
+    for tf, start in starts.items():
         bars = catalog.load_bars(
             spec.source,
             spec.instrument,
@@ -290,14 +300,20 @@ def _load_inputs(cfg: AppConfig, spec: DatasetSpec) -> dict[str, pd.DataFrame]:
             spec.end,
             build=spec.bar_build,
         )
-        keep = bars["is_complete"] & ~bars["trading_day"].isin(excluded)
-        return bars.loc[keep.to_numpy()].reset_index(drop=True)
+        name = BASE_INPUT if tf == spec.base_timeframe else tf.value
+        loaded[name] = bars.loc[bars["is_complete"].to_numpy()].reset_index(drop=True)
 
-    inputs = {BASE_INPUT: usable(spec.base_timeframe, load_start)}
-    for tf in spec.context_timeframes:
-        # Start one context bar earlier so one is already available when the window opens.
-        inputs[tf.value] = usable(tf, load_start - tf.duration)
-    return inputs
+    exclusions = {e.trading_day: e.reason for e in spec.exclusions}
+    days = {day for bars in loaded.values() for day in bars["trading_day"]} | set(exclusions)
+    if spec.quality_run_id is None:
+        raise ValueError("the spec must be resolved before its inputs are gated")
+    decision = gate_partitions(engine, spec.quality_run_id, days, exclusions)
+    excluded = {e.trading_day for e in decision.excluded}
+    inputs = {
+        name: bars.loc[~bars["trading_day"].isin(excluded).to_numpy()].reset_index(drop=True)
+        for name, bars in loaded.items()
+    }
+    return inputs, decision
 
 
 def _write_frame(frame: pd.DataFrame, path: Path) -> None:
@@ -306,7 +322,12 @@ def _write_frame(frame: pd.DataFrame, path: Path) -> None:
 
 
 def _manifest(
-    ds_id: str, spec: DatasetSpec, features: pd.DataFrame, directory: Path, git_sha: str
+    ds_id: str,
+    spec: DatasetSpec,
+    features: pd.DataFrame,
+    decision: GateDecision,
+    directory: Path,
+    git_sha: str,
 ) -> dict[str, Any]:
     files = {FEATURES_FILE: sha256_file(directory / FEATURES_FILE)}
     combined = hashlib.sha256(
@@ -327,9 +348,9 @@ def _manifest(
         "sha256": combined,
         "bar_set_ids": [bar_set_id(spec.source, spec.instrument, tf, build) for tf in timeframes],
         "quality_run_ids": [spec.quality_run_id],
-        "excluded_partitions": [
-            {"trading_day": e.trading_day.isoformat(), "reason": e.reason} for e in spec.exclusions
-        ],
+        "included_partitions": len(decision.included),
+        "warn_partitions": decision.manifest_entry()["warn_partitions"],
+        "excluded_partitions": decision.manifest_entry()["excluded_partitions"],
         "git_sha": git_sha,
         "created_at": str(utc_now()),
     }
