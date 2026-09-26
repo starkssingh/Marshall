@@ -27,6 +27,7 @@ from xq.core.logging import configure_logging, shutdown_logging
 from xq.data.bars import build_bar_sets
 from xq.data.clean import build_clean
 from xq.data.raw_store import ingest, rebuild_mirror, verify_raw_store
+from xq.data.spreads import build_spread_stats
 from xq.tracking.db import current_revision, engine_for, head_revision, upgrade_to_head
 
 EXIT_USAGE_ERROR = 2
@@ -228,6 +229,25 @@ def build_bars_command(
     typer.echo(
         f"build {result.build_version} (clean rules {result.clean_rules_version}): "
         f"{len(result.months)} month(s); bars per timeframe: {counts}"
+    )
+
+
+@app.command("spread-stats")
+def spread_stats_command(
+    ctx: typer.Context, source: SourceOption, start: StartOption = None, end: EndOption = None
+) -> None:
+    """Compute p50/p90/p99 spreads per New York hour of week (data before the vault only)."""
+    with pipeline_run(ctx.obj, source=source) as run:
+        result = build_spread_stats(
+            run.cfg,
+            run.engine,
+            source,
+            start=start.date() if start else None,
+            end=end.date() if end else None,
+        )
+    typer.echo(
+        f"spread statistics for {result.hours} hour(s) of week from {result.ticks} ticks, "
+        f"{result.computed_from} to {result.computed_to}"
     )
 
 

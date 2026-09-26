@@ -86,6 +86,10 @@ IDs from `docs/specs/development-plan.md`.
   to the 17:00 New York trading day; no bars for empty intervals, which become `bar_gaps` rows
   with `expected_open`; `bar_sets` rows per timeframe; versioned, bit-identical monthly files;
   causal-only tick exclusions (`SPIKE` refused). ADR 0007.
+- DATA-009: hour-of-week spread statistics (`xq.data.spreads`, `xq spread-stats`) — exact
+  p50/p90/p99 spreads per New York hour of week from an integer histogram on the tick grid,
+  computed from usable clean ticks before the vault only, stored in `spread_stats` per window;
+  test data with rollover spread widening shows the 16:xx/18:xx New York spike. ADR 0009.
 
 ### Changed
 
