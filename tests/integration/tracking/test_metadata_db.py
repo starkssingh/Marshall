@@ -12,7 +12,7 @@ from sqlalchemy import Engine, inspect, select
 from sqlalchemy.exc import IntegrityError, StatementError
 from sqlalchemy.orm import Session
 
-from xq.core.errors import NaiveTimestampError
+from xq.core.errors import ConfigError, NaiveTimestampError
 from xq.tracking.db import (
     create_db_engine,
     current_revision,
@@ -178,3 +178,10 @@ def test_raw_file_sha256_is_unique(session: Session) -> None:
     session.add(_raw_file("rf2", "a" * 64))
     with pytest.raises(IntegrityError):
         session.commit()
+
+
+def test_missing_migrations_directory_is_a_config_error(tmp_path: Path) -> None:
+    engine = create_db_engine(f"sqlite:///{tmp_path / 'm.sqlite'}")
+    with pytest.raises(ConfigError, match="migrations directory not found"):
+        upgrade_to_head(engine, tmp_path / "nowhere")
+    engine.dispose()

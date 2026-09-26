@@ -14,6 +14,7 @@ from sqlalchemy.engine import make_url
 from sqlalchemy.orm import Session, sessionmaker
 
 from xq.core.config import AppConfig
+from xq.core.errors import ConfigError
 
 
 def create_db_engine(url: str) -> Engine:
@@ -70,6 +71,8 @@ def head_revision(migrations_dir: Path) -> str | None:
 
 
 def _run(engine: Engine, migrations_dir: Path, action: Any, revision: str) -> None:
+    if not (migrations_dir / "env.py").is_file():
+        raise ConfigError(f"migrations directory not found: {migrations_dir}")
     config = alembic_config(migrations_dir)
     with engine.begin() as connection:
         config.attributes["connection"] = connection

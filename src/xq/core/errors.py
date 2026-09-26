@@ -23,3 +23,11 @@ class ClockConventionError(XQError, ValueError):
 
 class SourceFormatError(XQError, ValueError):
     """A source file does not match the format its adapter expects."""
+
+
+class ProvenanceError(XQError):
+    """A source or instrument declaration conflicts with what was already recorded."""
+
+
+class RawStoreIntegrityError(XQError):
+    """A file in the immutable raw store differs from its manifest entry."""

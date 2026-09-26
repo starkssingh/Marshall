@@ -65,6 +65,12 @@ IDs from `docs/specs/development-plan.md`.
   0004); deterministic synthetic MT5 fixtures around the March and November 2024 DST changes;
   gap-location tests proving the weekly open, weekly close and daily rollover gaps land at the
   expected UTC hours, and that a misdeclared `tz:Europe/Athens` clock is detected.
+- DATA-004: immutable raw store (`xq.data.raw_store`) and `xq ingest --source --path` —
+  content-addressed raw files (SHA-256; re-ingest is a no-op) copied read-only into
+  `data/raw/<source>/<instrument>/<yyyy>/<mm>/`, a faithful Parquet mirror partitioned by UTC day
+  with `raw_file_id` and `row_num`, `raw_files` / `ingest_runs` / `data_sources` / `instruments`
+  manifest rows, recovery of interrupted runs, refusal to change a source's clock after ingest
+  (`xq.data.provenance`), and `xq verify-raw` integrity checks. ADR 0005.
 
 ### Changed
 

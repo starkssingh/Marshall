@@ -20,6 +20,9 @@ import yaml
 import xq
 from xq.core.config import AppConfig, config_as_dict, config_hash, load_config, parse_override
 from xq.core.errors import XQError
+from xq.core.ids import git_sha, new_ulid
+from xq.core.logging import configure_logging, shutdown_logging
+from xq.data.raw_store import ingest, verify_raw_store
 from xq.tracking.db import current_revision, engine_for, head_revision, upgrade_to_head
 
 EXIT_USAGE_ERROR = 2
@@ -111,6 +114,54 @@ def config_show(
     else:
         typer.echo(f"# profile: {cfg.profile}\n# config_hash: {config_hash(cfg)}")
         typer.echo(yaml.safe_dump(data, sort_keys=False, allow_unicode=True).rstrip())
+
+
+@app.command("ingest")
+def ingest_command(
+    ctx: typer.Context,
+    source: Annotated[str, typer.Option("--source", help="Configured source id.")],
+    path: Annotated[Path, typer.Option("--path", help="File or directory of source files.")],
+) -> None:
+    """Copy source files into the immutable raw store with a Parquet mirror and manifest rows.
+
+    Files already in the raw store (same SHA-256) are skipped, so re-running is a no-op.
+    """
+    state: CliContext = ctx.obj
+    with cli_errors():
+        cfg = state.config
+        cfg.source(source)  # fail on an unknown source before touching anything
+        run_id = new_ulid()
+        sha = git_sha(cfg.paths.resolve(cfg.paths.root))
+        configure_logging(cfg, run_id=run_id, git_sha=sha)
+        engine = engine_for(cfg)
+        try:
+            upgrade_to_head(engine, cfg.paths.resolve(cfg.paths.migrations_dir))
+            result = ingest(cfg, source, path, engine=engine, run_id=run_id, git_sha=sha)
+        finally:
+            engine.dispose()
+            shutdown_logging()
+    typer.echo(
+        f"run {result.run_id}: ingested {len(result.ingested)} file(s) with {result.rows} rows; "
+        f"skipped {len(result.skipped)} already in the raw store"
+    )
+
+
+@app.command("verify-raw")
+def verify_raw_command(ctx: typer.Context) -> None:
+    """Re-hash every raw-store file against the manifest; exit 1 if any differ."""
+    state: CliContext = ctx.obj
+    with cli_errors():
+        cfg = state.config
+    engine = engine_for(cfg)
+    try:
+        problems = verify_raw_store(cfg, engine)
+    finally:
+        engine.dispose()
+    for problem in problems:
+        typer.echo(f"{problem.raw_file_id}\t{problem.problem}\t{problem.path}", err=True)
+    if problems:
+        raise typer.Exit(1)
+    typer.echo("raw store verified: every file matches its manifest entry")
 
 
 db_app = typer.Typer(help="Metadata database migrations.", no_args_is_help=True)
