@@ -3,7 +3,7 @@
 Layers, from lowest to highest precedence:
 
 1. ``config/base.yaml`` plus the section files next to it (``instruments/<id>.yaml``,
-   ``sessions.yaml``)
+   ``sessions.yaml``, ``quality.yaml``)
 2. ``config/<profile>.yaml`` (for example ``dev``, ``research``, ``paper``, ``prod``)
 3. environment variables prefixed ``XQ_``; nested keys are separated by ``__``,
    e.g. ``XQ_LOGGING__LEVEL=DEBUG``
@@ -59,7 +59,7 @@ SECRETS_SECTION = "secrets"
 # Sections kept in their own files: one YAML per entry in a directory (keyed by file stem).
 FRAGMENT_DIRS = {"instruments": "instruments"}
 # Sections kept in a single YAML file next to base.yaml.
-FRAGMENT_FILES = {"sessions": "sessions.yaml"}
+FRAGMENT_FILES = {"sessions": "sessions.yaml", "quality": "quality.yaml"}
 
 _HH_MM = re.compile(r"^(?P<h>[01]\d|2[0-3]):(?P<m>[0-5]\d)(:(?P<s>[0-5]\d))?$")
 _MONTH_DAY = re.compile(r"^(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])$")
@@ -388,6 +388,34 @@ class BarsConfig(FrozenModel):
         return value
 
 
+class CheckThreshold(FrozenModel):
+    """Thresholds of one quality check (DQ-001). ``None`` means the level is never reached.
+
+    Status of a measurement: FAIL if ``metric > fail``, else WARN if ``metric > warn``, else PASS.
+    A warn threshold of 0 therefore means "warn on any".
+    """
+
+    severity: Literal["critical", "major", "minor"]
+    unit: str
+    warn: float | None
+    fail: float | None
+    params: dict[str, Any] = {}
+
+    @model_validator(mode="after")
+    def _ordered(self) -> CheckThreshold:
+        if self.warn is not None and self.fail is not None and self.warn > self.fail:
+            raise ValueError("warn threshold must not exceed fail threshold")
+        return self
+
+
+class QualityConfig(FrozenModel):
+    """Data-quality settings (``config/quality.yaml``). Thresholds change only with an ADR."""
+
+    active_sessions: list[str]
+    top_anomalies: int = Field(default=20, gt=0)
+    checks: dict[str, CheckThreshold] = {}
+
+
 class SourceConfig(FrozenModel):
     """A declared market-data source (DATA-003). The clock convention is part of its identity."""
 
@@ -444,6 +472,7 @@ class AppConfig(BaseSettings):
     sources: dict[str, SourceConfig] = {}
     cleaning: CleaningConfig | None = None
     bars: BarsConfig | None = None
+    quality: QualityConfig | None = None
     secrets: SecretsConfig = SecretsConfig()
 
     @classmethod
@@ -498,6 +527,12 @@ class AppConfig(BaseSettings):
         if self.bars is None:
             raise ConfigError("no bars configuration (bars: in config/base.yaml)")
         return self.bars
+
+    def quality_config(self) -> QualityConfig:
+        """Return the data-quality thresholds; raise if they are not configured."""
+        if self.quality is None:
+            raise ConfigError("no quality configuration (config/quality.yaml) was loaded")
+        return self.quality
 
     def sessions_config(self) -> SessionsConfig:
         """Return the calendar and session configuration; raise if it is not configured."""

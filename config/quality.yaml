@@ -1,0 +1,8 @@
+# Data-quality checks (DQ-001..DQ-006). Each check is measured per trading day (partition) and
+# graded: FAIL if metric > fail, WARN if metric > warn, else PASS; null means "never". A warn of 0
+# means "warn on any". Thresholds are fixed before results are seen and change only with an ADR.
+
+active_sessions: [london, new_york]   # sessions (config/sessions.yaml) where liquidity is expected
+top_anomalies: 20                     # anomalies kept per check and day for the report and review
+
+checks: {}

@@ -95,6 +95,11 @@ IDs from `docs/specs/development-plan.md`.
   past `vault.start` raise `VaultAccessError`, ticks at or after it and bars that become available
   after it are never returned, and `allow_vault=True` raises until DS-004 gate tokens exist.
   ADR 0010.
+- DQ-001: data-quality framework (`xq.quality.registry`) — `Check` protocol returning a
+  `Measurement` (larger is worse), `CheckRegistry` with `@register` and built-in discovery,
+  thresholds, severity and check parameters in `config/quality.yaml` (`AppConfig.quality`),
+  grading FAIL above `fail` / WARN above `warn`, validation that thresholds and registered checks
+  match one to one, `run_checks` over trading-day partitions keeping the top anomalies.
 
 ### Changed
 
