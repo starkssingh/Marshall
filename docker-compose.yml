@@ -1,0 +1,21 @@
+# Compose profiles: `research` now; `paper` and `prod` arrive with Sprints 14-16 (DEPLOY-002).
+#   docker compose --profile research build
+#   docker compose --profile research run --rm xq xq --version
+services:
+  xq:
+    profiles: ["research"]
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
+    image: xq:dev
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      XQ_PROFILE: ${XQ_PROFILE:-research}
+    volumes:
+      - ./config:/app/config:ro
+      - ./data:/app/data
+      - ./logs:/app/logs
+      - ./reports:/app/reports
+      - ./tests/fixtures:/app/tests/fixtures:ro

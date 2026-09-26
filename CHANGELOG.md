@@ -36,6 +36,8 @@ IDs from `docs/specs/development-plan.md`.
 - ARCH-007: GitHub Actions CI (`.github/workflows/ci.yml`) — locked `uv sync`, ruff lint and
   format, mypy, and pytest (everything except `slow` and `research`) with coverage, all under
   `TZ=Asia/Tokyo` to catch hidden local-time dependencies.
+- ARCH-008: development Docker image (`docker/Dockerfile`: python 3.12-slim, uv from PyPI, locked
+  dependencies, non-root user), `docker-compose.yml` with the `research` profile, `.env.example`.
 
 ### Changed
 

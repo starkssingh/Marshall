@@ -22,3 +22,10 @@ Requires [uv](https://docs.astral.sh/uv/) and Python 3.12.
 uv sync            # create the environment from uv.lock
 uv run pytest      # run the test suite
 ```
+
+Or in Docker (research profile; `data/`, `logs/` and `reports/` are mounted from the host):
+
+```bash
+docker compose --profile research build
+docker compose --profile research run --rm xq xq --version
+```
