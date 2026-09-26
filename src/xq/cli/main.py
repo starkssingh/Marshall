@@ -28,6 +28,8 @@ from xq.data.bars import build_bar_sets
 from xq.data.clean import build_clean
 from xq.data.raw_store import ingest, rebuild_mirror, verify_raw_store
 from xq.data.spreads import build_spread_stats
+from xq.datasets.builder import build_dataset, verify_dataset
+from xq.datasets.spec import load_spec
 from xq.quality.validate import validate_source
 from xq.tracking.db import current_revision, engine_for, head_revision, upgrade_to_head
 
@@ -317,6 +319,42 @@ def verify_raw_command(ctx: typer.Context) -> None:
     typer.echo("raw store verified: every file matches its manifest entry")
 
 
+dataset_app = typer.Typer(
+    help="Build and inspect versioned datasets (DS-001..007).", no_args_is_help=True
+)
+app.add_typer(dataset_app, name="dataset")
+
+
+@dataset_app.command("build")
+def dataset_build(
+    ctx: typer.Context,
+    spec_path: Annotated[Path, typer.Argument(help="Dataset spec YAML.")],
+) -> None:
+    """Materialize a dataset spec under data/datasets/<dataset_id>/ (a rebuild is verified)."""
+    with pipeline_run(ctx.obj) as run:
+        ref = build_dataset(run.cfg, run.engine, load_spec(spec_path), git_sha=run.git_sha)
+    manifest = ref.manifest
+    action = "reproduced (identical content)" if ref.reproduced else "built"
+    typer.echo(
+        f"dataset {ref.dataset_id} {action}: {manifest['row_count']} rows, "
+        f"{manifest['decision_time_first']} to {manifest['decision_time_last']}; "
+        f"sha256 {manifest['sha256'][:16]}"
+    )
+    typer.echo(f"path: {ref.path}")
+
+
+@dataset_app.command("show")
+def dataset_show(
+    ctx: typer.Context,
+    dataset_id: Annotated[str, typer.Argument(help="Dataset id (ds-...).")],
+) -> None:
+    """Verify a dataset's files and print its manifest."""
+    state: CliContext = ctx.obj
+    with cli_errors():
+        manifest = verify_dataset(state.config, dataset_id)
+    typer.echo(json.dumps(manifest, indent=2))
+
+
 db_app = typer.Typer(help="Metadata database migrations.", no_args_is_help=True)
 app.add_typer(db_app, name="db")
 
@@ -353,7 +391,6 @@ def db_current(ctx: typer.Context) -> None:
 # Command groups for later phases. Each is registered now so the CLI surface is stable; the
 # commands arrive in the sprint named in the help text.
 _PLANNED_GROUPS = {
-    "dataset": "Build and inspect versioned datasets (Sprint 3: DS-001..007).",
     "exp": "Hypotheses, experiment runs and reproduction (Sprint 3: EXP-001..006).",
     "baselines": "Walk-forward baseline board (Sprint 4: BASE-001..006).",
     "research": "Exploratory, statistical and volatility research (Sprints 5-8).",

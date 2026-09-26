@@ -30,6 +30,12 @@ BASE: dict[str, Any] = {
     ],
     "bar_build": "b1-0123abcd",
     "quality_run_id": "01QRUN000000000000000000AA",
+    "config_digest": "0123456789abcdef",
+}
+RESOLVED = {
+    "bar_build": "b1-0123abcd",
+    "quality_run_id": "01QRUN000000000000000000AA",
+    "config_digest": "0123456789abcdef",
 }
 
 
@@ -77,6 +83,7 @@ def test_canonical_forms_do_not_change_the_id() -> None:
         {"exclusions": []},
         {"bar_build": "b1-ffffffff"},
         {"quality_run_id": "01QRUN000000000000000000AB"},
+        {"config_digest": "fedcba9876543210"},
     ],
 )
 def test_every_field_changes_the_id(changes: dict[str, Any]) -> None:
@@ -90,18 +97,22 @@ def test_code_version_is_part_of_the_id(monkeypatch: pytest.MonkeyPatch) -> None
 
 
 def test_unresolved_spec_has_no_id() -> None:
-    spec = make(bar_build=None, quality_run_id=None)
+    spec = make(bar_build=None, quality_run_id=None, config_digest=None)
     assert not spec.is_resolved
     with pytest.raises(ValueError, match="resolved spec"):
         dataset_id(spec)
-    resolved = spec.resolved(bar_build="b1-0123abcd", quality_run_id="01QRUN000000000000000000AA")
+    for partial in ({"bar_build": None}, {"config_digest": None}):
+        assert not make(**partial).is_resolved
+    resolved = spec.resolved(**RESOLVED)
     assert resolved.is_resolved
     assert dataset_id(resolved) == dataset_id(make())
 
 
 def test_resolving_cannot_change_pinned_values() -> None:
     with pytest.raises(ValueError, match="bar_build"):
-        make().resolved(bar_build="b1-ffffffff", quality_run_id=BASE["quality_run_id"])
+        make().resolved(**{**RESOLVED, "bar_build": "b1-ffffffff"})
+    with pytest.raises(ValueError, match="config_digest"):
+        make().resolved(**{**RESOLVED, "config_digest": "fedcba9876543210"})
 
 
 def test_parsed_values() -> None:

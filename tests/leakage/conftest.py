@@ -36,6 +36,12 @@ def _bars(ticks: pd.DataFrame, tf: Timeframe) -> pd.DataFrame:
             "low": bars["mid_low"],
             "close": bars["mid_close"],
             "tick_count": bars["tick_count"],
+            "spread_mean": bars["spread_mean"],
+            "spread_max": bars["spread_max"],
+            "spread_close": bars["spread_close"],
+            "n_flagged": bars["n_flagged"],
+            "n_excluded": bars["n_excluded"],
+            "trading_day": bars["trading_day"],
         }
     )
     return frame[bars["is_complete"].to_numpy()].reset_index(drop=True)

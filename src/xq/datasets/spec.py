@@ -3,18 +3,21 @@
 A `DatasetSpec` states everything that determines a dataset's content: the source and instrument,
 the base timeframe and price basis, the window, the context timeframes, the feature and target
 sets (by name and version), explicitly excluded partitions, the vault policy, and — once resolved
-by the builder — the bar build version and the quality run the data was gated on.
+by the builder — the bar build version, the quality run the data was gated on and a digest of the
+configuration the builder reads (calendar and instrument).
 
 ``dataset_id = "ds-" + sha256(canonical spec JSON + dataset code version)[:16]``. Canonical JSON
 has sorted keys and no whitespace, so the id does not depend on YAML key order or formatting. An
-id is only defined for a *resolved* spec (bar build and quality run set): an unresolved spec
-could produce different data depending on what is in the stores when it is built.
+id is only defined for a *resolved* spec (bar build, quality run and config digest set): an
+unresolved spec could produce different data depending on what is in the stores and the
+configuration when it is built.
 """
 
 from __future__ import annotations
 
 import hashlib
 import json
+from collections.abc import Mapping
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from typing import Annotated, Any, Literal
@@ -39,6 +42,7 @@ from xq.core.types import PriceBasis, Timeframe
 DATASET_CODE_VERSION = 1
 DATASET_ID_PREFIX = "ds-"
 
+_RESOLVED_FIELDS = ("bar_build", "quality_run_id", "config_digest")
 _NAME = r"^[a-z][a-z0-9_]*$"
 _SET_VERSION = r"^v[1-9][0-9]*$"
 
@@ -99,6 +103,7 @@ class DatasetSpec(_Frozen):
         vault_policy: Only ``exclude``: research datasets never contain vault data.
         bar_build: Bar build version the data comes from (set by the builder when resolving).
         quality_run_id: Quality run the partitions were gated on (set by the builder).
+        config_digest: Hash of the configuration sections the builder reads (set by the builder).
     """
 
     name: str = Field(pattern=_NAME)
@@ -117,6 +122,7 @@ class DatasetSpec(_Frozen):
     vault_policy: Literal["exclude"] = "exclude"
     bar_build: str | None = None
     quality_run_id: str | None = None
+    config_digest: str | None = None
 
     @field_validator("start", "end")
     @classmethod
@@ -170,25 +176,33 @@ class DatasetSpec(_Frozen):
 
     @property
     def is_resolved(self) -> bool:
-        """True once the bar build and quality run are pinned."""
-        return self.bar_build is not None and self.quality_run_id is not None
+        """True once the bar build, quality run and config digest are pinned."""
+        return all(getattr(self, name) is not None for name in _RESOLVED_FIELDS)
 
     @property
     def excluded_days(self) -> set[date]:
         """Trading days listed in `exclusions`."""
         return {item.trading_day for item in self.exclusions}
 
-    def resolved(self, *, bar_build: str, quality_run_id: str) -> DatasetSpec:
-        """Return a copy with the bar build and quality run pinned.
+    def resolved(self, *, bar_build: str, quality_run_id: str, config_digest: str) -> DatasetSpec:
+        """Return a copy with the bar build, quality run and config digest pinned.
 
         Raises:
-            ValueError: if the spec already pins different values.
+            ValueError: if the spec already pins a different value.
         """
-        for field_name, value in (("bar_build", bar_build), ("quality_run_id", quality_run_id)):
+        values = {
+            "bar_build": bar_build,
+            "quality_run_id": quality_run_id,
+            "config_digest": config_digest,
+        }
+        for field_name, value in values.items():
             current = getattr(self, field_name)
             if current is not None and current != value:
-                raise ValueError(f"spec pins {field_name}={current!r}, not {value!r}")
-        return self.model_copy(update={"bar_build": bar_build, "quality_run_id": quality_run_id})
+                raise ValueError(
+                    f"spec pins {field_name}={current!r}, but the stores and configuration give "
+                    f"{value!r}"
+                )
+        return self.model_copy(update=values)
 
     def canonical_json(self) -> str:
         """Sorted-key, whitespace-free JSON of the spec (the input to the dataset id)."""
@@ -197,19 +211,24 @@ class DatasetSpec(_Frozen):
         )
 
 
-def dataset_id(spec: DatasetSpec) -> str:
-    """``ds-<16 hex>`` over the canonical spec and `DATASET_CODE_VERSION`.
+def dataset_id(spec: DatasetSpec, code: Mapping[str, int] | None = None) -> str:
+    """``ds-<16 hex>`` over the canonical spec and the code versions that produce its content.
+
+    Args:
+        spec: A resolved spec.
+        code: Code versions of the feature and target builders the spec uses (the builder passes
+            them); `DATASET_CODE_VERSION` is always included.
 
     Raises:
         ValueError: if the spec is not resolved (see `DatasetSpec.resolved`).
     """
     if not spec.is_resolved:
         raise ValueError(
-            "a dataset id needs a resolved spec (bar_build and quality_run_id set); "
+            f"a dataset id needs a resolved spec ({', '.join(_RESOLVED_FIELDS)} set); "
             "the builder resolves specs before identifying them"
         )
     payload = json.dumps(
-        {"spec": json.loads(spec.canonical_json()), "code": code_versions()},
+        {"spec": json.loads(spec.canonical_json()), "code": {**code_versions(), **(code or {})}},
         sort_keys=True,
         separators=(",", ":"),
     )
@@ -217,7 +236,7 @@ def dataset_id(spec: DatasetSpec) -> str:
 
 
 def code_versions() -> dict[str, int]:
-    """Code versions of every builder whose output a dataset contains."""
+    """Code version of the dataset builder itself (feature and target sets add their own)."""
     return {"dataset": DATASET_CODE_VERSION}
 
 

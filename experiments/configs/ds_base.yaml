@@ -1,0 +1,20 @@
+# The base research dataset (Sprint 3: `xq dataset build experiments/configs/ds_base.yaml`).
+#
+# One row per complete 15-minute mid bar; decision time = the bar's available_at. Context bars
+# (1h, 4h, 1d) are joined on availability. The builder pins the bar build, the quality run and a
+# config digest when it resolves this spec, and stores the resolved spec with the dataset.
+#
+# The window is about four years before the vault, as the plan asks; confirm `start` against the
+# execution broker's real history depth once the broker is named. `end` equals vault.start:
+# research datasets never reach into the vault.
+name: ds_base
+source: mt5_primary
+instrument: xauusd
+base_timeframe: 15m
+price_basis: mid
+start: "2021-09-26T21:00:00Z"   # start of trading day 2021-09-27
+end: "2025-09-25T21:00:00Z"     # vault.start
+warmup: 10D
+context_timeframes: [1h, 4h, 1d]
+feature_set: {name: base, version: v1}
+exclusions: []

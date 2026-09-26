@@ -155,6 +155,18 @@ IDs from `docs/specs/development-plan.md`.
   full-sample z-score, `bfill`, higher-timeframe join on bar start, target shifted into features)
   and three planted target leaks, passes their correct counterparts, and runs every DS-003
   primitive and the availability join through the harness (`assert_causal` fixture). ADR 0016.
+- DS-005: dataset builder (`xq.datasets.builder`, `xq dataset build <spec>`, `xq dataset show`)
+  — resolves a spec (configured bar build, latest overlapping non-vault quality run, digest of the
+  calendar and instrument config), reads bars only through the vault-enforcing catalog, drops
+  incomplete bars and excluded trading days, computes the spec's feature set, and writes
+  `data/datasets/<id>/{features.parquet, spec.yaml, manifest.json}` atomically; the manifest has
+  row count, decision-time range, column types, per-file and combined SHA-256, git sha, code
+  versions, bar set ids, quality run ids and exclusions; `dataset_versions` table (migration
+  0004). Rebuilding an existing id verifies it: identical content is a no-op, different content
+  or a tampered file raises `DatasetIntegrityError`; `load_dataset` re-hashes before reading.
+  Built-in feature set `base.v1` (decision-bar values plus context bars joined on availability)
+  passes the leakage harness. `experiments/configs/ds_base.yaml` is the base research spec.
+  ADR 0017.
 
 ### Changed
 

@@ -295,3 +295,25 @@ class VaultAccess(Base):
     window_start_utc: Mapped[pd.Timestamp]
     window_end_utc: Mapped[pd.Timestamp]
     accessed_at: Mapped[pd.Timestamp]
+
+
+class DatasetVersion(Base):
+    """A materialized dataset: its resolved spec, inputs and content hash (DS-005)."""
+
+    __tablename__ = "dataset_versions"
+
+    dataset_id: Mapped[str] = mapped_column(String(32), primary_key=True)
+    name: Mapped[str] = mapped_column(String(64))
+    spec_json: Mapped[dict[str, Any]]
+    spec_hash: Mapped[str] = mapped_column(String(64))
+    feature_set_version: Mapped[str] = mapped_column(String(64))
+    target_set_version: Mapped[str | None] = mapped_column(String(64))
+    bar_set_ids: Mapped[list[str]]
+    quality_run_ids: Mapped[list[str]]
+    start_utc: Mapped[pd.Timestamp]
+    end_utc: Mapped[pd.Timestamp]
+    row_count: Mapped[int] = mapped_column(BigInteger)
+    sha256: Mapped[str] = mapped_column(String(64))
+    git_sha: Mapped[str] = mapped_column(String(64))
+    path: Mapped[str] = mapped_column(Text)
+    created_at: Mapped[pd.Timestamp]
