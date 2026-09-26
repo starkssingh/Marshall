@@ -16,5 +16,61 @@ packages = ["src/xq"]
 
 [dependency-groups]
 dev = [
+    "hypothesis>=6.168.1",
+    "mypy>=2.3.1",
+    "pre-commit>=4.6.2",
     "pytest>=8.3",
+    "pytest-cov>=7.1.0",
+    "ruff>=0.16.9",
 ]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+src = ["src", "tests"]
+extend-exclude = ["docs/specs/development-plan.md"]
+
+[tool.ruff.lint]
+select = [
+    "E", "W",   # pycodestyle
+    "F",        # pyflakes
+    "I",        # isort
+    "N",        # pep8-naming
+    "B",        # bugbear
+    "UP",       # pyupgrade
+    "SIM",      # simplify
+    "C4",       # comprehensions
+    "PIE",      # misc lints
+    "PT",       # pytest style
+    "DTZ",      # naive datetimes are bugs here (convention 1)
+    "NPY",      # numpy
+    "RUF",      # ruff-specific
+]
+
+[tool.ruff.format]
+docstring-code-format = true
+
+[tool.mypy]
+python_version = "3.12"
+files = ["src"]
+strict = true
+warn_unreachable = true
+
+[tool.pytest.ini_options]
+minversion = "8.0"
+testpaths = ["tests"]
+addopts = ["-ra", "--strict-markers", "--strict-config", "--import-mode=importlib"]
+xfail_strict = true
+filterwarnings = ["error"]
+markers = [
+    "unit: fast, isolated tests (auto-applied under tests/unit)",
+    "integration: tests crossing module or I/O boundaries (auto-applied under tests/integration)",
+    "property: hypothesis property-based tests (auto-applied under tests/property)",
+    "leakage: look-ahead and availability tests (auto-applied under tests/leakage)",
+    "slow: tests taking more than a few seconds; excluded from the default CI run",
+    "research: tests that need real market data; never run in CI",
+]
+
+[tool.coverage.run]
+source = ["xq"]
+branch = true
