@@ -282,14 +282,25 @@ class EventAnchor(FrozenModel):
     require_open: bool = True
 
 
+class EventWindow(FrozenModel):
+    """A window around an event anchor: ``[anchor - before_min, anchor + after_min)``."""
+
+    before_min: int = Field(ge=0)
+    after_min: int = Field(ge=0)
+
+
 class SessionsConfig(FrozenModel):
-    """Calendar, sessions and event anchors (``config/sessions.yaml``)."""
+    """Calendar, sessions and event anchors (``config/sessions.yaml``).
+
+    `event_windows` defines the ``in_<anchor>_window`` dataset columns (DS-007).
+    """
 
     market: MarketHoursConfig
     holidays: HolidayConfig
     sessions: dict[str, SessionWindow]
     overlaps: dict[str, list[str]] = {}
     event_anchors: dict[str, EventAnchor] = {}
+    event_windows: dict[str, EventWindow] = {}
 
     @model_validator(mode="after")
     def _check_overlaps(self) -> SessionsConfig:
@@ -297,6 +308,9 @@ class SessionsConfig(FrozenModel):
             unknown = [m for m in members if m not in self.sessions]
             if len(members) < 2 or unknown:
                 raise ValueError(f"overlap {name!r} needs two or more known sessions: {members}")
+        unknown_windows = sorted(set(self.event_windows) - set(self.event_anchors))
+        if unknown_windows:
+            raise ValueError(f"event windows for unknown anchors: {unknown_windows}")
         return self
 
 

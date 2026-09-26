@@ -9,12 +9,18 @@ from collections.abc import Callable
 import pandas as pd
 import pytest
 
+from helpers.pipeline import REPO
+from xq.core.config import load_config
 from xq.core.types import Timeframe
 from xq.datasets.base_features import FEATURE_SETS, FeatureContext
 from xq.datasets.leakage import FeatureFn, Inputs
 
 AssertCausal = Callable[[FeatureFn, Inputs], None]
-CONTEXT = FeatureContext(Timeframe.M15, (Timeframe.H1,))
+CONTEXT = FeatureContext(
+    Timeframe.M15,
+    (Timeframe.H1,),
+    load_config("research", config_dir=REPO / "config").sessions_config(),
+)
 
 
 @pytest.mark.parametrize("key", sorted(FEATURE_SETS), ids=lambda k: f"{k[0]}.{k[1]}")

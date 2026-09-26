@@ -172,7 +172,9 @@ def build_dataset(cfg: AppConfig, engine: Engine, spec: DatasetSpec, *, git_sha:
 
     inputs = _load_inputs(cfg, resolved)
     base = inputs[BASE_INPUT]
-    context = FeatureContext(resolved.base_timeframe, tuple(resolved.context_timeframes))
+    context = FeatureContext(
+        resolved.base_timeframe, tuple(resolved.context_timeframes), cfg.sessions_config()
+    )
     features = feature_def.compute(inputs, context)
     in_window = (base["bar_start_utc"] >= resolved.start).to_numpy()
     features = features.loc[in_window]

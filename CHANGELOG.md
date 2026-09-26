@@ -167,6 +167,14 @@ IDs from `docs/specs/development-plan.md`.
   Built-in feature set `base.v1` (decision-bar values plus context bars joined on availability)
   passes the leakage harness. `experiments/configs/ds_base.yaml` is the base research spec.
   ADR 0017.
+- DS-007: calendar and session columns known in advance (`xq.datasets.calendar_columns`, part of
+  `base.v1`) — trading day and weekday of the decision time, open / early-close / US and UK
+  holiday flags, minutes to market close, `in_<session>` and minutes since open for Tokyo, London,
+  New York and the London–New York overlap, minutes to and since every event anchor (LBMA AM/PM,
+  COMEX open, US 08:30 release, rollover; seven-day lookup cap), and `in_<anchor>_window` flags
+  from `event_windows` in `config/sessions.yaml` (US release −5/+30 min, rollover ±15 min,
+  proposed). Tested against the session table across US and UK DST and a US holiday, and through
+  the leakage harness. ADR 0018.
 
 ### Changed
 

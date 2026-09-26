@@ -5,9 +5,13 @@ columns*: the decision bar's own values and the latest context bars available at
 time, joined on availability. Nothing here is engineered or fitted; everything is known when the
 decision bar becomes available.
 
+It also carries the calendar and session columns known in advance (DS-007,
+`xq.datasets.calendar_columns`).
+
 A feature set is a pure function of named input frames (``"base"`` plus one frame per context
-timeframe, each with ``available_at_utc``) returning one row per decision time, so the leakage
-harness (DS-006) can test it. Its `code_version` is part of every dataset id.
+timeframe, each with ``available_at_utc``) and the calendar configuration, returning one row per
+decision time, so the leakage harness (DS-006) can test it. Its `code_version` is part of every
+dataset id.
 """
 
 from __future__ import annotations
@@ -17,9 +21,11 @@ from dataclasses import dataclass
 
 import pandas as pd
 
+from xq.core.config import SessionsConfig
 from xq.core.errors import ConfigError
 from xq.core.types import Timeframe
 from xq.datasets.asof import asof_join
+from xq.datasets.calendar_columns import calendar_columns
 from xq.datasets.leakage import Inputs
 from xq.datasets.spec import SetRef
 
@@ -50,6 +56,7 @@ class FeatureContext:
 
     base_timeframe: Timeframe
     context_timeframes: tuple[Timeframe, ...]
+    sessions: SessionsConfig
 
 
 FeatureSetFn = Callable[[Inputs, FeatureContext], pd.DataFrame]
@@ -77,7 +84,7 @@ def context_prefix(tf: Timeframe) -> str:
 
 
 def base_v1(inputs: Inputs, context: FeatureContext) -> pd.DataFrame:
-    """Decision-bar columns plus the latest available bar of each context timeframe."""
+    """Decision-bar columns, the latest bar of each context timeframe, and calendar columns."""
     base = inputs[BASE_INPUT]
     index = decision_index(base)
     features = pd.DataFrame(
@@ -94,6 +101,9 @@ def base_v1(inputs: Inputs, context: FeatureContext) -> pd.DataFrame:
         )
         for column in joined.columns.drop(DECISION_TIME):
             features[column] = joined[column].to_numpy()
+    calendar = calendar_columns(index, context.sessions)
+    for column in calendar.columns:
+        features[column] = calendar[column].to_numpy()
     return features
 
 
@@ -103,7 +113,7 @@ FEATURE_SETS: Mapping[tuple[str, str], FeatureSetDef] = {
         version="v1",
         code_version=1,
         compute=base_v1,
-        description="decision-bar values and context bars joined on availability",
+        description="decision-bar values, context bars joined on availability, calendar columns",
     ),
 }
 

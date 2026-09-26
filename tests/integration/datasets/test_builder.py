@@ -71,6 +71,9 @@ def test_build_materializes_features_manifest_and_record(cfg: AppConfig, engine:
     assert str(features.index.tz) == "UTC"
     assert features.index.tolist() == bars["available_at_utc"].tolist()
     assert features["close"].tolist() == bars["close"].tolist()
+    calendar = {"trading_day", "in_london_new_york", "minutes_to_lbma_pm", "in_rollover_window"}
+    assert calendar <= set(features.columns)
+    assert features["in_new_york"].dtype == bool
     for tf in ("1h", "4h"):
         provenance = features[f"ctx_{tf}_available_at"]
         assert (provenance.dropna() <= features.index[provenance.notna()]).all()
