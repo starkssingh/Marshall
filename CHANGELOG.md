@@ -146,6 +146,15 @@ IDs from `docs/specs/development-plan.md`.
   0003). The catalog's `load_ticks` / `load_bars` take `vault_token=` (replacing the always-failing
   `allow_vault=`) and an optional `engine` and `run_id`. Nothing in the library issues tokens yet
   (GATE-002). ADR 0015.
+- DS-006: leakage harness (`xq.datasets.leakage`) — `check_feature_causality` runs truncation
+  invariance and future perturbation at 25 seeded decision times plus an availability audit of
+  provenance columns; `correlation_scan` fails features with |corr| > 0.9 to a target at lag 0
+  unless the pair is explicitly allowed after review; `check_target_bounds` proves a target uses
+  no quotes after `label_end`, none before the decision time and no sigma-hat other than at t.
+  `tests/leakage/` catches all five planted leaks from the plan (centered rolling mean,
+  full-sample z-score, `bfill`, higher-timeframe join on bar start, target shifted into features)
+  and three planted target leaks, passes their correct counterparts, and runs every DS-003
+  primitive and the availability join through the harness (`assert_causal` fixture). ADR 0016.
 
 ### Changed
 
