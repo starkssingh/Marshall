@@ -1,0 +1,48 @@
+name: CI
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  checks:
+    name: lint, types, tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      # A non-UTC local timezone exposes any hidden dependency on the machine's clock settings.
+      TZ: Asia/Tokyo
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+
+      - name: Install locked environment
+        run: uv sync --locked
+
+      - name: Confirm non-UTC local timezone
+        run: uv run python -c "import time; assert time.strftime('%z') == '+0900', time.strftime('%z')"
+
+      - name: Ruff lint
+        run: uv run ruff check
+
+      - name: Ruff format
+        run: uv run ruff format --check
+
+      - name: Mypy
+        run: uv run mypy
+
+      - name: Tests (unit, leakage, property, integration)
+        run: uv run pytest -m "not slow and not research" --cov --cov-report=term-missing:skip-covered

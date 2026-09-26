@@ -33,6 +33,9 @@ IDs from `docs/specs/development-plan.md`.
   masked and the config hash, global `--profile`, `--set section.key=value` and `--config-dir`
   options, and placeholder command groups (`dataset`, `exp`, `baselines`, `research`,
   `robustness`, `registry`, `gate`) for later sprints.
+- ARCH-007: GitHub Actions CI (`.github/workflows/ci.yml`) — locked `uv sync`, ruff lint and
+  format, mypy, and pytest (everything except `slow` and `research`) with coverage, all under
+  `TZ=Asia/Tokyo` to catch hidden local-time dependencies.
 
 ### Changed
 
