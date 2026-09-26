@@ -25,3 +25,12 @@ IDs from `docs/specs/development-plan.md`.
 - ARCH-004: structured logging (`xq.core.logging`) — structlog JSON lines to stderr and to
   `logs/xq.jsonl`; standard-library loggers share the same pipeline; `run_id`, `git_sha` and
   `config_hash` are bound to every line.
+- ARCH-005: core utilities — `Timeframe` (durations, trading-day anchoring for 4h/1d), `Side`
+  (buy fills at ask, sell at bid), `PriceBasis`; UTC helpers that reject naive timestamps;
+  `trading_day` / `trading_days` / `trading_day_bounds` with the 17:00 New York roll; ULID and git
+  identifiers; `set_global_seed`, `make_rng` and SHA-256-based `derive_seed`.
+
+### Changed
+
+- Dependencies pinned to `pandas>=2.2,<3` (the plan specifies pandas 2.x; pandas 3 changes datetime
+  resolution inference) and `numpy<2.5` (numpy 2.5 raises deprecation errors inside pandas 2.3).

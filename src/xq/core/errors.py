@@ -11,3 +11,7 @@ class XQError(Exception):
 
 class ConfigError(XQError):
     """The configuration is missing, malformed or violates a configuration rule."""
+
+
+class NaiveTimestampError(XQError, ValueError):
+    """A timestamp without a timezone reached code that requires tz-aware values."""
