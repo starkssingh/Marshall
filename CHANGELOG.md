@@ -84,3 +84,6 @@ IDs from `docs/specs/development-plan.md`.
 
 - MT5 adapter: a file that mixes times with and without milliseconds is parsed row by row instead
   of being rejected (ADR 0004 already promised both forms).
+- Ingest: a file whose SHA-256 is already stored under a *different* source is still skipped (the
+  bytes are stored once) but now logs a `raw_file_already_ingested_under_other_source` warning
+  naming both source ids, instead of skipping silently.

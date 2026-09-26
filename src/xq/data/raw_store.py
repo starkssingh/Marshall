@@ -120,9 +120,7 @@ def ingest(
                 existing = session.scalar(select(RawFile).where(RawFile.sha256 == digest))
                 if existing is not None:
                     skipped.append(existing.raw_file_id)
-                    log.info(
-                        "raw_file_skipped", file=str(ref.path), raw_file_id=existing.raw_file_id
-                    )
+                    _log_skip(ref, existing, source_id)
                     continue
                 record = _ingest_file(
                     session, adapter, ref, digest, data_dir, source_id, source.instrument, run_id
@@ -145,6 +143,24 @@ def ingest(
 
     log.info("ingest_finished", ingested=len(ingested), skipped=len(skipped), rows=rows)
     return IngestResult(run_id=run_id, ingested=ingested, skipped=skipped, rows=rows)
+
+
+def _log_skip(ref: RawFileRef, existing: RawFile, source_id: str) -> None:
+    """A skip is routine for the same source; under another source it may be a mislabelled feed."""
+    if existing.source_id == source_id:
+        log.info("raw_file_skipped", file=str(ref.path), raw_file_id=existing.raw_file_id)
+        return
+    log.warning(
+        "raw_file_already_ingested_under_other_source",
+        file=str(ref.path),
+        raw_file_id=existing.raw_file_id,
+        source_id=source_id,
+        existing_source_id=existing.source_id,
+        detail=(
+            f"identical bytes were ingested as source {existing.source_id!r}; "
+            f"not recorded again under {source_id!r}"
+        ),
+    )
 
 
 def verify_raw_store(cfg: AppConfig, engine: Engine) -> list[IntegrityProblem]:
