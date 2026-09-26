@@ -233,6 +233,10 @@ IDs from `docs/specs/development-plan.md`.
   closing commits, open owner decisions, provisional assumptions, known issues and per-phase
   status; `CLAUDE.md` gains a session protocol (read it after `CLAUDE.md`, keep it current, record
   chat decisions in an ADR and in it the same session, the repository wins over memory).
+- EXP-004 trial clustering (ADR 0026, C-4): trial returns are summed per trading day (17:00 New
+  York roll) before they are correlated, and a pair needs 60 common trading days
+  (`experiments.trial_clustering.min_common_days`, replacing `min_overlap: 20`); the correlation
+  threshold stays 0.7. `daily_returns` is public for reports.
 - DS-007 rollover window (ADR 0026, C-3): `in_rollover_window` is the New York clock window
   16:45–18:15 on every day (pre-close, daily break and reopen spread spike, Sunday reopen
   included) instead of ±15 minutes around the 17:00 anchor. `event_windows` accept clock windows

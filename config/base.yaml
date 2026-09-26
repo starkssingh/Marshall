@@ -78,11 +78,11 @@ datasets:
   fill_delay_report_s: 5
 
 experiments:
-  # Effective number of independent trials (EXP-004, ADR 0023): trials are clustered by the
-  # correlation of their return series (average linkage on 1 - rho) and every cluster counts once.
-  # Trials whose returns correlate above the threshold on average count as one; pairs with fewer
-  # than `min_overlap` common observations are treated as independent. Proposed; fixed before any
-  # research result.
+  # Effective number of independent trials (EXP-004, ADR 0023, ADR 0026): trial returns are summed
+  # per trading day, clustered by their correlation (average linkage on 1 - rho), and every
+  # cluster counts once. Trials whose daily returns correlate above the threshold on average count
+  # as one; pairs with fewer than `min_common_days` common trading days are treated as
+  # independent. Fixed before any research result.
   trial_clustering:
     correlation_threshold: 0.7
-    min_overlap: 20
+    min_common_days: 60

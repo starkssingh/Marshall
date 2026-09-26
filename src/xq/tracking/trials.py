@@ -11,9 +11,12 @@ configuration.
 - ``n_trials`` and ``n_test_evaluations``;
 - ``effective_n``, the effective number of independent trials: trials whose return series are
   highly correlated are near-duplicates, so they are clustered (average linkage on ``1 - rho``,
-  cut at ``1 - correlation_threshold``) and each cluster counts once. Trials without returns, and
-  pairs with too little common history, count as independent — the conservative direction, since
-  more trials raise the bar a candidate must clear;
+  cut at ``1 - correlation_threshold``) and each cluster counts once. Returns are first summed
+  per trading day (17:00 New York roll), so trials sampled at different frequencies compare on
+  the same footing and intraday noise does not dilute the correlation (ADR 0026). Trials without
+  returns, and pairs with fewer than ``min_common_days`` common trading days, count as
+  independent — the conservative direction, since more trials raise the bar a candidate must
+  clear;
 - ``sharpe_variance``, the variance of the recorded trial Sharpe ratios (an input to the DSR).
 """
 
@@ -35,7 +38,7 @@ from sqlalchemy import Engine, select
 from xq.core.config import AppConfig, TrialClusteringConfig
 from xq.core.errors import NaiveTimestampError
 from xq.core.ids import new_ulid
-from xq.core.time import utc_now
+from xq.core.time import trading_days, utc_now
 from xq.tracking.db import session_factory
 from xq.tracking.models import Run, Trial
 from xq.tracking.registry import RegistryError, RunStatus
@@ -144,8 +147,8 @@ def effective_trials(returns: Mapping[str, pd.Series], params: TrialClusteringCo
     """Number of clusters of return series (see the module docstring)."""
     if len(returns) <= 1:
         return len(returns)
-    frame = pd.concat(returns, axis=1)
-    corr = frame.corr(min_periods=params.min_overlap).to_numpy(dtype=np.float64)
+    frame = pd.concat({name: daily_returns(r) for name, r in returns.items()}, axis=1)
+    corr = frame.corr(min_periods=params.min_common_days).to_numpy(dtype=np.float64)
     corr = np.nan_to_num(corr, nan=0.0)  # too little overlap: treat as independent
     np.fill_diagonal(corr, 1.0)
     distance = np.clip(1.0 - corr, 0.0, 2.0)
@@ -153,6 +156,20 @@ def effective_trials(returns: Mapping[str, pd.Series], params: TrialClusteringCo
     tree = linkage(squareform(distance, checks=False), method="average")
     labels = fcluster(tree, t=1.0 - params.correlation_threshold, criterion="distance")
     return len(np.unique(labels))
+
+
+def daily_returns(returns: pd.Series) -> pd.Series:
+    """A return series summed per trading day (17:00 New York roll); days without rows are absent.
+
+    Raises:
+        NaiveTimestampError: if the index is not tz-aware.
+    """
+    index = returns.index
+    if not isinstance(index, pd.DatetimeIndex) or index.tz is None:
+        raise NaiveTimestampError("trial returns need a tz-aware DatetimeIndex")
+    days = pd.DatetimeIndex(trading_days(index), name="trading_day")
+    daily: pd.Series = returns.astype(np.float64).groupby(days, sort=True).sum(min_count=1)
+    return daily.dropna()
 
 
 def _read_returns(path: Path) -> pd.Series:

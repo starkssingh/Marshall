@@ -11,7 +11,7 @@ with the repository, the repository wins.
 ## Current sprint
 
 - **Sprint:** 4 — evaluation spine (branch `sprint-4`, from `main` at `b64f059`).
-- **Next task:** the Sprint 3 review carry-overs below (C-4 … C-7), then WF-001.
+- **Next task:** the Sprint 3 review carry-overs below (C-5 … C-7), then WF-001.
 - **Sprint 4 order:** WF-001, WF-006, WF-002, WF-003, BT-001, BT-002, BT-003, BASE-006, VAL-001,
   VAL-002, VAL-005, VAL-007, BASE-001, BASE-002, BASE-005 — synthetic data only.
 - **Hold point:** before VAL-007, the proposed `config/gates.yaml` goes to the owner, and work waits
@@ -24,8 +24,8 @@ with the repository, the repository wins.
 | --- | --- | --- | --- | --- |
 | C-1 | Record the Sprint 3 review decisions in one ADR | Sprint 3 review | Claude | `4c67cfe` (ADR 0026) |
 | C-2 | Fill-delay diagnostic: count fills delayed > 5 s in target-build output | Sprint 3 review | Claude | `5ebfa87` |
-| C-3 | Rollover window 16:45–18:15 America/New_York (US release window unchanged) | Sprint 3 review | Claude | `feat(datasets): DS-007 rollover clock window` (hash recorded in the next commit) |
-| C-4 | Trial clustering: keep ρ 0.7, require 60 common daily points | Sprint 3 review | Claude | open |
+| C-3 | Rollover window 16:45–18:15 America/New_York (US release window unchanged) | Sprint 3 review | Claude | `3d141a1` |
+| C-4 | Trial clustering: keep ρ 0.7, require 60 common daily points | Sprint 3 review | Claude | `feat(tracking): EXP-004 trial clustering on trading-day returns` (hash recorded in the next commit) |
 | C-5 | Trading-time horizons (market-open minutes only) and a `crosses_close` target column; leakage tests and `label_end` checks updated | Sprint 3 review | Claude | open |
 | C-6 | Rebuild the Docker image and run the suite inside it (`scipy` added unchecked) | Sprint 3 review | Claude | open |
 | C-7 | `resample_causal` must respect availability (latency argument, test with latency > 0) | Sprint 3 review | Claude | open |

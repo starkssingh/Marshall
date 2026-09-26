@@ -486,10 +486,11 @@ class TargetSetConfig(FrozenModel):
 
 
 class TrialClusteringConfig(FrozenModel):
-    """How the effective number of independent trials is estimated (EXP-004)."""
+    """How the effective number of independent trials is estimated (EXP-004, ADR 0026)."""
 
     correlation_threshold: float = Field(gt=0, lt=1)
-    min_overlap: int = Field(gt=1)
+    #: Pairs of trials with fewer common trading days (daily-summed returns) are independent.
+    min_common_days: int = Field(gt=1)
 
 
 class ExperimentsConfig(FrozenModel):
