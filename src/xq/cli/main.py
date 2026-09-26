@@ -262,7 +262,15 @@ def validate_command(
         bool,
         typer.Option(
             "--include-vault",
-            help="Also validate vault days (release-gate procedure only; recorded on the run).",
+            help="Also validate vault days. Release-gate procedure only (ADR 0013); needs "
+            "--i-understand-vault-access, is logged and is recorded on the run.",
+        ),
+    ] = False,
+    vault_access_confirmed: Annotated[
+        bool,
+        typer.Option(
+            "--i-understand-vault-access",
+            help="Confirm that --include-vault reads the vault (the untouchable holdout).",
         ),
     ] = False,
 ) -> None:
@@ -277,11 +285,13 @@ def validate_command(
             start=start.date() if start else None,
             end=end.date() if end else None,
             include_vault=include_vault,
+            vault_access_confirmed=vault_access_confirmed,
         )
     totals = result.summary["totals"]
+    vault_note = "; includes vault days" if include_vault else ""
     typer.echo(
         f"quality run {result.run_id}: {len(result.days)} trading day(s); "
-        f"{totals['pass']} pass, {totals['warn']} warn, {totals['fail']} fail"
+        f"{totals['pass']} pass, {totals['warn']} warn, {totals['fail']} fail{vault_note}"
     )
     for check_id, row in result.summary["checks"].items():
         if row["warn"] or row["fail"]:

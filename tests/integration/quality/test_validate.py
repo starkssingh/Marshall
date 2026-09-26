@@ -5,11 +5,13 @@ from datetime import date
 from pathlib import Path
 
 import pytest
+import structlog
 from sqlalchemy import func, select
 from typer.testing import CliRunner
 
 from helpers.pipeline import REPO, config, run_pipeline
 from xq.cli.main import app
+from xq.core.errors import VaultAccessError
 from xq.quality.registry import Status
 from xq.quality.validate import NoQualityDataError, validate_source
 from xq.tracking.db import session_factory
@@ -98,20 +100,67 @@ def test_vault_days_need_explicit_inclusion(tmp_path: Path, clean_week_dir: Path
         cfg, engine, "mt5_primary", run_id="01QRUN000000000000000000AD", git_sha="test"
     )
     assert default.days == WEEK[:3]
-    everything = validate_source(
-        cfg,
-        engine,
-        "mt5_primary",
-        run_id="01QRUN000000000000000000AE",
-        git_sha="test",
-        include_vault=True,
-    )
+    with pytest.raises(VaultAccessError, match="--i-understand-vault-access"):
+        validate_source(
+            cfg,
+            engine,
+            "mt5_primary",
+            run_id="01QRUN000000000000000000AH",
+            git_sha="test",
+            include_vault=True,
+        )
+    with structlog.testing.capture_logs() as events:
+        everything = validate_source(
+            cfg,
+            engine,
+            "mt5_primary",
+            run_id="01QRUN000000000000000000AE",
+            git_sha="test",
+            include_vault=True,
+            vault_access_confirmed=True,
+        )
     assert everything.days == WEEK
+    (access,) = [e for e in events if e["event"] == "vault_validation_access"]
+    assert access["log_level"] == "warning"
+    assert access["run_id"] == "01QRUN000000000000000000AE"
+    assert access["source_id"] == "mt5_primary"
+    assert access["vault_days"] == ["2024-03-14", "2024-03-15"]
     with session_factory(engine)() as session:
         flagged = session.get(QualityRunRecord, "01QRUN000000000000000000AE")
+        refused = session.get(QualityRunRecord, "01QRUN000000000000000000AH")
     assert flagged is not None
     assert flagged.includes_vault is True
+    assert refused is None
     engine.dispose()
+
+
+def test_cli_include_vault_needs_confirmation(tmp_path: Path, clean_week_dir: Path) -> None:
+    common = [
+        "--config-dir",
+        str(REPO / "config"),
+        "--set",
+        f"paths.root={tmp_path}",
+        "--set",
+        f"paths.migrations_dir={REPO / 'migrations'}",
+        "--set",
+        "logging.console=false",
+        "--set",
+        "vault.start=2024-03-13T21:00:00Z",
+    ]
+    runner = CliRunner()
+    for step in (["ingest", "--path", str(clean_week_dir)], ["clean"], ["build-bars"]):
+        result = runner.invoke(app, [*common, step[0], "--source", "mt5_primary", *step[1:]])
+        assert result.exit_code == 0, result.output
+    validate = [*common, "validate", "--source", "mt5_primary", "--include-vault"]
+    refused = runner.invoke(app, validate)
+    assert refused.exit_code == 2
+    assert "--i-understand-vault-access" in refused.output
+    confirmed = runner.invoke(app, [*validate, "--i-understand-vault-access"])
+    assert confirmed.exit_code == 0, confirmed.output
+    assert "5 trading day(s)" in confirmed.stdout
+    assert "includes vault days" in confirmed.stdout
+    log = (tmp_path / "logs" / "xq.jsonl").read_text().splitlines()
+    assert any(json.loads(line)["event"] == "vault_validation_access" for line in log)
 
 
 def test_missing_inputs_are_explained(tmp_path: Path, clean_week_dir: Path) -> None:
