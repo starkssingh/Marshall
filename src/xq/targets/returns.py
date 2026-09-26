@@ -9,7 +9,8 @@ For a decision at time t (a base bar's ``available_at``) and horizon h:
   ``mid`` is the symmetric research variant ``log(mid_exit / mid_entry)``;
 - ``label_start`` is the entry quote's time and ``label_end`` the exit quote's time;
 - if either fill would come more than ``max_fill_delay_s`` after its intended time (a weekend, a
-  holiday, an excluded day, the end of the data), there is no label: the value is missing.
+  holiday, an excluded day, the end of the data), there is no label: the value is missing;
+- ``fill_delay_s`` is the larger of the two fills' delays after their intended times.
 
 Never the signal bar's close and never mid for a trade: the spread is paid on both legs.
 
@@ -104,9 +105,10 @@ def compute(spec: TargetSpec, quotes: pd.DataFrame, sigma: pd.Series) -> pd.Data
     latency = pd.Timedelta(milliseconds=int(spec.params["execution_latency_ms"])).value
     delay = pd.Timedelta(seconds=float(spec.params["max_fill_delay_s"])).value
 
-    entry, entry_ok = _fill(ts, t + latency, delay)
-    exit_, exit_ok = _fill(ts, t + spec.horizon.value + latency, delay)
+    entry, entry_ok, entry_late = _fill(ts, t + latency, delay)
+    exit_, exit_ok, exit_late = _fill(ts, t + spec.horizon.value + latency, delay)
     ok = entry_ok & exit_ok
+    fill_delay = np.where(ok, np.maximum(entry_late, exit_late) / 1e9, np.nan)
     value = np.full(len(t), np.nan)
     if ok.any():
         e, x = entry[ok], exit_[ok]
@@ -135,6 +137,7 @@ def compute(spec: TargetSpec, quotes: pd.DataFrame, sigma: pd.Series) -> pd.Data
             "label_start": pd.to_datetime(stamps, unit="ns", utc=True),
             "label_end": pd.to_datetime(ends, unit="ns", utc=True),
             "scale": scale,
+            "fill_delay_s": fill_delay,
         },
         index=index,
     )
@@ -142,13 +145,17 @@ def compute(spec: TargetSpec, quotes: pd.DataFrame, sigma: pd.Series) -> pd.Data
 
 def _fill(
     ts: npt.NDArray[np.int64], intended: npt.NDArray[np.int64], delay: int
-) -> tuple[npt.NDArray[np.int64], npt.NDArray[np.bool_]]:
-    """Index of the first quote at or after each intended time, and whether it is timely."""
+) -> tuple[npt.NDArray[np.int64], npt.NDArray[np.bool_], npt.NDArray[np.int64]]:
+    """First quote at or after each intended time: its index, whether it is timely, its delay.
+
+    The delay (nanoseconds) is 0 where no quote follows.
+    """
     index = np.searchsorted(ts, intended, side="left")
     found = index < len(ts)
-    timely = np.zeros(len(intended), dtype=bool)
-    timely[found] = ts[index[found]] - intended[found] <= delay
-    return index.astype(np.int64), timely
+    late = np.zeros(len(intended), dtype=np.int64)
+    late[found] = ts[index[found]] - intended[found]
+    timely = found & (late <= delay)
+    return index.astype(np.int64), timely, late
 
 
 def _ns(index: pd.DatetimeIndex) -> npt.NDArray[np.int64]:

@@ -11,7 +11,7 @@
    Target builds now report how often fills were late: every labelled target row records its
    `fill_delay_s` (the later of its entry and exit fill, measured from the intended fill time),
    and the manifest and `xq dataset build` report, per target, the labelled rows, the number of
-   fills delayed by more than 5 s and the largest delay. The 5 s reporting threshold is
+   labels with a fill delayed by more than 5 s and the largest delay. The 5 s reporting threshold is
    configuration (`datasets.fill_delay_report_s`), not part of the target definition.
 2. **Event windows.** The US data release window stays `[08:30 − 5 min, 08:30 + 30 min)`. The
    rollover window becomes the New York clock window **16:45–18:15** on every day: the pre-close,

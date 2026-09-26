@@ -5,14 +5,16 @@
 - ``features.parquet`` — one row per complete base bar with ``start <= bar_start < end``, keyed by
   ``decision_time_utc`` (the bar's ``available_at``), computed by the spec's feature set;
 - ``targets.parquet`` — if the spec names a target set (TGT-001), the targets of every decision time
-  in long form (``target``, ``value``, ``label_start``, ``label_end``, ``scale``), computed from
-  clean ticks after the decision time; a schema guard keeps target columns out of the features;
+  in long form (``target``, ``value``, ``label_start``, ``label_end``, ``scale``,
+  ``fill_delay_s``), computed from clean ticks after the decision time; a schema guard keeps
+  target columns out of the features;
 - ``spec.yaml`` — the *resolved* spec (bar build, quality run and config digest pinned), from which
   the dataset can be rebuilt with the same id;
 - ``manifest.json`` — row count, decision-time range, column types, per-file and combined SHA-256,
-  git sha, code versions, bar sets, the quality run, and the quality gate's decision: how many
-  partitions were included, which carried warnings and which were excluded (with reasons and
-  failing checks).
+  git sha, code versions, bar sets, the quality run, the quality gate's decision (how many
+  partitions were included, which carried warnings and which were excluded, with reasons and
+  failing checks) and, with targets, the fill-delay diagnostic: per target, the labelled rows,
+  those with a fill more than ``datasets.fill_delay_report_s`` late and the largest delay.
 
 It also records a ``dataset_versions`` row. Data is read only through the catalog, so the vault is
 enforced. Every trading day the inputs touch passes the quality gate (DQ-007): FAIL or unvalidated
@@ -63,6 +65,7 @@ from xq.targets.base import (
     check_feature_matrix,
     compute_targets,
     definition_hash,
+    fill_delay_report,
     lock_target_set,
 )
 from xq.targets.kinds import target_kind
@@ -261,6 +264,14 @@ def build_dataset(cfg: AppConfig, engine: Engine, spec: DatasetSpec, *, git_sha:
             shutil.rmtree(staging)
 
     _record(engine, ds_id, resolved, manifest, final)
+    if "fill_delays" in manifest:
+        delays = manifest["fill_delays"]
+        log.info(
+            "target_fill_delays",
+            dataset_id=ds_id,
+            threshold_s=delays["threshold_s"],
+            delayed={n: r["delayed"] for n, r in delays["targets"].items()},
+        )
     log.info(
         "dataset_reproduced" if reproduced else "dataset_built",
         dataset_id=ds_id,
@@ -449,10 +460,15 @@ def _manifest(
         files[TARGETS_FILE] = sha256_file(directory / TARGETS_FILE)
         columns["targets"] = {str(c): str(t) for c, t in targets.dtypes.items()}
         definition = cfg.target_set(spec.target_set.name, spec.target_set.version)
+        threshold = cfg.datasets_config().fill_delay_report_s
         target_info = {
             "targets": sorted(targets["target"].unique().tolist()),
             "target_set_hash": definition_hash(definition),
             "target_rows": len(targets),
+            "fill_delays": {
+                "threshold_s": threshold,
+                "targets": fill_delay_report(targets, threshold),
+            },
         }
     combined = hashlib.sha256(
         "".join(f"{name}:{digest}\n" for name, digest in sorted(files.items())).encode()

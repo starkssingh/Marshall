@@ -14,6 +14,7 @@ from xq.targets.base import (
     check_feature_matrix,
     compute_targets,
     definition_hash,
+    fill_delay_report,
     target_values,
 )
 
@@ -24,7 +25,14 @@ def test_long_frame_has_one_row_per_decision_and_target() -> None:
     specs = KIND.expand(DEFINITION)
     frame = compute_targets(KIND, specs, pd.DataFrame(), pd.Series(1.0, index=T))
     assert frame.index.name == "decision_time"
-    assert list(frame.columns) == ["target", "value", "label_start", "label_end", "scale"]
+    assert list(frame.columns) == [
+        "target",
+        "value",
+        "label_start",
+        "label_end",
+        "scale",
+        "fill_delay_s",
+    ]
     assert len(frame) == len(T) * 4
     assert frame["target"].iloc[:4].tolist() == sorted(s.name for s in specs)
     one = target_values(frame, "stub_long_1h")
@@ -65,3 +73,17 @@ def test_definition_hash_and_validation() -> None:
         TargetSetConfig(kind="stub", horizons=["1h", "1h"], price_refs=["long"])
     with pytest.raises(ValueError, match="invalid horizon"):
         TargetSetConfig(kind="stub", horizons=["soon"], price_refs=["long"])
+
+
+def test_fill_delay_report_counts_labelled_rows_with_a_late_fill() -> None:
+    frame = pd.DataFrame(
+        {
+            "target": ["a", "a", "a", "a", "b"],
+            "value": [0.1, 0.2, float("nan"), 0.3, float("nan")],
+            "fill_delay_s": [0.4, 7.25, float("nan"), 5.0, float("nan")],
+        }
+    )
+    assert fill_delay_report(frame, 5.0) == {
+        "a": {"labelled": 3, "delayed": 1, "max_delay_s": 7.25},  # 5.0 is not more than 5 s
+        "b": {"labelled": 0, "delayed": 0, "max_delay_s": None},
+    }

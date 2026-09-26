@@ -343,6 +343,12 @@ def dataset_build(
         f"{manifest['decision_time_first']} to {manifest['decision_time_last']}; "
         f"sha256 {manifest['sha256'][:16]}"
     )
+    if "fill_delays" in manifest:
+        delays = manifest["fill_delays"]
+        typer.echo(f"labels with a fill more than {delays['threshold_s']:g} s late:")
+        for name, row in delays["targets"].items():
+            largest = "n/a" if row["max_delay_s"] is None else f"{row['max_delay_s']:g} s"
+            typer.echo(f"  {name}: {row['delayed']} of {row['labelled']} labelled (max {largest})")
     typer.echo(f"path: {ref.path}")
 
 

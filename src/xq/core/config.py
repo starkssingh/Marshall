@@ -478,6 +478,13 @@ class ExperimentsConfig(FrozenModel):
     trial_clustering: TrialClusteringConfig
 
 
+class DatasetsConfig(FrozenModel):
+    """Dataset builder settings (``datasets:`` in ``config/base.yaml``)."""
+
+    #: Target builds report the labels with a fill later than this after its intended time.
+    fill_delay_report_s: float = Field(gt=0)
+
+
 class SourceConfig(FrozenModel):
     """A declared market-data source (DATA-003). The clock convention is part of its identity."""
 
@@ -536,6 +543,7 @@ class AppConfig(BaseSettings):
     bars: BarsConfig | None = None
     quality: QualityConfig | None = None
     experiments: ExperimentsConfig | None = None
+    datasets: DatasetsConfig | None = None
     targets: dict[str, dict[str, TargetSetConfig]] = {}
     secrets: SecretsConfig = SecretsConfig()
 
@@ -613,6 +621,12 @@ class AppConfig(BaseSettings):
         if self.experiments is None:
             raise ConfigError("no experiments configuration (experiments: in config/base.yaml)")
         return self.experiments
+
+    def datasets_config(self) -> DatasetsConfig:
+        """Return the dataset builder settings; raise if they are not configured."""
+        if self.datasets is None:
+            raise ConfigError("no datasets configuration (datasets: in config/base.yaml)")
+        return self.datasets
 
     def sessions_config(self) -> SessionsConfig:
         """Return the calendar and session configuration; raise if it is not configured."""

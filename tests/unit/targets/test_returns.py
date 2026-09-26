@@ -57,6 +57,14 @@ def test_fills_on_the_correct_side_after_the_latency(ref: str, expected: float) 
     assert np.isnan(out["scale"].iloc[0])
 
 
+def test_fill_delay_is_the_later_fill_after_its_intended_time() -> None:
+    out = compute(spec("long"), QUOTES, sigma(T0, T0 + pd.Timedelta(minutes=15)))
+    # entry intended at t0 + 1 s, filled at t0 + 2 s; exit intended at t0 + 1h + 1 s, filled 0.5 s
+    # later: the label's delay is the larger one
+    assert out["fill_delay_s"].iloc[0] == pytest.approx(1.0)
+    assert np.isnan(out["fill_delay_s"].iloc[1])  # no label, no delay
+
+
 def test_no_label_when_the_fill_comes_too_late_or_never() -> None:
     later = T0 + pd.Timedelta(minutes=15)  # next quote after later + 1 s is 45 minutes away
     out = compute(spec("long"), QUOTES, sigma(T0, later))
@@ -74,6 +82,7 @@ def test_zero_latency_fills_at_quotes_exactly_at_the_intended_times() -> None:
     assert out["label_start"].iloc[0] == at
     assert out["label_end"].iloc[0] == at + H
     assert out["value"].iloc[0] == pytest.approx(np.log(101.5 / 100.2))
+    assert out["fill_delay_s"].iloc[0] == 0.0
 
 
 def test_vol_normalized_variant_divides_by_sigma_at_t_scaled_to_the_horizon() -> None:

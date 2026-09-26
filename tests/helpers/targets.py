@@ -18,6 +18,7 @@ def stub_compute(spec: TargetSpec, quotes: pd.DataFrame, sigma: pd.Series) -> pd
             "label_start": index,
             "label_end": index + spec.horizon,
             "scale": np.nan,
+            "fill_delay_s": 0.0,
         },
         index=index,
     )

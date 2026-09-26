@@ -91,6 +91,24 @@ def test_label_windows_are_bounded_and_markets_closures_give_no_label(
     )  # the exit falls in the daily break
 
 
+def test_manifest_reports_labels_with_late_fills(cfg: AppConfig, engine: Engine) -> None:
+    ref = build_dataset(cfg, engine, dataset_spec(target_set=FWD), git_sha="t")
+    targets = load_dataset(cfg, ref.dataset_id, "targets")
+    report = ref.manifest["fill_delays"]
+    assert report["threshold_s"] == cfg.datasets_config().fill_delay_report_s == 5
+    assert set(report["targets"]) == set(targets["target"])
+    for name, row in report["targets"].items():
+        one = target_values(targets, name)
+        labelled = one["value"].notna()
+        assert row["labelled"] == labelled.sum() > 0
+        assert row["delayed"] == (one.loc[labelled, "fill_delay_s"] > 5).sum()
+        assert row["max_delay_s"] == pytest.approx(
+            one.loc[labelled, "fill_delay_s"].max(), abs=1e-3
+        )
+        assert (one.loc[labelled, "fill_delay_s"] >= 0).all()
+        assert one.loc[~labelled, "fill_delay_s"].isna().all()
+
+
 def test_quotes_of_excluded_days_are_never_used(cfg: AppConfig, engine: Engine) -> None:
     exclusion = [{"trading_day": "2024-03-14", "reason": "test exclusion"}]
     ref = build_dataset(
@@ -137,6 +155,8 @@ def test_cli_builds_a_dataset_with_targets(tmp_path: Path, clean_week_dir: Path)
     manifest = yaml.safe_load(shown.stdout)
     assert "targets.parquet" in manifest["files"]
     assert len(manifest["targets"]) == 24
+    assert "labels with a fill more than 5 s late:" in built.stdout
+    assert "fwd_ret_long_1h: " in built.stdout
 
 
 def test_a_decision_exactly_at_the_vault_start_gets_no_label(

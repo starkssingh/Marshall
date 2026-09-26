@@ -233,6 +233,10 @@ IDs from `docs/specs/development-plan.md`.
   closing commits, open owner decisions, provisional assumptions, known issues and per-phase
   status; `CLAUDE.md` gains a session protocol (read it after `CLAUDE.md`, keep it current, record
   chat decisions in an ADR and in it the same session, the repository wins over memory).
+- TGT-002 fill-delay diagnostic (ADR 0026, C-2): every target row records `fill_delay_s` (the
+  later fill's delay after its intended time); the manifest (`fill_delays`) and
+  `xq dataset build` report per target the labelled rows, those with a fill more than
+  `datasets.fill_delay_report_s` (5 s) late and the largest delay. Values are unchanged.
 - ADR 0026 records the owner's Sprint 3 review decisions: latency 1 s and fill delay 300 s kept
   (with a new fill-delay diagnostic), rollover window 16:45–18:15 New York, trial clustering on
   60 common trading days, trading-time horizons with a `crosses_close` flag, `ds_base.yaml` start
