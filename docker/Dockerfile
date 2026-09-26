@@ -21,6 +21,8 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 
 COPY src ./src
 COPY config ./config
+COPY migrations ./migrations
+COPY alembic.ini ./
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --locked --no-dev
 

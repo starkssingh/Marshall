@@ -20,6 +20,7 @@ import yaml
 import xq
 from xq.core.config import AppConfig, config_as_dict, config_hash, load_config, parse_override
 from xq.core.errors import XQError
+from xq.tracking.db import current_revision, engine_for, head_revision, upgrade_to_head
 
 EXIT_USAGE_ERROR = 2
 
@@ -110,6 +111,39 @@ def config_show(
     else:
         typer.echo(f"# profile: {cfg.profile}\n# config_hash: {config_hash(cfg)}")
         typer.echo(yaml.safe_dump(data, sort_keys=False, allow_unicode=True).rstrip())
+
+
+db_app = typer.Typer(help="Metadata database migrations.", no_args_is_help=True)
+app.add_typer(db_app, name="db")
+
+
+@db_app.command("upgrade")
+def db_upgrade(ctx: typer.Context) -> None:
+    """Apply pending migrations to the configured metadata database."""
+    state: CliContext = ctx.obj
+    with cli_errors():
+        cfg = state.config
+    engine = engine_for(cfg)
+    try:
+        upgrade_to_head(engine, cfg.paths.resolve(cfg.paths.migrations_dir))
+        typer.echo(f"metadata database at revision {current_revision(engine)}")
+    finally:
+        engine.dispose()
+
+
+@db_app.command("current")
+def db_current(ctx: typer.Context) -> None:
+    """Show the metadata database's migration revision and the newest available one."""
+    state: CliContext = ctx.obj
+    with cli_errors():
+        cfg = state.config
+    engine = engine_for(cfg)
+    try:
+        current = current_revision(engine) or "none"
+        head = head_revision(cfg.paths.resolve(cfg.paths.migrations_dir)) or "none"
+        typer.echo(f"current: {current}\nhead: {head}")
+    finally:
+        engine.dispose()
 
 
 # Command groups for later phases. Each is registered now so the CLI surface is stable; the

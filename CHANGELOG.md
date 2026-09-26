@@ -48,6 +48,11 @@ IDs from `docs/specs/development-plan.md`.
   trading day with market hours, Tokyo/London/New York sessions, the London–New York overlap and
   LBMA, COMEX, US-data and rollover anchors, all in UTC. Local times must be quoted `"HH:MM"`
   strings. Defaults recorded in ADR 0002.
+- DATA-005: metadata database — SQLAlchemy 2 models (`xq.tracking.models`) for `data_sources`,
+  `instruments`, `ingest_runs`, `raw_files`, `clean_partitions`, `cleaning_actions`, `bar_sets`,
+  `bar_gaps` and `spread_stats`; instants stored as UTC int64 nanoseconds, contract terms as exact
+  decimal text; Alembic migration `0001` (plain SQLAlchemy types only); SQLite foreign keys
+  enforced; `xq db upgrade` and `xq db current`.
 
 ### Changed
 

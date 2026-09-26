@@ -62,3 +62,26 @@ def test_unknown_profile_is_a_clean_usage_error() -> None:
     assert result.exit_code == 2
     assert "unknown profile 'nope'" in result.stderr
     assert "Traceback" not in result.output
+
+
+def test_db_upgrade_and_current(tmp_path: Path) -> None:
+    migrations = str(Path(REPO_CONFIG).parent / "migrations")
+    common = [
+        "--config-dir",
+        REPO_CONFIG,
+        "--set",
+        f"paths.root={tmp_path}",
+        "--set",
+        f"paths.migrations_dir={migrations}",
+    ]
+    result = runner.invoke(app, [*common, "db", "current"])
+    assert result.exit_code == 0, result.output
+    assert result.stdout.splitlines() == ["current: none", "head: 0001"]
+
+    result = runner.invoke(app, [*common, "db", "upgrade"])
+    assert result.exit_code == 0, result.output
+    assert "revision 0001" in result.stdout
+    assert (tmp_path / "data" / "metadata.sqlite").is_file()
+
+    result = runner.invoke(app, [*common, "db", "current"])
+    assert result.stdout.splitlines() == ["current: 0001", "head: 0001"]
