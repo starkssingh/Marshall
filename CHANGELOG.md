@@ -123,6 +123,15 @@ IDs from `docs/specs/development-plan.md`.
 
 ### Changed
 
+- ADR 0013 records the owner's decisions on the Sprint 2 open questions: quality thresholds
+  ratified as provisional (one change allowed, by ADR, after the DQ-008 real-data review; never
+  after a strategy result exists); hour-of-week spread buckets kept until DQ-008; exact duplicates
+  stay flagged in the clean store and excluded from bars; vault-period validation belongs to
+  GATE-002; the broker and calendar stay pending, so Sprint 2 stays "implemented and tested, not
+  validated".
+- `xq validate --include-vault` now refuses to run without `--i-understand-vault-access`
+  (`validate_source(..., vault_access_confirmed=True)` for library callers) and logs a
+  `vault_validation_access` warning naming the run, source and vault days on every use (ADR 0013).
 - Dependencies pinned to `pandas>=2.2,<3` (the plan specifies pandas 2.x; pandas 3 changes datetime
   resolution inference) and `numpy<2.5` (numpy 2.5 raises deprecation errors inside pandas 2.3).
 - `CLAUDE.md` no longer marks `docs/specs/project-instructions.md` as missing: the owner committed

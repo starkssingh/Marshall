@@ -1,6 +1,6 @@
 # ADR 0012 — Quality runs, report and vault handling in `xq validate`
 
-- **Status:** accepted
+- **Status:** accepted; §3 (vault) refined by ADR 0013
 - **Date:** 2026-09-26
 - **Tasks:** DQ-006 (refines ADR 0010 §5 for quality checks)
 
@@ -25,7 +25,8 @@ gate needs validated vault data.
 3. **Vault.** `xq validate` covers only trading days that end at or before `vault.start` unless
    `--include-vault` is given. That flag exists for the release-gate procedure (GATE-001/002),
    is recorded as `quality_runs.includes_vault`, and should not be used during research: the
-   report's anomalies show prices and times, so a vault report is a look at the holdout.
+   report's anomalies show prices and times, so a vault report is a look at the holdout. ADR 0013
+   adds a required `--i-understand-vault-access` confirmation and a log line for every use.
 4. **Persistence.** Migration 0002 adds `quality_runs` (window, rules and build versions,
    `includes_vault`, git sha, config hash, report path, summary JSON) and `quality_results` (one
    row per run, partition and check: severity, metric, thresholds, status, details with the kept

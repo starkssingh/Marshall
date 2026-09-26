@@ -7,8 +7,9 @@ source's data coverage — grades every registered check, stores the results in 
 ``quality_results`` and writes a report to ``reports/quality/<run_id>/``.
 
 Validation is a pipeline stage, not a research read (ADR 0010). By default it covers only days
-before ``vault.start``; ``include_vault`` exists for the release-gate procedure and is recorded on
-the run.
+before ``vault.start``. Vault-period validation belongs to the release gate (GATE-002, ADR 0013):
+``include_vault`` also needs ``vault_access_confirmed``, every confirmed use logs a
+``vault_validation_access`` warning, and the run is recorded with ``includes_vault``.
 """
 
 from __future__ import annotations
@@ -24,7 +25,7 @@ import pandas as pd
 from sqlalchemy import Engine, func, select
 
 from xq.core.config import AppConfig, config_hash
-from xq.core.errors import XQError
+from xq.core.errors import VaultAccessError, XQError
 from xq.core.logging import get_logger
 from xq.core.time import to_ns, trading_day_bounds, utc_now
 from xq.core.types import Timeframe
@@ -83,8 +84,24 @@ def validate_source(
     start: date | None = None,
     end: date | None = None,
     include_vault: bool = False,
+    vault_access_confirmed: bool = False,
 ) -> ValidationResult:
-    """Grade every registered check on every selected trading day of `source_id`."""
+    """Grade every registered check on every selected trading day of `source_id`.
+
+    Args:
+        include_vault: Also validate trading days that end after ``vault.start``. Reserved for the
+            release-gate procedure (ADR 0013); requires `vault_access_confirmed`.
+        vault_access_confirmed: The caller's explicit acknowledgement that vault days will be
+            read (``--i-understand-vault-access`` on the CLI).
+
+    Raises:
+        VaultAccessError: `include_vault` without `vault_access_confirmed`.
+    """
+    if include_vault and not vault_access_confirmed:
+        raise VaultAccessError(
+            "validating vault days is part of the release-gate procedure (GATE-002, ADR 0013); "
+            "pass --i-understand-vault-access together with --include-vault to confirm"
+        )
     quality = cfg.quality_config()
     registry = load_builtin_checks()
     validate_thresholds(registry, quality)
@@ -122,8 +139,17 @@ def validate_source(
             if first is not None and last is not None
         ]
     days = [d for d in days if (start is None or d >= start) and (end is None or d <= end)]
+    vault_days = [d for d in days if to_ns(trading_day_bounds(d)[1]) > vault_ns]
     if not include_vault:
-        days = [d for d in days if to_ns(trading_day_bounds(d)[1]) <= vault_ns]
+        days = [d for d in days if d not in vault_days]
+    elif vault_days:
+        log.warning(
+            "vault_validation_access",
+            run_id=run_id,
+            source_id=source_id,
+            vault_start=str(cfg.vault.start),
+            vault_days=[d.isoformat() for d in vault_days],
+        )
     if not days:
         raise NoQualityDataError(
             f"no clean partitions of {source_id!r} to validate in the requested window "
