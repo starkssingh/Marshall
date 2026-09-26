@@ -408,12 +408,21 @@ def _targets(
     for _, chunk in sigma.groupby(months, sort=True):
         start = chunk.index[0]
         end = min(chunk.index[-1] + lookahead + pd.Timedelta(seconds=1), vault)
-        ticks = catalog.load_ticks(spec.source, spec.instrument, start, end)
-        usable = (ticks["flags"].to_numpy() & mask) == 0
-        if excluded and len(ticks):
-            days = trading_days(pd.DatetimeIndex(ticks["ts_utc"]))
-            usable &= ~pd.Series([d.item() for d in days]).isin(excluded).to_numpy()
-        quotes = ticks.loc[usable, ["ts_utc", "bid", "ask"]].reset_index(drop=True)
+        if end <= start:  # decisions at the vault start: every fill would need vault quotes
+            quotes = pd.DataFrame(
+                {
+                    "ts_utc": pd.Series(dtype="datetime64[ns, UTC]"),
+                    "bid": pd.Series(dtype="float64"),
+                    "ask": pd.Series(dtype="float64"),
+                }
+            )
+        else:
+            ticks = catalog.load_ticks(spec.source, spec.instrument, start, end)
+            usable = (ticks["flags"].to_numpy() & mask) == 0
+            if excluded and len(ticks):
+                days = trading_days(pd.DatetimeIndex(ticks["ts_utc"]))
+                usable &= ~pd.Series([d.item() for d in days]).isin(excluded).to_numpy()
+            quotes = ticks.loc[usable, ["ts_utc", "bid", "ask"]].reset_index(drop=True)
         frames.append(compute_targets(kind, specs, quotes, chunk))
     return pd.concat(frames)
 

@@ -246,6 +246,9 @@ IDs from `docs/specs/development-plan.md`.
 
 ### Fixed
 
+- Dataset targets: a month of decisions whose only decision time is exactly `vault.start` no longer
+  asks the catalog for an empty tick window (which it rejects); those decisions get no label,
+  since every fill would need vault quotes.
 - `asof_join` no longer fails with an `IndexError` when the right frame is empty (for example,
   context bars truncated before the first one is available); every row gets no match. Found by
   the DS-006 leakage harness.

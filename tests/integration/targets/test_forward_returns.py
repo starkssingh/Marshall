@@ -137,3 +137,18 @@ def test_cli_builds_a_dataset_with_targets(tmp_path: Path, clean_week_dir: Path)
     manifest = yaml.safe_load(shown.stdout)
     assert "targets.parquet" in manifest["files"]
     assert len(manifest["targets"]) == 24
+
+
+def test_a_decision_exactly_at_the_vault_start_gets_no_label(
+    tmp_path: Path, clean_week_dir: Path
+) -> None:
+    vaulted = config(tmp_path, **{"vault.start": "2024-03-14T21:00:00Z"})
+    engine = validated_pipeline(vaulted, clean_week_dir)
+    spec = dataset_spec(
+        target_set=FWD, start="2024-03-14T20:45:00Z", end="2024-03-14T21:00:00Z", warmup="1D"
+    )
+    ref = build_dataset(vaulted, engine, spec, git_sha="t")
+    targets = load_dataset(vaulted, ref.dataset_id, "targets")
+    assert targets.index.unique().tolist() == [pd.Timestamp("2024-03-14 21:00", tz="UTC")]
+    assert targets["value"].isna().all()  # every fill would need quotes from the vault
+    engine.dispose()
