@@ -15,3 +15,7 @@ class ConfigError(XQError):
 
 class NaiveTimestampError(XQError, ValueError):
     """A timestamp without a timezone reached code that requires tz-aware values."""
+
+
+class ClockConventionError(XQError, ValueError):
+    """A clock convention is malformed, or timestamps are inconsistent with the declared one."""

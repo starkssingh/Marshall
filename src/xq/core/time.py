@@ -10,15 +10,19 @@ Binding conventions (development plan, section 1):
 
 from __future__ import annotations
 
+import re
 from collections.abc import Sequence
+from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta
+from enum import StrEnum
 from typing import Final
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import numpy as np
 import numpy.typing as npt
 import pandas as pd
 
-from xq.core.errors import NaiveTimestampError
+from xq.core.errors import ClockConventionError, NaiveTimestampError
 
 UTC: Final = "UTC"
 NEW_YORK: Final = "America/New_York"
@@ -101,3 +105,75 @@ def local_time_to_utc(day: date, at: time, tz: str) -> pd.Timestamp:
     if pd.isna(local):
         raise ValueError(f"{wall} is not a unique local time in {tz} (DST change)")
     return local.tz_convert(UTC)
+
+
+class ClockKind(StrEnum):
+    """How a source's timestamps relate to UTC."""
+
+    UTC = "utc"
+    FIXED = "fixed"
+    IANA = "iana"
+    NY_CLOSE = "ny_close"
+
+
+@dataclass(frozen=True)
+class ClockConvention:
+    """The clock a data source's timestamps are written in (DATA-003 / DATA-006).
+
+    Text forms (as stored in config and in ``data_sources.clock_convention``):
+
+    - ``UTC``: timestamps are UTC.
+    - ``UTC+02:00`` / ``UTC-05:00``: a fixed offset with no DST.
+    - ``tz:Europe/Athens``: wall-clock time in an IANA zone, with that zone's DST rules.
+    - ``NY+7``: New York wall-clock time shifted by +7 hours. This is the usual MT4/MT5 broker
+      "server time" (UTC+2 in US winter, UTC+3 in US summer): its midnight is 17:00 New York, and
+      it changes offset on the US DST dates, not the EU ones. It is not the same as any IANA zone.
+    """
+
+    kind: ClockKind
+    offset_minutes: int = 0
+    tz: str | None = None
+    shift_hours: int = 0
+
+    @classmethod
+    def parse(cls, text: str) -> ClockConvention:
+        """Parse a clock convention from its text form; raise `ClockConventionError`."""
+        value = text.strip()
+        if value.upper() == "UTC":
+            return cls(ClockKind.UTC)
+        if match := _FIXED_CLOCK.match(value):
+            sign = 1 if match["sign"] == "+" else -1
+            minutes = sign * (int(match["h"]) * 60 + int(match["m"]))
+            if abs(minutes) > 14 * 60:
+                raise ClockConventionError(f"UTC offset out of range in {text!r}")
+            return cls(ClockKind.FIXED, offset_minutes=minutes)
+        if value.startswith("tz:"):
+            zone = value[3:]
+            try:
+                ZoneInfo(zone)
+            except (ZoneInfoNotFoundError, ValueError) as exc:
+                raise ClockConventionError(f"unknown IANA time zone in {text!r}") from exc
+            return cls(ClockKind.IANA, tz=zone)
+        if match := _NY_CLOSE_CLOCK.match(value):
+            shift = int(match["shift"])
+            if not -12 <= shift <= 12:
+                raise ClockConventionError(f"New York shift out of range in {text!r}")
+            return cls(ClockKind.NY_CLOSE, tz=NEW_YORK, shift_hours=shift)
+        raise ClockConventionError(
+            f"unknown clock convention {text!r}; expected UTC, UTC+HH:MM, tz:<IANA zone> or NY+N"
+        )
+
+    def __str__(self) -> str:
+        if self.kind is ClockKind.UTC:
+            return "UTC"
+        if self.kind is ClockKind.FIXED:
+            sign = "+" if self.offset_minutes >= 0 else "-"
+            hours, minutes = divmod(abs(self.offset_minutes), 60)
+            return f"UTC{sign}{hours:02d}:{minutes:02d}"
+        if self.kind is ClockKind.IANA:
+            return f"tz:{self.tz}"
+        return f"NY{self.shift_hours:+d}"
+
+
+_FIXED_CLOCK = re.compile(r"^UTC(?P<sign>[+-])(?P<h>\d{2}):(?P<m>\d{2})$", re.IGNORECASE)
+_NY_CLOSE_CLOCK = re.compile(r"^NY(?P<shift>[+-]\d{1,2})$", re.IGNORECASE)

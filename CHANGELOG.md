@@ -53,6 +53,11 @@ IDs from `docs/specs/development-plan.md`.
   `bar_gaps` and `spread_stats`; instants stored as UTC int64 nanoseconds, contract terms as exact
   decimal text; Alembic migration `0001` (plain SQLAlchemy types only); SQLite foreign keys
   enforced; `xq db upgrade` and `xq db current`.
+- DATA-006: UTC normalization (`xq.data.normalize`) — `ClockConvention` (`UTC`, `UTC±HH:MM`,
+  `tz:<zone>`, `NY±N` for MT5 broker server time) and `normalize_local_times`, which converts
+  source-clock timestamps to UTC int64 nanoseconds, flags DST-ambiguous, DST-nonexistent and
+  out-of-order rows (`xq.data.flags.TickFlag`) without dropping any, and gives a stable canonical
+  order. ADR 0003.
 
 ### Changed
 
