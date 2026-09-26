@@ -908,7 +908,7 @@ flowchart TD
 
 ARCH-001 → ARCH-003 → DATA-003 → DATA-006 → DATA-007 → DATA-008 → DATA-010 → DS-005 → TGT-001 → WF-001 → WF-002 → BASE-005 → VOL-003 → VOL-006 → FEAT-001 → FEAT-005 → TGT-005 → ML-002 → ML-005 → BT-004 → BT-005 → RISK-005 → SIGNAL-004 → ROB-008 → MREG-002 → GATE-001 → PAPER-001 → PAPER-005 → GATE-004.
 
-A slip on any of these delays the release gate. Two of them are also research decision points: after BASE-005 and ML-005 the project may conclude that no candidate exists.
+This chain follows the build order, so some links are research dependencies rather than code dependencies: the event backtester (BT-004) needs no ML code, but it has nothing worth testing until ML-005 or a baseline yields a candidate. A slip on any of these delays the release gate. Two of them are also research decision points: after BASE-005 and ML-005 the project may conclude that no candidate exists.
 
 ### Blocking tasks
 
@@ -1067,215 +1067,6 @@ These unblock the most downstream work and should never be left half-finished at
 | VAL-006 | Holm and BH corrections by family | P1 | EXP-004 | S | Reference values | `src/xq/validation/multiple_testing.py` |
 | VAL-007 | Evidence policy config and loader | P0 | VAL-002 | S | Gates load and validate | `config/gates.yaml` |
 
-## 10. Sprint plan for Claude Code
-
-Sixteen sprints, each ending in a working system verified by commands and tests. Sprints 1–4 build a thin end-to-end slice (raw ticks → walk-forward baseline report after costs) before any research. Tasks within a sprint are listed in implementation order.
-
-### Sprint 1 — Skeleton and raw ingestion
-
-- **Tasks:** ARCH-001, ARCH-002, ARCH-003, ARCH-004, ARCH-005, ARCH-006, ARCH-007, ARCH-008, DATA-001, DATA-002, DATA-005, DATA-003, DATA-004, DATA-006.
-- **Working system:** `xq ingest --source <primary> --path tests/fixtures/ticks/` writes the immutable raw store, Parquet mirror and manifest rows; a second run is a no-op.
-- **Verification:** CI green; DST conversion tests and session tests pass; raw files are read-only.
-
-### Sprint 2 — Clean ticks, bars and data quality
-
-- **Tasks:** DATA-007, DATA-008, DATA-009, DATA-010, DQ-001, DQ-002, DQ-003, DQ-004, DQ-006, DQ-008.
-- **Working system:** `xq build-bars` produces 7 timeframes × bid/ask/mid; `xq validate` produces a quality report for at least one year of real data.
-- **Verification:** bar property tests; bit-identical rebuild; injected-defect tests; quality review document committed.
-
-### Sprint 3 — Datasets, leakage harness, experiment registry
-
-- **Tasks:** DS-001, DS-002, DS-003, DS-004, DS-006, DS-005, DS-007, DQ-007, EXP-001, EXP-002, EXP-003, EXP-004, TGT-001, TGT-002.
-- **Working system:** `xq dataset build experiments/configs/ds_base.yaml` materializes a versioned dataset with forward-return targets; hypotheses can be registered; runs are recorded.
-- **Verification:** the harness catches all five planted leaks; vault access raises; dataset sha256 reproducible.
-
-### Sprint 4 — Evaluation spine (first end-to-end slice)
-
-- **Tasks:** WF-001, WF-006, WF-002, WF-003, BT-001, BT-002, BT-003, BASE-006, VAL-001, VAL-002, VAL-005, VAL-007, BASE-001, BASE-002, BASE-005.
-- **Working system:** `xq baselines run --dataset <id>` produces a walk-forward, net-of-cost baseline board with Sharpe CIs and DSR using the registered trial count.
-- **Verification:** splitter property tests; golden cost and P&L cases; statistics match references; purging demonstration test.
-- **Note:** this is the platform's first honest answer to "do simple strategies make money after costs?" Record it as experiment H-0001.
-
-### Sprint 5 — Exploratory research and horizon admission
-
-- **Tasks:** EDA-001, EDA-006, EDA-002, EDA-003, EDA-004, EDA-005, EXP-005, DATA-013.
-- **Working system:** `xq research eda --dataset <id>` regenerates the EDA report on the discovery window; `config/horizons.yaml` lists admitted horizons; secondary long-history feed ingested if broker history is too short.
-- **Verification:** deterministic report build; every seasonal effect has CI and stability flag; hypotheses backlog written and top items pre-registered.
-
-### Sprint 6 — Statistical and volatility research
-
-- **Tasks:** STAT-001, STAT-002, STAT-003, STAT-006, STAT-008, VOL-001, VOL-002, VOL-003, VOL-004, VOL-005, VOL-006, BASE-003.
-- **Working system:** statistical verdict report; volatility model board; the selected `VolForecaster` serves σ̂ to datasets.
-- **Verification:** every method passes simulation recovery before running on gold; all volatility models evaluated on identical folds.
-
-### Sprint 7 — Features and targets
-
-- **Tasks:** FEAT-001, FEAT-002, FEAT-003, FEAT-004, FEAT-006, FEAT-005, FEAT-008, TGT-003, TGT-004, TGT-005, TGT-006, WF-004, WF-005.
-- **Working system:** feature set v1 and target set v1 materialized in a dataset; walk-forward reports with decay regression.
-- **Verification:** every registered feature passes the leakage harness automatically; barrier-label synthetic tests pass.
-
-### Sprint 8 — Regimes and diagnostics
-
-- **Tasks:** REG-001, REG-006, REG-007, REG-002, REG-003, FEAT-010, BASE-004, STAT-004, STAT-005, EDA-007.
-- **Working system:** regime board comparing rule-based and statistical regimes on downstream decisions; feature diagnostics; logistic baseline on the board.
-- **Verification:** filtered-probability causality tests; switching-process recovery; verdicts registered.
-
-### Sprint 9 — Significance and robustness core
-
-- **Tasks:** VAL-003, VAL-004, VAL-006, ROB-001, ROB-002, ROB-003, ROB-006, ROB-007, EXP-006.
-- **Working system:** `xq validate-strategy <run_id>` produces significance and robustness reports for any baseline or candidate; `xq exp reproduce` works.
-- **Verification:** overfit simulation fails and genuine-edge simulation passes; SPA/DSR size tests on noise families.
-
-### Sprint 10 — ML stages A and B
-
-- **Tasks:** ML-001, ML-009, ML-002, ML-003, ML-004, ML-005, ML-008, ML-010.
-- **Working system:** ML board against baselines with DSR, SPA and robustness for any R1 candidate; explicit accept or reject per hypothesis; Stage C unlock decision recorded.
-- **Verification:** purging demonstration; calibration tests; model reload reproduces predictions.
-- **Decision point:** if nothing reaches R1 here, write the negative-result report and consult the owner before continuing; Sprints 11–13 can still proceed using the best baseline to finish the platform.
-
-### Sprint 11 — Event-driven backtester
-
-- **Tasks:** BT-004, BT-005, BT-006, BT-007, BT-008, BT-009, BT-010.
-- **Working system:** event backtests with full ledger; reconciliation with the screener.
-- **Verification:** golden trades, gap and same-bar tests, accounting identity, reconciliation within tolerance.
-
-### Sprint 12 — Risk and signal engines
-
-- **Tasks:** RISK-001, RISK-002, RISK-003, RISK-004, RISK-005, RISK-006, SIGNAL-001, SIGNAL-002, SIGNAL-003, SIGNAL-004, SIGNAL-005, ROB-004, ROB-005, ROB-008.
-- **Working system:** a candidate (or best baseline) runs forecast → EV → filters → risk → execution in the event backtester with a complete audit trail, Monte Carlo and robustness score.
-- **Verification:** risk property tests; architectural bypass test; audit-record schema test.
-
-### Sprint 13 — Model registry and gates
-
-- **Tasks:** MREG-001, MREG-002, MREG-003, MREG-005, MREG-004, GATE-001, GATE-002, GATE-003; conditional research spikes only if unlocked: ML-006, ML-007 (split first), ML-011, FEAT-007, FEAT-009, STAT-007, REG-004, REG-005, RISK-007, and DATA-011, DQ-005, DATA-012 if a second feed or a bar-only source is used.
-- **Working system:** `xq gate evaluate <bundle>` produces a gate report; promotions are enforced; the vault procedure works end to end on a test bundle.
-- **Verification:** promotion without gate fails; rollback restores hash; second vault access refused.
-- **Decision point:** if no bundle passes R2, the release gate is not reached. Sprints 14–16 then validate infrastructure only, using a baseline bundle in paper mode.
-
-### Sprint 14 — Paper trading
-
-- **Tasks:** PAPER-004, PAPER-002, PAPER-003, PAPER-001, PAPER-005, PAPER-007, PAPER-006, PROD-001, PROD-002.
-- **Working system:** `docker compose --profile paper up` runs the runtime on a live feed with simulated fills, persisting every decision; nightly shadow replay.
-- **Verification:** 100% replay parity on a recorded day; mid-position restart; disconnect and reconnect.
-
-### Sprint 15 — Monitoring, API and dashboard
-
-- **Tasks:** MON-001, MON-002, MON-003, MON-004, MON-005, DASH-001, DASH-002, DASH-003, DASH-004.
-- **Working system:** alerts fire on simulated faults; dashboard shows live state, performance vs Monte Carlo bands, research and gate views.
-- **Verification:** each alert rule fires on its fault and stays quiet on clean replay; API contract tests.
-
-### Sprint 16 — Production hardening and release gate
-
-- **Tasks:** PROD-003, PROD-004, DEPLOY-001, DEPLOY-002, DEPLOY-003, DEPLOY-004, DEPLOY-005, DEPLOY-006, DEPLOY-007, GATE-004.
-- **Working system:** clean-host bring-up of the paper and prod profiles (live adapter disabled), backups with a tested restore, chaos suite, completed live-readiness checklist for any bundle that passed R4.
-- **Verification:** restore drill; chaos tests; gateway rejects orders under kill flag.
-
-### After Sprint 16
-
-The platform then runs research cycles rather than build sprints: pre-register a hypothesis, run it through the spine, record the verdict, and promote only through the gates. Live execution is a separate project that starts only from a bundle with a passed R4 gate and a signed GATE-003 review.
-
-## 11. CLAUDE CODE MASTER IMPLEMENTATION PROMPT
-
-Before first use, save this plan as `docs/specs/development-plan.md` and the original project instructions as `docs/specs/project-instructions.md` in the repository. Then paste the prompt below into Claude Code at the start of each working session.
-
-```text
-You are the implementation engineer for the XAUUSD Quantitative Research Platform (package `xq`).
-You act as a quantitative developer, data engineer and adversarial reviewer of your own code.
-The goal is a research-grade system whose results survive unseen data and realistic costs — not a
-profitable-looking backtest.
-
-SOURCES OF TRUTH (read before doing anything)
-1. docs/specs/development-plan.md    — phases, backlog (task IDs), sprint order, gates
-2. docs/specs/project-instructions.md — research philosophy and requirements
-3. CLAUDE.md                          — binding invariants (create it in ARCH-001 if absent)
-4. docs/adr/                          — decisions already made
-5. CHANGELOG.md and git log           — what is already done
-If these conflict, the development plan wins for architecture and sequencing; the project
-instructions win for research standards. Record any conflict you find in an ADR.
-
-START OF EVERY SESSION
-1. Inspect the repository: tree, pyproject, CLAUDE.md, CHANGELOG, recent commits, open TODOs,
-   and run the full test suite. Report its current state honestly before changing anything.
-2. Identify the current sprint and the next unfinished task in sprint order.
-3. State in 3-6 lines: the task ID, what you will build, files you will touch, tests you will write.
-4. Work on ONE task at a time. Do not start the next task until the current one is done.
-
-DEFINITION OF DONE FOR A TASK
-- Code implements the task's description and interfaces as specified in the plan.
-- Tests listed for the task exist and pass; the whole suite passes (`uv run pytest`).
-- `uv run ruff check`, `uv run ruff format --check` and `uv run mypy` pass.
-- Public functions have type hints and docstrings; config lives in config/, not in code.
-- CHANGELOG.md updated under "Unreleased" with the task ID.
-- Docs updated where behaviour or interfaces changed; ADR added for any architectural decision.
-- One logical commit (or a small series) using Conventional Commits, referencing the task ID,
-  e.g. `feat(data): DATA-008 bar builder with available_at`.
-- End-of-task report: what was done, test command output summary (counts, failures),
-  deviations from the plan and why, known limitations, next task.
-
-BINDING INVARIANTS (violating any of these is a critical bug)
-- Timestamps are UTC int64 ns. Bars are [start, start+tf) labelled by start and carry available_at.
-  Nothing is used before its available_at. Trading day rolls at 17:00 America/New_York.
-- No look-ahead: no centered windows, no full-sample scaling or normalization, no bfill into the
-  past, no joins on bar start across timeframes (use asof_join on available_at), no smoothed/Viterbi
-  regime states, no target-derived features. Every new feature and target must pass the leakage
-  harness (tests/leakage) — add it to the parametrized suite, never skip it.
-- Raw data is immutable. Cleaning flags; it does not silently repair. Every action is logged.
-- Fills happen at the next available quote on the correct side (buy at ask, sell at bid) plus
-  modelled slippage, commission and financing. Never fill at the signal bar's close or at mid.
-- Walk-forward only for financial time series. No shuffled splits. Purge by label_end, embargo.
-  Hyperparameter search, early stopping, calibration and thresholds use training/validation data only.
-- The vault (data after vault.start) is never loaded without a gate token. Never work around it.
-- Every research run goes through the experiment run context and is counted by the trial counter.
-  Confirmatory runs require a clean git tree.
-- Thresholds, stops and targets are in volatility units or basis points, never fixed dollars.
-- Models never size positions. Every order passes through RiskEngine.evaluate; OrderIntent can only
-  be built from an approved RiskDecision.
-- Gate thresholds in config/gates.yaml are fixed before results are seen. Never change them to make
-  a candidate pass; if you believe a threshold is wrong, stop and raise it with the owner.
-- An LLM (including you) never makes or overrides trading decisions at runtime.
-
-RESEARCH TASK PROCEDURE (task types R)
-1. Pre-register the hypothesis YAML (statement, target, information set, windows, primary metric,
-   success and falsification criteria, trial budget, planned tests and slices) before running it.
-2. Validate each statistical method on simulated data with known properties first.
-3. Run through the walk-forward engine with the standard cost model; compare with the baseline board.
-4. Report as: Observed / Statistical evidence / Interpretation / Limitations / Action.
-5. Negative or inconclusive results are valid outcomes. Record them; do not tune until something
-   passes. If you want to try a variation, register it as a new hypothesis so it is counted.
-
-HONESTY RULES
-- Never claim something works without running it. Quote actual test and command output.
-- If a test fails, say so, diagnose the cause, and fix the cause — do not weaken, skip or xfail
-  tests to get green unless the test itself is wrong, and then explain why in the commit.
-- Never silently change a research assumption (cost model, horizon, window, threshold, universe).
-  Changes require an ADR and a CHANGELOG entry.
-- If results look too good (e.g. Sharpe above 3 after costs, hit rate far above 55% on returns,
-  near-perfect classification), treat it as a leakage bug until proven otherwise and investigate.
-- Distinguish clearly between "implemented", "tested", and "validated on real data".
-
-ENGINEERING STANDARDS
-- Python 3.12, uv, pandas/NumPy, pydantic config, structlog, pytest + hypothesis, ruff, mypy.
-- Add a dependency only in the sprint that needs it, with a one-line justification in the commit.
-- Pure functions where possible; no hidden global state; explicit config objects.
-- Seed all randomness via xq.core.seeds; record seeds in run metadata.
-- Correctness before speed; vectorize after tests exist.
-- Keep modules within the layout in section 3 of the plan; propose layout changes via ADR.
-
-WHEN TO STOP AND ASK
-Only for a genuinely blocking decision that the plan and ADRs do not resolve, for example:
-choice of data vendor or broker API, account currency, licensing of a data source, a requested
-change to gate thresholds or the vault, or a plan contradiction with material consequences.
-For everything else, choose the option most consistent with the plan, record it in an ADR, and continue.
-
-SCOPE CONTROL
-- Implement incrementally, task by task, in sprint order. Never generate the whole system at once.
-- Each sprint must end with a working, tested system and the sprint's verification commands passing.
-- Do not implement items listed under "Not yet" for a phase until their sprint.
-- Do not build live-money execution. Paper trading and demo accounts only, within this plan.
-
-Begin now: inspect the repository, run the tests, report the current state, and propose the next task.
-```
-
 ### Exploratory research (EDA)
 
 | ID | Title and description | Pri | Deps | Cx | Acceptance and tests | Deliverables |
@@ -1299,7 +1090,7 @@ Begin now: inspect the repository, run the tests, report the current state, and 
 | STAT-005 | Fixed-width fractional differencing | P2 | STAT-001, DS-003 | S | Causal; d search on train only | `fracdiff.py` |
 | STAT-006 | AR/ARMA/ARIMA walk-forward forecasts vs random walk | P1 | WF-002, BASE-001, VAL-005 | M | AR(1) sim recovered; DM report | `arima.py` |
 | STAT-007 | ARIMAX, VAR, Johansen, VECM (gated) | P3 | FEAT-009 | L | Cointegrated sim recovered | `multivariate.py` |
-| STAT-008 | Statistical verdict report | P1 | STAT-001..006 | S | Verdict per method in section 33 format | `reports/stats/verdict.md` |
+| STAT-008 | Statistical verdict report | P1 | STAT-001, STAT-002, STAT-003, STAT-006 (STAT-004/005 appended in Sprint 8) | S | Verdict per method in the Observed / Evidence / Interpretation / Limitations / Action format | `reports/stats/verdict.md` |
 
 ### Volatility (VOL)
 
@@ -1460,3 +1251,212 @@ Begin now: inspect the repository, run the tests, report the current state, and 
 | GATE-002 | One-time vault evaluation procedure | P1 | DS-004, GATE-001 | S | Second vault access for same bundle refused | vault token flow |
 | GATE-003 | Human review template and sign-off | P1 | GATE-001 | S | Template committed | `docs/specs/gate-review.md` |
 | GATE-004 | Live-readiness checklist (no live code) | P2 | GATE-003, PAPER-006 | S | Checklist complete for a bundle | `docs/specs/live-readiness.md` |
+
+## 10. Sprint plan for Claude Code
+
+Sixteen sprints, each ending in a working system verified by commands and tests. Sprints 1–4 build a thin end-to-end slice (raw ticks → walk-forward baseline report after costs) before any research. Tasks within a sprint are listed in implementation order.
+
+### Sprint 1 — Skeleton and raw ingestion
+
+- **Tasks:** ARCH-001, ARCH-002, ARCH-003, ARCH-004, ARCH-005, ARCH-006, ARCH-007, ARCH-008, DATA-001, DATA-002, DATA-005, DATA-003, DATA-004, DATA-006.
+- **Working system:** `xq ingest --source <primary> --path tests/fixtures/ticks/` writes the immutable raw store, Parquet mirror and manifest rows; a second run is a no-op.
+- **Verification:** CI green; DST conversion tests and session tests pass; raw files are read-only.
+
+### Sprint 2 — Clean ticks, bars and data quality
+
+- **Tasks:** DATA-007, DATA-008, DATA-009, DATA-010, DQ-001, DQ-002, DQ-003, DQ-004, DQ-006, DQ-008.
+- **Working system:** `xq build-bars` produces 7 timeframes × bid/ask/mid; `xq validate` produces a quality report for at least one year of real data.
+- **Verification:** bar property tests; bit-identical rebuild; injected-defect tests; quality review document committed.
+
+### Sprint 3 — Datasets, leakage harness, experiment registry
+
+- **Tasks:** DS-001, DS-002, DS-003, DS-004, DS-006, DS-005, DS-007, DQ-007, EXP-001, EXP-002, EXP-003, EXP-004, TGT-001, TGT-002.
+- **Working system:** `xq dataset build experiments/configs/ds_base.yaml` materializes a versioned dataset with forward-return targets; hypotheses can be registered; runs are recorded.
+- **Verification:** the harness catches all five planted leaks; vault access raises; dataset sha256 reproducible.
+
+### Sprint 4 — Evaluation spine (first end-to-end slice)
+
+- **Tasks:** WF-001, WF-006, WF-002, WF-003, BT-001, BT-002, BT-003, BASE-006, VAL-001, VAL-002, VAL-005, VAL-007, BASE-001, BASE-002, BASE-005.
+- **Working system:** `xq baselines run --dataset <id>` produces a walk-forward, net-of-cost baseline board with Sharpe CIs and DSR using the registered trial count.
+- **Verification:** splitter property tests; golden cost and P&L cases; statistics match references; purging demonstration test.
+- **Note:** this is the platform's first honest answer to "do simple strategies make money after costs?" Record it as experiment H-0001.
+
+### Sprint 5 — Exploratory research and horizon admission
+
+- **Tasks:** EDA-001, EDA-006, EDA-002, EDA-003, EDA-004, EDA-005, EXP-005, DATA-013.
+- **Working system:** `xq research eda --dataset <id>` regenerates the EDA report on the discovery window; `config/horizons.yaml` lists admitted horizons; secondary long-history feed ingested if broker history is too short.
+- **Verification:** deterministic report build; every seasonal effect has CI and stability flag; hypotheses backlog written and top items pre-registered.
+
+### Sprint 6 — Statistical and volatility research
+
+- **Tasks:** STAT-001, STAT-002, STAT-003, STAT-006, STAT-008, VOL-001, VOL-002, VOL-003, VOL-004, VOL-005, VOL-006, BASE-003.
+- **Working system:** statistical verdict report; volatility model board; the selected `VolForecaster` serves σ̂ to datasets.
+- **Verification:** every method passes simulation recovery before running on gold; all volatility models evaluated on identical folds.
+
+### Sprint 7 — Features and targets
+
+- **Tasks:** FEAT-001, FEAT-002, FEAT-003, FEAT-004, FEAT-006, FEAT-005, FEAT-008, TGT-003, TGT-004, TGT-005, TGT-006, WF-004, WF-005.
+- **Working system:** feature set v1 and target set v1 materialized in a dataset; walk-forward reports with decay regression.
+- **Verification:** every registered feature passes the leakage harness automatically; barrier-label synthetic tests pass.
+
+### Sprint 8 — Regimes and diagnostics
+
+- **Tasks:** REG-001, REG-006, REG-007, REG-002, REG-003, FEAT-010, BASE-004, STAT-004, STAT-005, EDA-007.
+- **Working system:** regime board comparing rule-based and statistical regimes on downstream decisions; feature diagnostics; logistic baseline on the board.
+- **Verification:** filtered-probability causality tests; switching-process recovery; verdicts registered.
+
+### Sprint 9 — Significance and robustness core
+
+- **Tasks:** VAL-003, VAL-004, VAL-006, ROB-001, ROB-002, ROB-003, ROB-006, ROB-007, EXP-006.
+- **Working system:** `xq validate-strategy <run_id>` produces significance and robustness reports for any baseline or candidate; `xq exp reproduce` works.
+- **Verification:** overfit simulation fails and genuine-edge simulation passes; SPA/DSR size tests on noise families.
+
+### Sprint 10 — ML stages A and B
+
+- **Tasks:** ML-001, ML-009, ML-002, ML-003, ML-004, ML-005, ML-008, ML-010.
+- **Working system:** ML board against baselines with DSR, SPA and robustness for any R1 candidate; explicit accept or reject per hypothesis; Stage C unlock decision recorded.
+- **Verification:** purging demonstration; calibration tests; model reload reproduces predictions.
+- **Decision point:** if nothing reaches R1 here, write the negative-result report and consult the owner before continuing; Sprints 11–13 can still proceed using the best baseline to finish the platform.
+
+### Sprint 11 — Event-driven backtester
+
+- **Tasks:** BT-004, BT-005, BT-006, BT-007, BT-008, BT-009, BT-010.
+- **Working system:** event backtests with full ledger; reconciliation with the screener.
+- **Verification:** golden trades, gap and same-bar tests, accounting identity, reconciliation within tolerance.
+
+### Sprint 12 — Risk and signal engines
+
+- **Tasks:** RISK-001, RISK-002, RISK-003, RISK-004, RISK-005, RISK-006, SIGNAL-001, SIGNAL-002, SIGNAL-003, SIGNAL-004, SIGNAL-005, ROB-004, ROB-005, ROB-008.
+- **Working system:** a candidate (or best baseline) runs forecast → EV → filters → risk → execution in the event backtester with a complete audit trail, Monte Carlo and robustness score.
+- **Verification:** risk property tests; architectural bypass test; audit-record schema test.
+
+### Sprint 13 — Model registry and gates
+
+- **Tasks:** MREG-001, MREG-002, MREG-003, MREG-005, MREG-004, GATE-001, GATE-002, GATE-003; DATA-011, DQ-005 and DATA-012 if a second feed or a bar-only source is used; then conditional research spikes only if unlocked: ML-006, ML-007 (split first), ML-011, FEAT-007, FEAT-009, STAT-007, REG-004, REG-005, RISK-007.
+- **Working system:** `xq gate evaluate <bundle>` produces a gate report; promotions are enforced; the vault procedure works end to end on a test bundle.
+- **Verification:** promotion without gate fails; rollback restores hash; second vault access refused.
+- **Decision point:** if no bundle passes R2, the release gate is not reached. Sprints 14–16 then validate infrastructure only, using a baseline bundle in paper mode.
+
+### Sprint 14 — Paper trading
+
+- **Tasks:** PAPER-004, PAPER-002, PAPER-003, PAPER-001, PAPER-005, PAPER-007, PAPER-006, PROD-001, PROD-002.
+- **Working system:** `docker compose --profile paper up` runs the runtime on a live feed with simulated fills, persisting every decision; nightly shadow replay.
+- **Verification:** 100% replay parity on a recorded day; mid-position restart; disconnect and reconnect.
+
+### Sprint 15 — Monitoring, API and dashboard
+
+- **Tasks:** MON-001, MON-002, MON-003, MON-004, MON-005, DASH-001, DASH-002, DASH-003, DASH-004.
+- **Working system:** alerts fire on simulated faults; dashboard shows live state, performance vs Monte Carlo bands, research and gate views.
+- **Verification:** each alert rule fires on its fault and stays quiet on clean replay; API contract tests.
+
+### Sprint 16 — Production hardening and release gate
+
+- **Tasks:** PROD-003, PROD-004, DEPLOY-001, DEPLOY-002, DEPLOY-003, DEPLOY-004, DEPLOY-005, DEPLOY-006, DEPLOY-007, GATE-004.
+- **Working system:** clean-host bring-up of the paper and prod profiles (live adapter disabled), backups with a tested restore, chaos suite, completed live-readiness checklist for any bundle that passed R4.
+- **Verification:** restore drill; chaos tests; gateway rejects orders under kill flag.
+
+### After Sprint 16
+
+The platform then runs research cycles rather than build sprints: pre-register a hypothesis, run it through the spine, record the verdict, and promote only through the gates. Live execution is a separate project that starts only from a bundle with a passed R4 gate and a signed GATE-003 review.
+
+## 11. CLAUDE CODE MASTER IMPLEMENTATION PROMPT
+
+Before first use, save this plan as `docs/specs/development-plan.md` and the original project instructions as `docs/specs/project-instructions.md` in the repository. Then paste the prompt below into Claude Code at the start of each working session.
+
+```text
+You are the implementation engineer for the XAUUSD Quantitative Research Platform (package `xq`).
+You act as a quantitative developer, data engineer and adversarial reviewer of your own code.
+The goal is a research-grade system whose results survive unseen data and realistic costs — not a
+profitable-looking backtest.
+
+SOURCES OF TRUTH (read before doing anything)
+1. docs/specs/development-plan.md    — phases, backlog (task IDs), sprint order, gates
+2. docs/specs/project-instructions.md — research philosophy and requirements
+3. CLAUDE.md                          — binding invariants (create it in ARCH-001 if absent)
+4. docs/adr/                          — decisions already made
+5. CHANGELOG.md and git log           — what is already done
+If these conflict, the development plan wins for architecture and sequencing; the project
+instructions win for research standards. Record any conflict you find in an ADR.
+
+START OF EVERY SESSION
+1. Inspect the repository: tree, pyproject, CLAUDE.md, CHANGELOG, recent commits, open TODOs,
+   and run the full test suite. Report its current state honestly before changing anything.
+2. Identify the current sprint and the next unfinished task in sprint order.
+3. State in 3-6 lines: the task ID, what you will build, files you will touch, tests you will write.
+4. Work on ONE task at a time. Do not start the next task until the current one is done.
+
+DEFINITION OF DONE FOR A TASK
+- Code implements the task's description and interfaces as specified in the plan.
+- Tests listed for the task exist and pass; the whole suite passes (`uv run pytest`).
+- `uv run ruff check`, `uv run ruff format --check` and `uv run mypy` pass.
+- Public functions have type hints and docstrings; config lives in config/, not in code.
+- CHANGELOG.md updated under "Unreleased" with the task ID.
+- Docs updated where behaviour or interfaces changed; ADR added for any architectural decision.
+- One logical commit (or a small series) using Conventional Commits, referencing the task ID,
+  e.g. `feat(data): DATA-008 bar builder with available_at`.
+- End-of-task report: what was done, test command output summary (counts, failures),
+  deviations from the plan and why, known limitations, next task.
+
+BINDING INVARIANTS (violating any of these is a critical bug)
+- Timestamps are UTC int64 ns. Bars are [start, start+tf) labelled by start and carry available_at.
+  Nothing is used before its available_at. Trading day rolls at 17:00 America/New_York.
+- No look-ahead: no centered windows, no full-sample scaling or normalization, no bfill into the
+  past, no joins on bar start across timeframes (use asof_join on available_at), no smoothed/Viterbi
+  regime states, no target-derived features. Every new feature and target must pass the leakage
+  harness (tests/leakage) — add it to the parametrized suite, never skip it.
+- Raw data is immutable. Cleaning flags; it does not silently repair. Every action is logged.
+- Fills happen at the next available quote on the correct side (buy at ask, sell at bid) plus
+  modelled slippage, commission and financing. Never fill at the signal bar's close or at mid.
+- Walk-forward only for financial time series. No shuffled splits. Purge by label_end, embargo.
+  Hyperparameter search, early stopping, calibration and thresholds use training/validation data only.
+- The vault (data after vault.start) is never loaded without a gate token. Never work around it.
+- Every research run goes through the experiment run context and is counted by the trial counter.
+  Confirmatory runs require a clean git tree.
+- Thresholds, stops and targets are in volatility units or basis points, never fixed dollars.
+- Models never size positions. Every order passes through RiskEngine.evaluate; OrderIntent can only
+  be built from an approved RiskDecision.
+- Gate thresholds in config/gates.yaml are fixed before results are seen. Never change them to make
+  a candidate pass; if you believe a threshold is wrong, stop and raise it with the owner.
+- An LLM (including you) never makes or overrides trading decisions at runtime.
+
+RESEARCH TASK PROCEDURE (task types R)
+1. Pre-register the hypothesis YAML (statement, target, information set, windows, primary metric,
+   success and falsification criteria, trial budget, planned tests and slices) before running it.
+2. Validate each statistical method on simulated data with known properties first.
+3. Run through the walk-forward engine with the standard cost model; compare with the baseline board.
+4. Report as: Observed / Statistical evidence / Interpretation / Limitations / Action.
+5. Negative or inconclusive results are valid outcomes. Record them; do not tune until something
+   passes. If you want to try a variation, register it as a new hypothesis so it is counted.
+
+HONESTY RULES
+- Never claim something works without running it. Quote actual test and command output.
+- If a test fails, say so, diagnose the cause, and fix the cause — do not weaken, skip or xfail
+  tests to get green unless the test itself is wrong, and then explain why in the commit.
+- Never silently change a research assumption (cost model, horizon, window, threshold, universe).
+  Changes require an ADR and a CHANGELOG entry.
+- If results look too good (e.g. Sharpe above 3 after costs, hit rate far above 55% on returns,
+  near-perfect classification), treat it as a leakage bug until proven otherwise and investigate.
+- Distinguish clearly between "implemented", "tested", and "validated on real data".
+
+ENGINEERING STANDARDS
+- Python 3.12, uv, pandas/NumPy, pydantic config, structlog, pytest + hypothesis, ruff, mypy.
+- Add a dependency only in the sprint that needs it, with a one-line justification in the commit.
+- Pure functions where possible; no hidden global state; explicit config objects.
+- Seed all randomness via xq.core.seeds; record seeds in run metadata.
+- Correctness before speed; vectorize after tests exist.
+- Keep modules within the layout in section 3 of the plan; propose layout changes via ADR.
+
+WHEN TO STOP AND ASK
+Only for a genuinely blocking decision that the plan and ADRs do not resolve, for example:
+choice of data vendor or broker API, account currency, licensing of a data source, a requested
+change to gate thresholds or the vault, or a plan contradiction with material consequences.
+For everything else, choose the option most consistent with the plan, record it in an ADR, and continue.
+
+SCOPE CONTROL
+- Implement incrementally, task by task, in sprint order. Never generate the whole system at once.
+- Each sprint must end with a working, tested system and the sprint's verification commands passing.
+- Do not implement items listed under "Not yet" for a phase until their sprint.
+- Do not build live-money execution. Paper trading and demo accounts only, within this plan.
+
+Begin now: inspect the repository, run the tests, report the current state, and propose the next task.
+```
