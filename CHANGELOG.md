@@ -79,3 +79,8 @@ IDs from `docs/specs/development-plan.md`.
 - `CLAUDE.md` no longer marks `docs/specs/project-instructions.md` as missing: the owner committed
   it together with the revised development plan (backlog tables back in section 9, STAT-008
   dependencies, Sprint 13 ordering, critical-path note).
+
+### Fixed
+
+- MT5 adapter: a file that mixes times with and without milliseconds is parsed row by row instead
+  of being rejected (ADR 0004 already promised both forms).
