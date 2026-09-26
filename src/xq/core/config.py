@@ -294,10 +294,29 @@ class EventWindow(FrozenModel):
     after_min: int = Field(ge=0)
 
 
+class ClockWindow(FrozenModel):
+    """A local clock-time window ``[start, end)`` in `tz` on every calendar day (ADR 0026).
+
+    Unlike an `EventWindow` it does not depend on an anchor occurring, so a rollover clock window
+    also covers the Sunday reopen, which follows no rollover.
+    """
+
+    tz: TimeZoneName
+    start: LocalTime
+    end: LocalTime
+
+    @model_validator(mode="after")
+    def _check_order(self) -> ClockWindow:
+        if self.start >= self.end:
+            raise ValueError("clock window start must be before its end in local time")
+        return self
+
+
 class SessionsConfig(FrozenModel):
     """Calendar, sessions and event anchors (``config/sessions.yaml``).
 
-    `event_windows` defines the ``in_<anchor>_window`` dataset columns (DS-007).
+    `event_windows` defines the ``in_<name>_window`` dataset columns (DS-007): an `EventWindow`
+    around the event anchor of the same name, or a `ClockWindow`.
     """
 
     market: MarketHoursConfig
@@ -305,7 +324,7 @@ class SessionsConfig(FrozenModel):
     sessions: dict[str, SessionWindow]
     overlaps: dict[str, list[str]] = {}
     event_anchors: dict[str, EventAnchor] = {}
-    event_windows: dict[str, EventWindow] = {}
+    event_windows: dict[str, EventWindow | ClockWindow] = {}
 
     @model_validator(mode="after")
     def _check_overlaps(self) -> SessionsConfig:
@@ -313,7 +332,8 @@ class SessionsConfig(FrozenModel):
             unknown = [m for m in members if m not in self.sessions]
             if len(members) < 2 or unknown:
                 raise ValueError(f"overlap {name!r} needs two or more known sessions: {members}")
-        unknown_windows = sorted(set(self.event_windows) - set(self.event_anchors))
+        anchored = {n for n, w in self.event_windows.items() if isinstance(w, EventWindow)}
+        unknown_windows = sorted(anchored - set(self.event_anchors))
         if unknown_windows:
             raise ValueError(f"event windows for unknown anchors: {unknown_windows}")
         return self

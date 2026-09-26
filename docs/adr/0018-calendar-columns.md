@@ -26,7 +26,8 @@ match the session table and pass the leakage harness like any other feature.
    would rightly flag it.
 4. **Event windows are configuration.** `in_<anchor>_window` covers `[anchor - before,
    anchor + after)` with windows in `config/sessions.yaml` (`event_windows`): US data release
-   5 minutes before to 30 minutes after, rollover 15 minutes either side. These are proposed
+   5 minutes before to 30 minutes after, rollover 15 minutes either side (replaced by ADR 0026:
+   rollover is now the New York clock window 16:45–18:15 on every day). These are proposed
    defaults fixed before any research result; changing them requires an ADR. The calendar
    configuration is part of the dataset config digest, so a change gives new dataset ids.
 5. **Placement.** `xq.datasets.calendar_columns` is a new module beside the plan's `datasets/`

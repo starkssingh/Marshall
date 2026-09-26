@@ -69,13 +69,50 @@ def test_release_and_rollover_windows(sessions: SessionsConfig) -> None:
         "2024-03-12 12:25",
         "2024-03-12 12:59",
         "2024-03-12 13:00",
-        "2024-03-12 20:44",
-        "2024-03-12 20:45",
-        "2024-03-12 21:14",
-        "2024-03-12 21:15",
+        "2024-03-12 20:44",  # 16:44 EDT
+        "2024-03-12 20:45",  # 16:45 EDT: the pre-close
+        "2024-03-12 21:30",  # the daily break
+        "2024-03-12 22:14",  # 18:14 EDT: just after the reopen
+        "2024-03-12 22:15",
     )
     assert flags["in_us_data_release_window"].tolist()[:4] == [False, True, True, False]
-    assert flags["in_rollover_window"].tolist()[4:] == [False, True, True, False]
+    assert flags["in_rollover_window"].tolist()[4:] == [False, True, True, True, False]
+
+
+@pytest.mark.parametrize(
+    ("utc", "inside"),
+    [
+        ("2024-03-10 21:59", True),  # Sunday 17:59 EDT (the day DST starts): before the reopen
+        ("2024-03-10 22:00", True),  # the Sunday reopen follows no rollover, but is covered
+        ("2024-03-10 22:15", False),
+        ("2024-01-16 21:44", False),  # 16:44 EST in winter
+        ("2024-01-16 21:45", True),
+        ("2024-01-16 23:14", True),
+        ("2024-01-16 23:15", False),
+    ],
+)
+def test_rollover_window_is_a_new_york_clock_window(
+    sessions: SessionsConfig, utc: str, inside: bool
+) -> None:
+    assert at(sessions, utc).iloc[0]["in_rollover_window"] == inside
+
+
+def test_clock_windows_need_no_anchor_and_must_be_ordered(sessions: SessionsConfig) -> None:
+    extra = {"tz": "Europe/London", "start": "07:00", "end": "08:00"}
+    data = sessions.model_dump(mode="json")
+    changed = SessionsConfig.model_validate(
+        {**data, "event_windows": {**data["event_windows"], "london_fix_prep": extra}}
+    )
+    flags = at(changed, "2024-07-01 06:00", "2024-07-01 05:59")  # 07:00 and 06:59 BST
+    assert flags["in_london_fix_prep_window"].tolist() == [True, False]
+    with pytest.raises(ValueError, match="start must be before"):
+        SessionsConfig.model_validate(
+            {**data, "event_windows": {"rollover": {**extra, "start": "08:00"}}}
+        )
+    with pytest.raises(ValueError, match="unknown anchors"):
+        SessionsConfig.model_validate(
+            {**data, "event_windows": {"nowhere": {"before_min": 1, "after_min": 1}}}
+        )
 
 
 def test_us_holiday_early_close_and_skipped_release(sessions: SessionsConfig) -> None:

@@ -233,6 +233,11 @@ IDs from `docs/specs/development-plan.md`.
   closing commits, open owner decisions, provisional assumptions, known issues and per-phase
   status; `CLAUDE.md` gains a session protocol (read it after `CLAUDE.md`, keep it current, record
   chat decisions in an ADR and in it the same session, the repository wins over memory).
+- DS-007 rollover window (ADR 0026, C-3): `in_rollover_window` is the New York clock window
+  16:45–18:15 on every day (pre-close, daily break and reopen spread spike, Sunday reopen
+  included) instead of ±15 minutes around the 17:00 anchor. `event_windows` accept clock windows
+  (`tz`, `start`, `end`) beside anchored ones; the US release window is unchanged. Dataset ids
+  change through the config digest.
 - TGT-002 fill-delay diagnostic (ADR 0026, C-2): every target row records `fill_delay_s` (the
   later fill's delay after its intended time); the manifest (`fill_delays`) and
   `xq dataset build` report per target the labelled rows, those with a fill more than
