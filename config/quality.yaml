@@ -90,3 +90,25 @@ checks:
     unit: bars per day
     warn: null
     fail: 0                     # proposed: any; these are construction invariants
+
+  # --- Calendar checks (DQ-004) ---
+  cal.closed_market_ticks:      # share of the day's ticks outside the calendar's market hours
+    severity: major
+    unit: share of ticks
+    warn: 0.0                   # plan: any
+    fail: 0.001                 # plan
+  cal.holiday_behaviour:        # ticks outside hours on holidays / early-close days
+    severity: major
+    unit: ticks per day
+    warn: 0                     # proposed: any disagreement with the holiday calendar
+    fail: 100                   # proposed
+  cal.missing_open_data:        # share of whole market-hours minutes without a 1-minute bar
+    severity: major
+    unit: share of market minutes
+    warn: 0.05                  # proposed: the Asian hours are thinner than the sessions
+    fail: 0.2                   # proposed
+  cal.gap_location:             # minutes between calendar open/close and first/last tick
+    severity: critical
+    unit: minutes
+    warn: 10                    # proposed
+    fail: 45                    # proposed: a clock-convention error moves boundaries by 60

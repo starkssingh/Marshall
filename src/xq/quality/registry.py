@@ -71,6 +71,8 @@ class PartitionData:
         spread_stats: Hour-of-week spread percentiles (``hour_of_week``, ``p50``...), if any.
         hourly_tick_norm: Typical tick count per New York hour of week, if enough history exists.
         dropped: Ticks removed by cleaning, per rule id (only rules configured to drop).
+        coverage: First and last instant (UTC ns) of all ingested data of the source, so checks
+            can tell a data edge from a gap.
     """
 
     source_id: str
@@ -82,6 +84,7 @@ class PartitionData:
     spread_stats: pd.DataFrame | None = None
     hourly_tick_norm: pd.Series | None = None
     dropped: Mapping[str, int] = field(default_factory=dict)
+    coverage: tuple[int, int] | None = None
 
     @property
     def partition_id(self) -> str:

@@ -1,8 +1,8 @@
 # ADR 0011 — Data-quality check definitions and thresholds
 
-- **Status:** proposed (completed as DQ-003 and DQ-004 land)
+- **Status:** accepted; "proposed" thresholds are provisional until the DQ-008 review of real broker data
 - **Date:** 2026-09-26
-- **Tasks:** DQ-001, DQ-002 (DQ-003, DQ-004 append their sections)
+- **Tasks:** DQ-001, DQ-002, DQ-003, DQ-004
 
 ## Context
 
@@ -67,3 +67,25 @@ Notes:
 - An extreme return is labelled with the start of the bar whose close moved.
 - Duplicate starts and bid/ask/mid mismatches cannot come out of the bar builder, so any
   occurrence means a corrupted or foreign bar file and fails.
+
+## Decision — calendar checks (DQ-004)
+
+| Check | Metric | Warn | Fail | Source |
+| --- | --- | --- | --- | --- |
+| `cal.closed_market_ticks` | share of the day's ticks outside market hours (`CLOSED_MARKET`) | any | > 0.1% | plan |
+| `cal.holiday_behaviour` | ticks outside hours on holidays and early-close days | any | > 100 | proposed |
+| `cal.missing_open_data` | share of whole market-hours minutes without a 1-minute bar | > 5% | > 20% | proposed |
+| `cal.gap_location` | larger of |first tick − open| and |last tick − close|, in minutes | > 10 | > 45 | proposed |
+
+Notes:
+
+- A day that should be closed but has ticks (weekend, full-close holiday) scores 100% on
+  `cal.closed_market_ticks`. On holidays and early closes `cal.holiday_behaviour` also counts them,
+  so a wrong holiday calendar is visible on its own.
+- `cal.missing_open_data` covers all market hours, including the thinner Asian hours, hence looser
+  thresholds than `bar.missing_minutes` (London and New York only).
+- `cal.gap_location` catches clock-convention errors (ADR 0003): a misdeclared clock moves the
+  weekly open, weekly close and every daily rollover by an hour. A boundary the source's data does
+  not reach — the first or last day of the ingested history — is skipped, so an export edge is not
+  mistaken for a clock error; missing minutes before or after the data's coverage are not counted
+  either.

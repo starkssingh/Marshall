@@ -109,6 +109,10 @@ IDs from `docs/specs/development-plan.md`.
   missing minutes in the active sessions, duplicate starts, extreme adjacent-minute returns in
   robust sigma, zero-range session bars, and bid/ask/mid consistency; thresholds in
   `config/quality.yaml`. ADR 0011 (draft) extended.
+- DQ-004: calendar checks (`xq.quality.checks.calendar`) — ticks while closed, ticks outside
+  hours on holidays and early closes, missing minutes across all market hours, and first/last-tick
+  distance from the calendar's open and close (clock errors show up an hour off; data-coverage
+  edges are skipped). ADR 0011 accepted.
 
 ### Changed
 
