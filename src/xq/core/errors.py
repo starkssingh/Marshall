@@ -35,3 +35,7 @@ class RawStoreIntegrityError(XQError):
 
 class MirrorVersionError(XQError):
     """A raw-store mirror part predates the schema a later stage needs; rebuild the mirror."""
+
+
+class VaultAccessError(XQError):
+    """Data at or after ``vault.start`` was requested without a gate token."""

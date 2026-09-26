@@ -90,6 +90,11 @@ IDs from `docs/specs/development-plan.md`.
   p50/p90/p99 spreads per New York hour of week from an integer histogram on the tick grid,
   computed from usable clean ticks before the vault only, stored in `spread_stats` per window;
   test data with rollover spread widening shows the 16:xx/18:xx New York spike. ADR 0009.
+- DATA-010: research catalog (`xq.data.catalog.Catalog`) — `load_ticks` and `load_bars` (one
+  price basis, prices as open/high/low/close) over DuckDB with tz-aware UTC timestamps; requests
+  past `vault.start` raise `VaultAccessError`, ticks at or after it and bars that become available
+  after it are never returned, and `allow_vault=True` raises until DS-004 gate tokens exist.
+  ADR 0010.
 
 ### Changed
 
