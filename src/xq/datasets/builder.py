@@ -4,6 +4,9 @@
 
 - ``features.parquet`` — one row per complete base bar with ``start <= bar_start < end``, keyed by
   ``decision_time_utc`` (the bar's ``available_at``), computed by the spec's feature set;
+- ``targets.parquet`` — if the spec names a target set (TGT-001), the targets of every decision time
+  in long form (``target``, ``value``, ``label_start``, ``label_end``, ``scale``), computed from
+  clean ticks after the decision time; a schema guard keeps target columns out of the features;
 - ``spec.yaml`` — the *resolved* spec (bar build, quality run and config digest pinned), from which
   the dataset can be rebuilt with the same id;
 - ``manifest.json`` — row count, decision-time range, column types, per-file and combined SHA-256,
@@ -39,15 +42,30 @@ from xq.core.config import AppConfig
 from xq.core.errors import ConfigError, XQError
 from xq.core.ids import new_ulid
 from xq.core.logging import get_logger
-from xq.core.time import ensure_utc, utc_now
-from xq.data.bars import bar_set_id, build_version
+from xq.core.time import ensure_utc, trading_days, utc_now
+from xq.data.bars import bar_set_id, build_version, exclude_mask
 from xq.data.catalog import Catalog
 from xq.data.clean import rules_version
 from xq.data.raw_store import sha256_file
-from xq.datasets.base_features import BASE_INPUT, DECISION_TIME, FeatureContext, feature_set
+from xq.datasets.base_features import (
+    BASE_INPUT,
+    DECISION_TIME,
+    FeatureContext,
+    decision_index,
+    feature_set,
+)
 from xq.datasets.spec import DatasetSpec, code_versions, dataset_id, dump_spec
-from xq.datasets.vault import check_window
+from xq.datasets.vault import check_window, vault_start
 from xq.quality.gate import GateDecision, gate_partitions
+from xq.targets.base import (
+    TargetKind,
+    TargetSpec,
+    check_feature_matrix,
+    compute_targets,
+    definition_hash,
+    lock_target_set,
+)
+from xq.targets.kinds import target_kind
 from xq.tracking.db import session_factory
 from xq.tracking.models import DatasetVersion, QualityRunRecord
 
@@ -86,18 +104,30 @@ def datasets_root(cfg: AppConfig) -> Path:
 
 
 def config_digest(cfg: AppConfig, spec: DatasetSpec) -> str:
-    """Hash of the configuration the builder reads besides the stores: calendar and instrument."""
-    payload = {
+    """Hash of the configuration the builder reads besides the stores.
+
+    Covers the calendar, the instrument, the bar exclusion flags (which ticks targets may fill
+    at) and the target set definition, if any.
+    """
+    payload: dict[str, Any] = {
         "sessions": cfg.sessions_config().model_dump(mode="json"),
         "instrument": cfg.instrument(spec.instrument).model_dump(mode="json"),
     }
+    if spec.target_set is not None:
+        definition = cfg.target_set(spec.target_set.name, spec.target_set.version)
+        payload["target_set"] = definition_hash(definition)
+        payload["fill_exclusions"] = cfg.bars_config().exclude_flags
     canonical = json.dumps(payload, sort_keys=True, separators=(",", ":"))
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()[:16]
 
 
-def code_versions_for(spec: DatasetSpec) -> dict[str, int]:
-    """Code versions of the feature (and target) builders a spec uses."""
-    return {f"features:{spec.feature_set}": feature_set(spec.feature_set).code_version}
+def code_versions_for(cfg: AppConfig, spec: DatasetSpec) -> dict[str, int]:
+    """Code versions of the feature and target builders a spec uses."""
+    versions = {f"features:{spec.feature_set}": feature_set(spec.feature_set).code_version}
+    if spec.target_set is not None:
+        definition = cfg.target_set(spec.target_set.name, spec.target_set.version)
+        versions[f"targets:{spec.target_set}"] = target_kind(definition.kind).code_version
+    return versions
 
 
 def resolve_spec(cfg: AppConfig, engine: Engine, spec: DatasetSpec) -> DatasetSpec:
@@ -167,14 +197,19 @@ def build_dataset(cfg: AppConfig, engine: Engine, spec: DatasetSpec, *, git_sha:
         raise ConfigError(
             f"source {spec.source!r} carries {source.instrument!r}, not {spec.instrument!r}"
         )
-    if spec.target_set is not None:
-        raise ConfigError("target sets are not available yet (TGT-001); omit target_set")
     check_window(cfg, spec.start, spec.end)  # research datasets never read the vault
     feature_def = feature_set(spec.feature_set)
+    targets_def: tuple[TargetKind, list[TargetSpec]] | None = None
+    lookahead = pd.Timedelta(0)
+    if spec.target_set is not None:
+        definition = cfg.target_set(spec.target_set.name, spec.target_set.version)
+        kind = target_kind(definition.kind)
+        targets_def = (kind, kind.expand(definition))
+        lookahead = kind.lookahead(definition)
     resolved = resolve_spec(cfg, engine, spec)
-    ds_id = dataset_id(resolved, code_versions_for(resolved))
+    ds_id = dataset_id(resolved, code_versions_for(cfg, resolved))
 
-    inputs, decision = _load_inputs(cfg, engine, resolved)
+    inputs, decision = _load_inputs(cfg, engine, resolved, lookahead)
     base = inputs[BASE_INPUT]
     context = FeatureContext(
         resolved.base_timeframe, tuple(resolved.context_timeframes), cfg.sessions_config()
@@ -187,6 +222,15 @@ def build_dataset(cfg: AppConfig, engine: Engine, spec: DatasetSpec, *, git_sha:
             f"no complete {resolved.base_timeframe.value} bars of {resolved.source!r} between "
             f"{resolved.start} and {resolved.end} (after exclusions)"
         )
+    target_names = [t.name for t in targets_def[1]] if targets_def else []
+    check_feature_matrix(features, target_names)
+    targets: pd.DataFrame | None = None
+    if targets_def is not None and resolved.target_set is not None:
+        definition = cfg.target_set(resolved.target_set.name, resolved.target_set.version)
+        lock_target_set(engine, resolved.target_set.name, resolved.target_set.version, definition)
+        excluded = {e.trading_day for e in decision.excluded}
+        decisions = pd.DatetimeIndex(features.index)
+        targets = _targets(cfg, resolved, base, decisions, excluded, *targets_def, definition)
 
     root = datasets_root(cfg)
     root.mkdir(parents=True, exist_ok=True)
@@ -194,8 +238,10 @@ def build_dataset(cfg: AppConfig, engine: Engine, spec: DatasetSpec, *, git_sha:
     staging.mkdir()
     try:
         _write_frame(features, staging / FEATURES_FILE)
+        if targets is not None:
+            _write_frame(targets, staging / TARGETS_FILE)
         (staging / SPEC_FILE).write_text(dump_spec(resolved), encoding="utf-8")
-        manifest = _manifest(ds_id, resolved, features, decision, staging, git_sha)
+        manifest = _manifest(cfg, ds_id, resolved, features, targets, decision, staging, git_sha)
         (staging / MANIFEST_FILE).write_text(json.dumps(manifest, indent=2) + "\n")
         final = root / ds_id
         reproduced = final.exists()
@@ -280,9 +326,13 @@ def _verify_files(directory: Path, manifest: dict[str, Any]) -> None:
 
 
 def _load_inputs(
-    cfg: AppConfig, engine: Engine, spec: DatasetSpec
+    cfg: AppConfig, engine: Engine, spec: DatasetSpec, lookahead: pd.Timedelta
 ) -> tuple[dict[str, pd.DataFrame], GateDecision]:
-    """Complete bars of every input timeframe, gated by the spec's quality run (DQ-007)."""
+    """Complete bars of every input timeframe, gated by the spec's quality run (DQ-007).
+
+    With targets, the trading days their quotes may reach (up to `lookahead` after the last
+    decision, never past the vault) are gated too.
+    """
     catalog = Catalog(cfg)
     load_start = ensure_utc(spec.start - spec.warmup)
     starts = {spec.base_timeframe: load_start}
@@ -305,6 +355,21 @@ def _load_inputs(
 
     exclusions = {e.trading_day: e.reason for e in spec.exclusions}
     days = {day for bars in loaded.values() for day in bars["trading_day"]} | set(exclusions)
+    if lookahead > pd.Timedelta(0):
+        ahead_end = min(
+            ensure_utc(spec.end) + spec.base_timeframe.duration + lookahead, vault_start(cfg)
+        )
+        if ahead_end > ensure_utc(spec.end):
+            ahead = catalog.load_bars(
+                spec.source,
+                spec.instrument,
+                spec.base_timeframe,
+                spec.price_basis,
+                spec.end,
+                ahead_end,
+                build=spec.bar_build,
+            )
+            days |= set(ahead["trading_day"])
     if spec.quality_run_id is None:
         raise ValueError("the spec must be resolved before its inputs are gated")
     decision = gate_partitions(engine, spec.quality_run_id, days, exclusions)
@@ -316,20 +381,70 @@ def _load_inputs(
     return inputs, decision
 
 
+def _targets(
+    cfg: AppConfig,
+    spec: DatasetSpec,
+    base: pd.DataFrame,
+    decisions: pd.DatetimeIndex,
+    excluded: set[Any],
+    kind: TargetKind,
+    specs: list[TargetSpec],
+    definition: Any,
+) -> pd.DataFrame:
+    """Targets of every decision time, computed month by month from clean ticks.
+
+    Sigma-hat is computed on the gated base bars (warm-up included) and taken at each decision
+    time. Quotes are the clean ticks from the decision time up to `lookahead` later (never past
+    the vault), without ticks the bars exclude and without ticks of excluded trading days.
+    """
+    close = pd.Series(base["close"].to_numpy(), index=decision_index(base))
+    sigma = kind.sigma(close, definition).reindex(decisions)
+    lookahead = kind.lookahead(definition)
+    vault = vault_start(cfg)
+    mask = exclude_mask(cfg.bars_config())
+    catalog = Catalog(cfg)
+    months = decisions.tz_convert("UTC").strftime("%Y-%m")
+    frames = []
+    for _, chunk in sigma.groupby(months, sort=True):
+        start = chunk.index[0]
+        end = min(chunk.index[-1] + lookahead + pd.Timedelta(seconds=1), vault)
+        ticks = catalog.load_ticks(spec.source, spec.instrument, start, end)
+        usable = (ticks["flags"].to_numpy() & mask) == 0
+        if excluded and len(ticks):
+            days = trading_days(pd.DatetimeIndex(ticks["ts_utc"]))
+            usable &= ~pd.Series([d.item() for d in days]).isin(excluded).to_numpy()
+        quotes = ticks.loc[usable, ["ts_utc", "bid", "ask"]].reset_index(drop=True)
+        frames.append(compute_targets(kind, specs, quotes, chunk))
+    return pd.concat(frames)
+
+
 def _write_frame(frame: pd.DataFrame, path: Path) -> None:
     table = frame.reset_index().rename(columns={DECISION_TIME: DECISION_COLUMN})
     pq.write_table(pa.Table.from_pandas(table, preserve_index=False), path, compression="zstd")
 
 
 def _manifest(
+    cfg: AppConfig,
     ds_id: str,
     spec: DatasetSpec,
     features: pd.DataFrame,
+    targets: pd.DataFrame | None,
     decision: GateDecision,
     directory: Path,
     git_sha: str,
 ) -> dict[str, Any]:
     files = {FEATURES_FILE: sha256_file(directory / FEATURES_FILE)}
+    columns = {"features": {str(c): str(t) for c, t in features.dtypes.items()}}
+    target_info: dict[str, Any] = {}
+    if targets is not None and spec.target_set is not None:
+        files[TARGETS_FILE] = sha256_file(directory / TARGETS_FILE)
+        columns["targets"] = {str(c): str(t) for c, t in targets.dtypes.items()}
+        definition = cfg.target_set(spec.target_set.name, spec.target_set.version)
+        target_info = {
+            "targets": sorted(targets["target"].unique().tolist()),
+            "target_set_hash": definition_hash(definition),
+            "target_rows": len(targets),
+        }
     combined = hashlib.sha256(
         "".join(f"{name}:{digest}\n" for name, digest in sorted(files.items())).encode()
     ).hexdigest()
@@ -339,11 +454,12 @@ def _manifest(
         "dataset_id": ds_id,
         "name": spec.name,
         "spec": spec.model_dump(mode="json"),
-        "code_versions": {**code_versions(), **code_versions_for(spec)},
+        "code_versions": {**code_versions(), **code_versions_for(cfg, spec)},
         "row_count": len(features),
         "decision_time_first": str(features.index[0]),
         "decision_time_last": str(features.index[-1]),
-        "columns": {"features": {str(c): str(t) for c, t in features.dtypes.items()}},
+        "columns": columns,
+        **target_info,
         "files": files,
         "sha256": combined,
         "bar_set_ids": [bar_set_id(spec.source, spec.instrument, tf, build) for tf in timeframes],

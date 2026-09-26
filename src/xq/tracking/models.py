@@ -419,3 +419,19 @@ class Artifact(Base):
     kind: Mapped[str] = mapped_column(String(64))
     path: Mapped[str] = mapped_column(Text)
     sha256: Mapped[str] = mapped_column(String(64))
+
+
+class TargetSetRecord(Base):
+    """The locked definition of a target set version (TGT-001).
+
+    The first build that uses a target set version records its definition hash; a later build
+    with a different definition under the same version is refused.
+    """
+
+    __tablename__ = "target_sets"
+
+    name: Mapped[str] = mapped_column(String(64), primary_key=True)
+    version: Mapped[str] = mapped_column(String(16), primary_key=True)
+    spec_json: Mapped[dict[str, Any]]
+    hash: Mapped[str] = mapped_column(String(64))
+    created_at: Mapped[pd.Timestamp]

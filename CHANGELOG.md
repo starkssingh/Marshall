@@ -210,6 +210,15 @@ IDs from `docs/specs/development-plan.md`.
   observations; trials without returns count as independent), with parameters in
   `experiments.trial_clustering` (proposed). New dependency `scipy` (hierarchical clustering). ADR
   0023.
+- TGT-001: target framework (`xq.targets.base`, `xq.targets.kinds`) — target sets defined in
+  `config/targets.yaml` (`kind`, `horizons`, `price_refs`, `params`), expanded into `TargetSpec`s
+  and computed by a `TargetKind` (`expand`, causal `sigma`, `compute`, `lookahead`, code
+  version); every target carries `value`, `label_start`, `label_end` and `scale`; datasets with a
+  target set write `targets.parquet` in long form, computed month by month from clean ticks
+  (unusable and excluded-day ticks removed, never past the vault, quote days gated by DQ-007);
+  definitions are hash-locked in `target_sets` (migration 0006) and part of the dataset id; the
+  schema guard `check_feature_matrix` refuses target columns and reserved prefixes (`tgt_`,
+  `fwd_`) in feature matrices. ADR 0024.
 
 ### Changed
 

@@ -1,0 +1,27 @@
+"""The target kinds known to the dataset builder (TGT-001).
+
+A static mapping, filled explicitly here as kinds are implemented (TGT-002 adds forward returns).
+"""
+
+from __future__ import annotations
+
+from collections.abc import Mapping
+from types import MappingProxyType
+
+from xq.core.errors import ConfigError
+from xq.targets.base import TargetKind
+
+TARGET_KINDS: Mapping[str, TargetKind] = MappingProxyType({})
+
+
+def target_kind(name: str) -> TargetKind:
+    """The kind called `name`.
+
+    Raises:
+        ConfigError: if no such kind exists.
+    """
+    try:
+        return TARGET_KINDS[name]
+    except KeyError:
+        known = ", ".join(sorted(TARGET_KINDS)) or "none"
+        raise ConfigError(f"unknown target kind {name!r}; available: {known}") from None
