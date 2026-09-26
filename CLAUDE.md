@@ -11,9 +11,20 @@ profitable-looking backtest.
 3. This file — binding invariants.
 4. `docs/adr/` — decisions already made.
 5. `CHANGELOG.md` and `git log` — what is already done.
+6. `docs/STATUS.md` — current sprint and next task, carry-over items, open owner decisions,
+   provisional assumptions, known issues and per-phase status.
 
 The development plan wins on architecture and sequencing; the project instructions win on
 research standards. Record any conflict in an ADR.
+
+## Session protocol
+
+- At the start of every session, read this file, then `docs/STATUS.md`.
+- Update `docs/STATUS.md` at the end of every sprint and whenever a decision or a carry-over item
+  changes.
+- Anything decided in conversation must land in an ADR and in `docs/STATUS.md` in the same
+  session.
+- If memory of an earlier conversation conflicts with the repository, the repository wins.
 
 ## Commands
 

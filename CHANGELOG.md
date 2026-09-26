@@ -229,6 +229,10 @@ IDs from `docs/specs/development-plan.md`.
 
 ### Changed
 
+- `docs/STATUS.md` tracks the current sprint and next task, review carry-overs with owners and
+  closing commits, open owner decisions, provisional assumptions, known issues and per-phase
+  status; `CLAUDE.md` gains a session protocol (read it after `CLAUDE.md`, keep it current, record
+  chat decisions in an ADR and in it the same session, the repository wins over memory).
 - ADR 0013 records the owner's decisions on the Sprint 2 open questions: quality thresholds
   ratified as provisional (one change allowed, by ADR, after the DQ-008 real-data review; never
   after a strategy result exists); hour-of-week spread buckets kept until DQ-008; exact duplicates
