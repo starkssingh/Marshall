@@ -167,3 +167,45 @@ are labelled "descriptive, cut ex post".
   each slice, and "descriptive, cut ex post" for volatility terciles, because their cut points use
   the sliced period itself.
 - The hypothesis template's comment says so.
+
+## 5. A reproduction is REPRODUCED only on the same code
+
+**Decision.** A reproduction's status is REPRODUCED only if the git sha, the config hash and the
+lock hash match **and** the metrics are within tolerance. Otherwise its status is
+RERUN_DIFFERENT_CODE: it is reported, and never counted as reproduced.
+
+**Implementation.**
+
+- `Reproduction.status` is a `ReproductionStatus`, and `reproduced` is true only for REPRODUCED.
+- A value must identify something to match. An unknown sha, or the `+dirty` sha of a dirty tree,
+  identifies no commit; a missing `uv.lock` identifies no environment; a run without a config hash
+  identifies no configuration. None of these matches, even itself: two dirty runs with the same
+  sha may run different code.
+- `describe` prints the status and every identity field that differs or is unidentified. A
+  RERUN_DIFFERENT_CODE says it is not counted as reproduced.
+- The status, the identity fields and the comparisons are written to
+  `<reports_dir>/reproductions/<reproduction run id>.json` and recorded as a `reproduction`
+  artifact of the reproduction run, so the gate evaluator (GATE-001) can read the status rather
+  than re-derive it.
+- `xq exp reproduce` exits 0 only for REPRODUCED, 1 for NOT_REPRODUCED and 3 for
+  RERUN_DIFFERENT_CODE (2 stays a refusal).
+
+**One reading of Claude's, for the owner.** Where the code is the same (all three fields match
+and identify it) but a judged metric is out of tolerance, the status is a third one,
+**NOT_REPRODUCED**, not RERUN_DIFFERENT_CODE. Calling that "different code" would misstate what
+happened: the same code gave a different result, a genuine failure to reproduce, which is the
+more serious finding. It is never counted as reproduced either. RERUN_DIFFERENT_CODE covers
+exactly the case the name states. If the owner prefers two statuses, NOT_REPRODUCED folds into
+RERUN_DIFFERENT_CODE with a one-line change.
+
+**Known truth.** The fixture board run reproduces on a clean git repository with every judged
+metric equal: REPRODUCED, exit 0. The test repository ignores what runs write, so the tree stays
+clean. The same rerun is RERUN_DIFFERENT_CODE (exit 3) in three cases, even though its metrics all
+agree:
+
+- after a new commit;
+- with another configuration (`--set logging.level=WARNING`);
+- with an uncommitted edit to the lockfile (a dirty tree).
+
+A stored metric altered by 0.1 on the same code is NOT_REPRODUCED (exit 1), with exactly that
+metric named.

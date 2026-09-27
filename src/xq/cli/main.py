@@ -47,11 +47,19 @@ from xq.tracking.conclusions import close_experiment, load_conclusion, unconclud
 from xq.tracking.db import current_revision, engine_for, head_revision, upgrade_to_head
 from xq.tracking.hypotheses import register_hypothesis
 from xq.tracking.registry import list_hypotheses
-from xq.tracking.reproduce import DEFAULT_ATOL, DEFAULT_RTOL, describe, reproduce_run
+from xq.tracking.reproduce import (
+    DEFAULT_ATOL,
+    DEFAULT_RTOL,
+    ReproductionStatus,
+    describe,
+    reproduce_run,
+)
 from xq.tracking.runs import experiment_run
 from xq.tracking.trials import trial_count
 
 EXIT_USAGE_ERROR = 2
+#: `xq exp reproduce`: the rerun used other code, config or environment (never reproduced).
+EXIT_DIFFERENT_CODE = 3
 
 app = typer.Typer(
     name="xq",
@@ -480,16 +488,20 @@ def exp_reproduce(
         ),
     ] = False,
 ) -> None:
-    """Rebuild a run's dataset, repeat the run and compare its metrics (EXP-006); exit 1 unless
-    every judged metric is within tolerance."""
+    """Rebuild a run's dataset, repeat the run and compare its metrics (EXP-006).
+
+    Exit 0 only for REPRODUCED (same git sha, config hash and lock hash, every judged metric
+    within tolerance); 1 for NOT_REPRODUCED; 3 for RERUN_DIFFERENT_CODE (C-24, ADR 0055)."""
     with pipeline_run(ctx.obj) as run:
         result = reproduce_run(
             run.cfg, run.engine, run_id, rtol=rtol, atol=atol, exploratory=exploratory
         )
     for line in describe(result):
         typer.echo(line)
-    if not result.reproduced:
+    if result.status is ReproductionStatus.NOT_REPRODUCED:
         raise typer.Exit(1)
+    if result.status is ReproductionStatus.RERUN_DIFFERENT_CODE:
+        raise typer.Exit(EXIT_DIFFERENT_CODE)
 
 
 baselines_app = typer.Typer(

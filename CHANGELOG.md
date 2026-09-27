@@ -718,6 +718,16 @@ IDs from `docs/specs/development-plan.md`.
   (`SliceReport.label`); every other slice is "descriptive". Tested: an unknown name is refused at
   registration, vocabulary names and aliases register, and an old version with an unknown name is
   still refused when loaded.
+- C-24 (5) (owner's decision, ADR 0055), EXP-006: a reproduction has a status
+  (`ReproductionStatus`). It is REPRODUCED only when the git sha, the config hash and the lock
+  hash match and identify the code, and every judged metric is within tolerance. An unknown or
+  dirty sha, a missing lockfile or a missing config hash never matches. Otherwise the status is
+  RERUN_DIFFERENT_CODE, which is reported and never counted as reproduced. On the same code with a
+  metric out of tolerance it is NOT_REPRODUCED. The status, the identity fields and the
+  comparisons are written to `reports/reproductions/<run>.json` as a `reproduction` artifact.
+  `xq exp reproduce` exits 0 only for REPRODUCED, 1 for NOT_REPRODUCED and 3 for
+  RERUN_DIFFERENT_CODE. The test fixture is now a clean git repository. Tested: a new commit,
+  another configuration and a dirty tree each give RERUN_DIFFERENT_CODE with matching metrics.
 - C-22 (owner's decision, ADR 0053): position sizing scales on the edge per unit of risk instead
   of the raw calibrated probability — `ev_r = p_lcb x TP/SL - (1 - p_lcb) - round_trip_cost/SL`
   with `p_lcb` the probability's lower confidence bound, and the multiplier
