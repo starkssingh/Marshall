@@ -388,6 +388,13 @@ IDs from `docs/specs/development-plan.md`.
   GARCH(1,1) simulation Ljung-Box on squared returns and ARCH-LM reject; Q* keeps its size on GARCH
   returns (at most 10 % rejections at 5 % over 150 draws) where the plain Ljung-Box over-rejects;
   an AR(1) is detected. ADR 0043.
+- STAT-003: variance-ratio tests (`xq.research.stats.variance_ratio`) — Lo-MacKinlay robust z* at
+  2 to 64 bars with the Chow-Denning joint test; by slice (session, volatility regime) with q-bar
+  windows inside contiguous runs only and Holm across slices; volatility-regime labels from the
+  trailing volatility before each return with cut-offs from reference rows. Recovery: on
+  Ornstein-Uhlenbeck increments VR(q) is below 1 and matches (1 - phi^q) / (q (1 - phi)), and the
+  joint test rejects; on a random walk it does not; its size on GARCH returns stays at most 10 %;
+  slices find reversion only where it is. ADR 0043.
 
 ### Changed
 

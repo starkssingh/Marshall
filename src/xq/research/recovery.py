@@ -13,6 +13,7 @@ from collections.abc import Mapping
 
 _STATIONARITY = "tests/unit/research/test_stats_stationarity.py"
 _DEPENDENCE = "tests/unit/research/test_stats_dependence.py"
+_VARIANCE_RATIO = "tests/unit/research/test_stats_variance_ratio.py"
 
 RECOVERY_TESTS: Mapping[str, tuple[str, ...]] = {
     "ADF": (
@@ -41,6 +42,14 @@ RECOVERY_TESTS: Mapping[str, tuple[str, ...]] = {
     "ARCH-LM": (
         f"{_DEPENDENCE}::test_ljung_box_and_arch_lm_match_statsmodels",
         f"{_DEPENDENCE}::test_garch_squared_returns_reject_and_arch_lm_rejects",
+    ),
+    "VR": (
+        f"{_VARIANCE_RATIO}::test_ou_increments_have_variance_ratios_below_one_matching_theory",
+        f"{_VARIANCE_RATIO}::test_random_walk_increments_do_not_reject",
+    ),
+    "Chow-Denning": (
+        f"{_VARIANCE_RATIO}::test_ou_increments_have_variance_ratios_below_one_matching_theory",
+        f"{_VARIANCE_RATIO}::test_chow_denning_size_is_controlled_on_garch_returns",
     ),
 }
 
