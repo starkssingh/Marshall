@@ -15,12 +15,15 @@ Sprints 1 and 2 are merged. Sprint 2 (clean ticks, bars and data quality) is imp
 tested on synthetic data but **not validated**: its quality report must first run on at least one
 year of real broker ticks, followed by the human review (DQ-008); the owner's decisions on its open
 questions are in ADR 0013. Sprint 3 (datasets, leakage harness, experiment registry, forward-return
-targets) is implemented and tested on synthetic data only. See [`CHANGELOG.md`](CHANGELOG.md) for
-completed backlog tasks.
+targets) and Sprint 4 (walk-forward, cost model and screener, Sharpe inference, DSR, forecast
+comparison, the evidence gates in `config/gates.yaml`, and the baseline board) are implemented and
+tested on synthetic data only. See [`CHANGELOG.md`](CHANGELOG.md) for completed backlog tasks and
+[`docs/STATUS.md`](docs/STATUS.md) for the current sprint, open decisions and carry-over items.
 
-Open owner decisions (development plan, section 1): the execution broker and its data feed. The
-source `mt5_primary` in `config/base.yaml` is a provisional placeholder (ADR 0004); no real market
-data is in the repository.
+Open owner decisions (development plan, section 1): the execution broker, its data feed and its
+cost terms. The source `mt5_primary` in `config/base.yaml` is a provisional placeholder (ADR 0004),
+the cost model is a provisional placeholder (every net result is "screening, placeholder costs"),
+and no real market data is in the repository.
 
 ## Quick start
 
