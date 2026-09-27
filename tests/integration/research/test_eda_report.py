@@ -26,7 +26,7 @@ from xq.tracking import registry
 HYPOTHESIS = "H-0900"
 #: A trading-day start inside the synthetic data: the discovery window of the enforcement tests.
 DISCOVERY_END = "2024-03-12T21:00:00Z"
-SECTIONS = ["overview", "distributions", "dependence", "seasonality", "horizons"]
+SECTIONS = ["overview", "distributions", "dependence", "seasonality", "trend", "horizons"]
 
 
 @pytest.fixture(scope="module")

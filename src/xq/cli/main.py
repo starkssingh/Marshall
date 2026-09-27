@@ -519,7 +519,8 @@ def research_eda(
         ),
     ] = False,
 ) -> None:
-    """Write the EDA report of a dataset's discovery window."""
+    """Write the EDA report of a dataset's discovery window (distributions, dependence,
+    seasonality, trend, cost to volatility and the horizon admission list)."""
     with pipeline_run(ctx.obj) as run:
         stop = ensure_utc(pd.Timestamp(end)) if end is not None else None
         with experiment_run(

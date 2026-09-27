@@ -5,8 +5,8 @@ window (`xq.research.eda.data`), computes the sections below and writes one repo
 `xq.research.reports.ReportBuilder` under ``reports/eda/<dataset_id>/<run_id>/``:
 
 - ``overview`` — the discovery window, the bars and returns per timeframe, the excluded days;
-- ``distributions`` (EDA-002), ``dependence`` (EDA-003), ``seasonality`` (EDA-004) and ``horizons``
-  (EDA-006), each with its tables and figures;
+- ``distributions`` (EDA-002), ``dependence`` (EDA-003), ``seasonality`` (EDA-004), ``trend``
+  (EDA-005) and ``horizons`` (EDA-006), each with its tables and figures;
 - ``admission.yaml`` — the horizon admission list (copied to ``config/horizons.yaml`` only by
   ``xq research admit-horizons``);
 - ``run.json`` — the run id, experiment, confirmatory flag, git sha and seed (outside the
@@ -36,7 +36,7 @@ from xq.core.config import config_hash
 from xq.core.seeds import derive_seed
 from xq.core.time import TimestampLike
 from xq.core.types import Timeframe
-from xq.research.eda import dependence, distributions, horizons, seasonality
+from xq.research.eda import dependence, distributions, horizons, seasonality, trend
 from xq.research.eda.bootstrap import eda_block_length
 from xq.research.eda.data import EdaInputs, bars_per_trading_day, load_eda_inputs
 from xq.research.reports import (
@@ -52,6 +52,7 @@ if TYPE_CHECKING:
 
 REPORT_DIR = "eda"
 TITLE = "Exploratory research on the discovery window"
+_TOP_EPISODES = 10
 #: Longest table rendered in a Markdown section; longer ones are in their CSV files.
 _MAX_ROWS = 60
 
@@ -113,6 +114,7 @@ def run_eda(run: RunContext, dataset_id: str, *, end: TimestampLike | None = Non
     _distributions(builder.section("distributions", "Return distributions (EDA-002)"), run, returns)
     _dependence(builder.section("dependence", "Serial dependence (EDA-003)"), run, returns)
     _seasonality(builder.section("seasonality", "Seasonality and sessions (EDA-004)"), run, returns)
+    _trend(builder.section("trend", "Trend and reversion (EDA-005)"), run, inputs, returns)
     admission = _horizons(
         builder.section("horizons", "Cost to volatility and horizon admission (EDA-006)"),
         run,
@@ -369,6 +371,63 @@ def _seasonality(section: Section, run: RunContext, returns: dict[Timeframe, pd.
                 ),
                 caption=f"{family} effects with corrected intervals (hollow: not stable)",
             )
+
+
+def _trend(
+    section: Section,
+    run: RunContext,
+    inputs: EdaInputs,
+    returns: dict[Timeframe, pd.DataFrame],
+) -> None:
+    config = run.cfg.eda_config().trend
+    section.text(
+        "Descriptive only. Variance ratios of overlapping q-bar sums (Lo-MacKinlay; z* is the "
+        "heteroskedasticity-robust distance from 1), sign runs against independent signs, and "
+        "buy-and-hold drawdowns of the daily mid close (no costs)."
+    )
+    vr_returns = returns[config.variance_ratio_timeframe]["ret"].to_numpy(dtype=np.float64)
+    table = trend.variance_ratio_table(vr_returns, config.variance_ratio_q)
+    tf = config.variance_ratio_timeframe.value
+    section.table("variance-ratios", table, caption=f"Variance ratios of {tf} returns")
+    section.figure(
+        "variance-ratios",
+        trend.variance_ratio_figure(table, f"Variance ratios of {tf} returns"),
+        caption=f"Variance ratio VR(q) of {tf} returns",
+    )
+    run_returns = returns[config.run_timeframe]["ret"].to_numpy(dtype=np.float64)
+    runs = trend.sign_runs(run_returns)
+    run_tf = config.run_timeframe.value
+    section.table(
+        "runs",
+        pd.DataFrame([{"timeframe": run_tf, **runs}]),
+        caption=f"Sign runs of {run_tf} returns",
+    )
+    section.table(
+        "run-lengths",
+        trend.run_length_counts(run_returns),
+        caption=f"Run lengths of {run_tf} returns against independent signs",
+    )
+    daily = inputs.bars[Timeframe.D1]
+    if len(daily):
+        prices = pd.Series(
+            daily["close"].to_numpy(dtype=np.float64), index=list(daily["trading_day"])
+        )
+        summary = trend.drawdown_summary(prices)
+        section.table(
+            "drawdown", pd.DataFrame([summary]), caption="Buy-and-hold drawdowns (daily mid)"
+        )
+        episodes = trend.drawdown_episodes(prices)
+        deepest = episodes.sort_values(["depth", "peak"], ascending=[False, True])
+        section.table(
+            "episodes",
+            deepest.head(_TOP_EPISODES).reset_index(drop=True),
+            caption=f"The {_TOP_EPISODES} deepest drawdown episodes",
+        )
+        section.figure(
+            "underwater",
+            trend.underwater_figure(prices, "Buy and hold, daily mid close"),
+            caption="Daily mid close and its drawdown from the running peak",
+        )
 
 
 def _horizons(

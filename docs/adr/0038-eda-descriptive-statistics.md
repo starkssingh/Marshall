@@ -2,7 +2,7 @@
 
 - **Status:** accepted
 - **Date:** 2026-09-27
-- **Tasks:** EDA-002, EDA-003, EDA-004 (on EDA-001)
+- **Tasks:** EDA-002, EDA-003, EDA-004, EDA-005 (on EDA-001)
 
 ## Context
 
@@ -59,6 +59,20 @@ processes with known properties. Exact formulas are in the module docstrings.
   effects separately. Nothing here is validated out of sample.
 - Tests: injected hour-of-week mean and volatility effects are significant and stable; noise stays
   within the family-wise rate; an effect present only in the first half is unstable.
+
+## Decision — EDA-005 trend and reversion
+
+- Variance ratios VR(q) of overlapping q-bar sums (Lo–MacKinlay) with the
+  heteroskedasticity-robust z*, on 15m returns for q = 2, 4, 16, 92 (30 minutes to one trading
+  day). Descriptive only: no verdict is drawn.
+- Sign runs of 1h returns against independent signs (Wald–Wolfowitz expectation and z), with run
+  length counts against geometric run lengths.
+- Buy-and-hold drawdowns of the daily mid close (no costs): every episode with peak, trough,
+  recovery, depth and durations; the maximum drawdown, the share of days under water and the
+  longest underwater spell.
+- Tests: VR matches the estimator written out and the AR(1) theory `1 + 2 sum (1 - k/q) phi^k`;
+  GARCH noise has VR near 1 with |z*| < 3; runs detect persistence and reversal; the drawdown
+  episodes of a known path are exact.
 
 ## Consequences
 

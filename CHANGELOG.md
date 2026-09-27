@@ -360,6 +360,10 @@ IDs from `docs/specs/development-plan.md`.
   standard errors (trading week; month), Bonferroni-corrected Student-t intervals and split-half
   stability labels. Injected hour-of-week effects are found and stable; an effect that stops
   half-way is unstable; noise stays within the family-wise error rate. ADR 0038.
+- EDA-005: trend and reversion descriptives (`xq.research.eda.trend`) — Lo–MacKinlay variance
+  ratios with the heteroskedasticity-robust z*, sign runs with run-length counts against
+  independent signs, and buy-and-hold drawdown episodes, time under water and the longest
+  underwater spell. Variance ratios match AR(1) theory. ADR 0038.
 
 ### Changed
 
