@@ -2,7 +2,7 @@
 
 - **Status:** accepted
 - **Date:** 2026-09-27
-- **Tasks:** VAL-001, VAL-002 (VAL-005 adds a section below)
+- **Tasks:** VAL-001, VAL-002, VAL-005
 
 ## Context
 
@@ -47,6 +47,22 @@ published examples.
    T = 1250, N = 100, V = 0.5, skewness −3, kurtosis 10) is reproduced: expected maximum 0.1132,
    DSR 0.9004. On simulated pure-noise families of 20 strategies, the best strategy passes
    DSR > 0.95 in at most 8 % of families, where the undeflated PSR passes in more than 30 %.
+
+8. **Forecast comparison (VAL-005)** in `xq.validation.forecast_eval`, on per-observation loss
+   series (BASE-006):
+   - Diebold–Mariano uses the autocovariances up to `horizon − 1`, falling back to Newey–West
+     weights if that is not positive, with the Harvey–Leybourne–Newbold correction and Student's
+     t(T − 1).
+   - Giacomini–White uses instruments lagged by the horizon (default: a constant and the lagged
+     loss difference), with a Newey–West Ω and a χ²(q) test.
+   - The Model Confidence Set (Hansen–Lunde–Nason) uses T_max, sequential elimination and the
+     stationary bootstrap. Its p-values never decrease along the eliminations, and the set is the
+     models with p ≥ α (default 0.10).
+
+   Verification: hand-computed statistics; size on simulated nulls (DM at horizons 1 and 4, and
+   GW, reject 2–10 % at the 5 % level); power on alternatives (DM on a better forecast; GW on
+   predictable loss differences with zero mean); the MCS keeps all equal models in at least 85 %
+   of simulations at α = 0.10 and drops a clearly worse one.
 
 ## Consequences
 

@@ -11,7 +11,7 @@ with the repository, the repository wins.
 ## Current sprint
 
 - **Sprint:** 4 — evaluation spine (branch `sprint-4`, from `main` at `b64f059`).
-- **Next task:** VAL-005 (C-6 blocked, see below).
+- **Next task:** VAL-007 — on hold: the proposed `config/gates.yaml` is with the owner for approval (C-6 blocked, see below).
 - **Sprint 4 order:** WF-001, WF-006, WF-002, WF-003, BT-001, BT-002, BT-003, BASE-006, VAL-001,
   VAL-002, VAL-005, VAL-007, BASE-001, BASE-002, BASE-005 — synthetic data only.
 - **Hold point:** before VAL-007, the proposed `config/gates.yaml` goes to the owner, and work waits

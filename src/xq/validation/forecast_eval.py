@@ -16,18 +16,37 @@ variance ``s``: ``qlike`` = mean(s / h - log(s / h) - 1) (Patton 2011), zero onl
 forecast and robust to noise in the realized proxy.
 
 `loss_series` returns the per-observation losses these means are made of, aligned with the
-input, for Diebold-Mariano and related comparisons (VAL-005).
+input, for the forecast comparisons below (VAL-005). Each takes loss series of competing forecasts
+of the same targets; lower loss is better.
+
+- `diebold_mariano`: equal expected loss of two forecasts. ``d = loss_a - loss_b``; the variance
+  of its mean uses the autocovariances up to ``horizon - 1`` (Diebold and Mariano 1995; Newey-West
+  weights if that estimate is not positive); with ``harvey`` the statistic is scaled by
+  ``sqrt((T + 1 - 2h + h(h - 1) / T) / T)`` and compared with Student's t with ``T - 1`` degrees
+  of freedom (Harvey, Leybourne and Newbold 1997).
+- `giacomini_white`: conditional equal predictive ability (Giacomini and White 2006). With
+  instruments ``h`` known before the forecast (default: a constant and the lagged loss
+  difference), ``T * zbar' Omega^-1 zbar`` for ``z_t = h_(t - horizon) d_t`` is chi-squared with
+  as many degrees of freedom as instruments; Omega is Newey-West with ``horizon - 1`` lags.
+- `model_confidence_set`: the models that contain the best one with probability ``1 - alpha``
+  (Hansen, Lunde and Nason 2011), by sequential elimination with the ``T_max`` statistic and the
+  stationary bootstrap; every model gets an MCS p-value and the set is the models whose p-value is
+  at least ``alpha``.
 """
 
 from __future__ import annotations
 
 import math
+from dataclasses import dataclass
 from typing import Literal
 
 import numpy as np
 import numpy.typing as npt
 import pandas as pd
-from scipy.stats import rankdata
+from scipy.stats import chi2, norm, rankdata
+from scipy.stats import t as student_t
+
+from xq.validation.sharpe import stationary_bootstrap
 
 FloatArray = npt.NDArray[np.float64]
 Loss = Literal["squared", "absolute", "log", "brier", "qlike"]
@@ -182,3 +201,144 @@ def _check_binary(y: FloatArray) -> None:
 def _check_probability(p: FloatArray) -> None:
     if np.any((p < 0) | (p > 1)) or np.isnan(p).any():
         raise ValueError("probabilities must lie in [0, 1]")
+
+
+@dataclass(frozen=True)
+class ComparisonTest:
+    """Result of a forecast comparison test (a positive statistic means ``a`` loses more)."""
+
+    statistic: float
+    p_value: float
+    n: int
+    mean_difference: float
+
+
+@dataclass(frozen=True)
+class ModelConfidenceSet:
+    """The models in the confidence set, every model's MCS p-value and the elimination order."""
+
+    included: list[str]
+    p_values: dict[str, float]
+    eliminated: list[str]
+
+
+def diebold_mariano(
+    loss_a: npt.ArrayLike, loss_b: npt.ArrayLike, *, horizon: int = 1, harvey: bool = True
+) -> ComparisonTest:
+    """Two-sided test of equal expected loss of forecasts ``a`` and ``b`` (module docstring)."""
+    d = _differences(loss_a, loss_b)
+    n = len(d)
+    if horizon < 1:
+        raise ValueError("horizon must be at least 1")
+    if n < 2 * horizon + 1:
+        return ComparisonTest(math.nan, math.nan, n, float(np.mean(d)) if n else math.nan)
+    mean = float(np.mean(d))
+    centred = d - mean
+    gammas = [float(np.dot(centred[k:], centred[: n - k])) / n for k in range(horizon)]
+    long_run = gammas[0] + 2 * sum(gammas[1:])
+    if long_run <= 0:
+        long_run = gammas[0] + 2 * sum(
+            (1 - k / horizon) * g for k, g in enumerate(gammas[1:], start=1)
+        )
+    if long_run <= 0:
+        return ComparisonTest(math.nan, math.nan, n, mean)
+    statistic = mean / math.sqrt(long_run / n)
+    if harvey:
+        statistic *= math.sqrt((n + 1 - 2 * horizon + horizon * (horizon - 1) / n) / n)
+        p_value = 2 * float(student_t.sf(abs(statistic), df=n - 1))
+    else:
+        p_value = 2 * float(norm.sf(abs(statistic)))
+    return ComparisonTest(statistic, p_value, n, mean)
+
+
+def giacomini_white(
+    loss_a: npt.ArrayLike,
+    loss_b: npt.ArrayLike,
+    *,
+    horizon: int = 1,
+    instruments: npt.ArrayLike | None = None,
+) -> ComparisonTest:
+    """Test conditional equal predictive ability (see the module docstring).
+
+    Args:
+        instruments: One row per observation (``T x q``), each row known when the forecast for
+            that observation is made; it is lagged by `horizon`. Default: a constant and the loss
+            difference itself (lagged by `horizon`).
+    """
+    d = _differences(loss_a, loss_b)
+    n = len(d)
+    if horizon < 1:
+        raise ValueError("horizon must be at least 1")
+    h = np.column_stack([np.ones(n), d]) if instruments is None else np.asarray(instruments, float)
+    if h.ndim == 1:
+        h = h[:, None]
+    if len(h) != n:
+        raise ValueError(f"{len(h)} instrument rows for {n} loss differences")
+    z = h[: n - horizon] * d[horizon:, None]
+    rows, q = z.shape
+    if rows <= q:
+        return ComparisonTest(math.nan, math.nan, n, float(np.mean(d)))
+    zbar = z.mean(axis=0)
+    omega = z.T @ z / rows
+    centred = z - zbar
+    for k in range(1, horizon):
+        gamma = centred[k:].T @ centred[:-k] / rows
+        omega = omega + (1 - k / horizon) * (gamma + gamma.T)
+    try:
+        statistic = float(rows * zbar @ np.linalg.solve(omega, zbar))
+    except np.linalg.LinAlgError:
+        return ComparisonTest(math.nan, math.nan, n, float(np.mean(d)))
+    return ComparisonTest(statistic, float(chi2.sf(statistic, df=q)), n, float(np.mean(d)))
+
+
+def model_confidence_set(
+    losses: pd.DataFrame,
+    *,
+    alpha: float = 0.10,
+    n_boot: int = 1000,
+    mean_block: float = 5.0,
+    seed: int,
+) -> ModelConfidenceSet:
+    """The Model Confidence Set of the columns of `losses` (one row per observation)."""
+    if losses.isna().to_numpy().any():
+        raise ValueError("losses must not contain missing values")
+    names = [str(c) for c in losses.columns]
+    values = losses.to_numpy(dtype=np.float64)
+    n = len(values)
+    if len(names) < 2 or n < 3:
+        return ModelConfidenceSet(names, dict.fromkeys(names, 1.0), [])
+    index = stationary_bootstrap(n, n_boot=n_boot, mean_block=mean_block, seed=seed)
+    means = values.mean(axis=0)
+    boot_means = values[index].mean(axis=1)  # n_boot x m
+    alive = list(range(len(names)))
+    p_values: dict[str, float] = {}
+    eliminated: list[str] = []
+    running = 0.0
+    while len(alive) > 1:
+        d = means[alive] - means[alive].mean()
+        d_boot = boot_means[:, alive] - boot_means[:, alive].mean(axis=1, keepdims=True)
+        spread = d_boot - d
+        variance = np.mean(spread**2, axis=0)
+        scale = np.sqrt(np.where(variance > 0, variance, np.nan))
+        t_stat = d / scale
+        observed = float(np.nanmax(t_stat))
+        boot = np.nanmax(spread / scale, axis=1)
+        p = float(np.mean(boot >= observed))
+        running = max(running, p)
+        worst = alive[int(np.nanargmax(t_stat))]
+        p_values[names[worst]] = running
+        eliminated.append(names[worst])
+        alive.remove(worst)
+    p_values[names[alive[0]]] = 1.0
+    included = [name for name in names if p_values[name] >= alpha]
+    return ModelConfidenceSet(included, p_values, eliminated)
+
+
+def _differences(loss_a: npt.ArrayLike, loss_b: npt.ArrayLike) -> FloatArray:
+    a, b = np.asarray(loss_a, dtype=np.float64), np.asarray(loss_b, dtype=np.float64)
+    if a.shape != b.shape:
+        raise ValueError("the loss series must have the same length")
+    d = a - b
+    if np.isnan(d).any():
+        raise ValueError("loss series must not contain missing values")
+    return d

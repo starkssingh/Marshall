@@ -282,6 +282,10 @@ IDs from `docs/specs/development-plan.md`.
   trial count and trial Sharpe variance (trials record annualized Sharpe ratios). Reproduces the
   published example (DSR 0.9004); on pure-noise families the selected best passes DSR > 0.95 in at
   most 8 % of simulations. ADR 0031.
+- VAL-005: forecast comparison (`xq.validation.forecast_eval`) — Diebold–Mariano with the
+  Harvey–Leybourne–Newbold correction, Giacomini–White conditional predictive ability test and
+  the Model Confidence Set (T_max, stationary bootstrap, MCS p-values). Size checked on simulated
+  nulls and power on simulated alternatives. ADR 0031.
 
 ### Changed
 
