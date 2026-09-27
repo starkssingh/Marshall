@@ -188,3 +188,26 @@ simulations (`tests/helpers/strategies.py`) are:
    the hypothesis is registered. A typo therefore surfaces only at report time and needs a new
    hypothesis version. Checking at registration would move the vocabulary into the tracking
    layer.
+
+## ROB-007 — execution-delay sensitivity
+
+1. **What is delayed.** Every order, entries and exits alike, comes 1, 2 or 3 decision bars late.
+   The target series is shifted by k bars on its own decision grid and is flat before the
+   first. Fills, costs and latency are otherwise unchanged, so the curve isolates the timing of
+   the information. The plan's wording is "entries late". Delaying only entries would also
+   change holding periods, which would mix timing with a different strategy.
+2. **Reported.** The net Sharpe ratio at each delay; its retention (over the undelayed Sharpe,
+   NaN unless that is positive); and whether the curve flips (a positive undelayed Sharpe that
+   turns negative). The R2 gate reads only the delay of `execution_delay.bars` (1): net Sharpe
+   > 0. Smoothness is reported, not gated.
+3. **Known truth.**
+   - A trend rule on a drift with persistence 0.97 has a median undelayed Sharpe of about 1.6.
+     Over 40 seeds its median retention falls steadily, to above 0.8 at three bars; at most two
+     seeds flip, and at least 95 % pass the gate.
+   - A reversal rule on a bid-ask bounce (AR(1), φ = −0.3) flips at the first delay in every
+     seed and fails the gate.
+   - A strategy trading on the return it earns (a look-ahead leak) has an undelayed Sharpe above
+     10, far too good and the tell of CLAUDE.md, and keeps under 2 % of it one bar later.
+   - Per seed, a delayed Sharpe ratio can tick up by chance, so smoothness is judged on the
+     median across replications, as a report on one strategy should judge it against its own
+     bootstrap interval (ROB-003).

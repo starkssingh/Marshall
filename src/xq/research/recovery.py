@@ -32,6 +32,7 @@ _PERTURB = "tests/unit/robustness/test_perturb.py"
 _COST_STRESS = "tests/unit/robustness/test_costs_stress.py"
 _BOOTSTRAP = "tests/unit/robustness/test_bootstrap.py"
 _SLICING = "tests/integration/robustness/test_slicing.py"
+_DELAY = "tests/unit/robustness/test_delay.py"
 
 RECOVERY_TESTS: Mapping[str, tuple[str, ...]] = {
     "ADF": (
@@ -176,6 +177,11 @@ RECOVERY_TESTS: Mapping[str, tuple[str, ...]] = {
         f"{_SLICING}::test_an_edge_earned_in_one_year_fails_the_single_year_gate",
         f"{_SLICING}::test_volatility_terciles_find_an_edge_that_lives_in_high_volatility",
         f"{_SLICING}::test_sessions_follow_dst_and_name_the_overlap",
+    ),
+    "execution_delay": (
+        f"{_DELAY}::test_a_genuine_trend_edge_decays_smoothly_and_passes_the_gate",
+        f"{_DELAY}::test_a_bid_ask_bounce_edge_flips_at_the_first_delay",
+        f"{_DELAY}::test_a_look_ahead_leak_collapses_at_the_first_delay",
     ),
 }
 

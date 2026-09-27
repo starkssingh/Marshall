@@ -667,6 +667,12 @@ IDs from `docs/specs/development-plan.md`.
   rate); the R2 `max_single_year_pnl_share` check. The hypothesis template's slices use the
   vocabulary. Proven on planted edges: an edge earned in one year fails the gate, an edge in
   high volatility lands in the high tercile, sessions follow DST. ADR 0054.
+- ROB-007: execution-delay sensitivity (`xq.robustness.delay`) — the net Sharpe ratio with orders
+  0, 1, 2 and 3 bars late (`delay_curve` for any strategy; `screen_delays` shifts a target series
+  by whole decision bars and screens it), its retention and whether it flips, and the R2
+  `execution_delay` check. Proven on known truth: a genuine trend edge decays smoothly (median
+  retention falling to above 0.8 at three bars) and passes, a bid-ask-bounce edge flips at the
+  first delay and fails, a look-ahead leak collapses. ADR 0054.
 
 ### Changed
 
