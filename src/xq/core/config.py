@@ -475,6 +475,26 @@ TRADING_DAYS_HORIZON = re.compile(r"^(?P<days>[1-9]\d*)[dD]$")
 _DAY_UNIT = re.compile(r"\d\s*(days?|d)(?![a-z])", re.IGNORECASE)
 
 
+def check_horizon_labels(value: list[str]) -> list[str]:
+    """Validate trading-time horizon labels (ADR 0026, ADR 0032): positive, unique, and either
+    whole trading days (``1d``) or market time without a day unit (``15m``, ``36h``)."""
+    for text in value:
+        try:
+            horizon = pd.Timedelta(text)
+        except ValueError as exc:
+            raise ValueError(f"invalid horizon {text!r}") from exc
+        if horizon <= pd.Timedelta(0):
+            raise ValueError(f"horizon {text!r} must be positive")
+        if not TRADING_DAYS_HORIZON.match(text) and _DAY_UNIT.search(text):
+            raise ValueError(
+                f"horizon {text!r} mixes days with other units; write whole trading days "
+                "('1d') or market hours and minutes ('36h')"
+            )
+    if len(set(value)) != len(value):
+        raise ValueError("horizons must be unique")
+    return value
+
+
 class TargetSetConfig(FrozenModel):
     """A versioned target set (``config/targets.yaml``, TGT-001).
 
@@ -492,21 +512,7 @@ class TargetSetConfig(FrozenModel):
     @field_validator("horizons")
     @classmethod
     def _positive_horizons(cls, value: list[str]) -> list[str]:
-        for text in value:
-            try:
-                horizon = pd.Timedelta(text)
-            except ValueError as exc:
-                raise ValueError(f"invalid horizon {text!r}") from exc
-            if horizon <= pd.Timedelta(0):
-                raise ValueError(f"horizon {text!r} must be positive")
-            if not TRADING_DAYS_HORIZON.match(text) and _DAY_UNIT.search(text):
-                raise ValueError(
-                    f"horizon {text!r} mixes days with other units; write whole trading days "
-                    "('1d') or market hours and minutes ('36h')"
-                )
-        if len(set(value)) != len(value):
-            raise ValueError("horizons must be unique")
-        return value
+        return check_horizon_labels(value)
 
 
 class TrialClusteringConfig(FrozenModel):
@@ -596,20 +602,32 @@ class TrendConfig(FrozenModel):
         return sorted(value)
 
 
+class TargetSetRef(FrozenModel):
+    """A target set of ``config/targets.yaml`` by name and version."""
+
+    name: str
+    version: str
+
+
 class HorizonAdmissionConfig(FrozenModel):
-    """Cost-to-volatility horizon admission (EDA-006)."""
+    """Cost-to-volatility horizon admission (EDA-006, ADR 0037, ADR 0040).
+
+    `candidates` are TGT-002 horizon labels (trading time; ``1d`` is one trading day). Holding
+    periods start at the decisions of 1m bars on a `decision_step` grid and use the execution
+    latency and allowed fill delay of the forward-return target set `target_set`.
+    """
 
     max_cost_to_vol: float = Field(gt=0)
-    candidates: list[Timeframe] = Field(min_length=1)
+    candidates: list[str] = Field(min_length=1)
+    decision_step: Timeframe
+    target_set: TargetSetRef
     #: Slippage uses sigma-hat of 1-minute returns: their RMS over this many minutes before entry.
     sigma_1m_minutes: int = Field(ge=1)
 
     @field_validator("candidates")
     @classmethod
-    def _unique(cls, value: list[Timeframe]) -> list[Timeframe]:
-        if len(set(value)) != len(value):
-            raise ValueError("candidate horizons must be unique")
-        return value
+    def _labels(cls, value: list[str]) -> list[str]:
+        return check_horizon_labels(value)
 
 
 class EdaConfig(FrozenModel):
@@ -1223,6 +1241,13 @@ class AppConfig(BaseSettings):
         end = self.eda.discovery.end
         if end is not None and end > self.vault.start:
             raise ValueError(f"eda.discovery.end {end} is after vault.start {self.vault.start}")
+        reference = self.eda.horizons.target_set
+        definition = self.targets.get(reference.name, {}).get(reference.version)
+        if definition is None or definition.kind != "forward_return":
+            raise ValueError(
+                f"eda.horizons.target_set {reference.name}.{reference.version} must be a "
+                "configured forward_return target set"
+            )
         windows = self.eda.seasonality.event_windows
         if windows:
             anchors = set(self.sessions.event_anchors) if self.sessions is not None else set()

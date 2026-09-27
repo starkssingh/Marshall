@@ -375,6 +375,27 @@ IDs from `docs/specs/development-plan.md`.
 
 ### Changed
 
+- EDA-006 holding periods are TGT-002's (ADR 0040, owner review of PR #9): candidates are TGT-002
+  horizon labels; from every market-open decision of a 1m bar on a 5-minute grid, the move over h
+  of market time is computed by `xq.targets.returns.compute` (mid) on quotes rebuilt from the 1m
+  bars' closes, with `fwd_returns.v1`'s latency and fill delay, so trading-time horizons, the
+  closed-market rule and `crosses_close` are the targets' own; n and the share of periods crossing
+  a close are reported. `config/eda.yaml` gains `decision_step` and `target_set`.
+- EDA-006 spread cost is half the closing spread of the 1m bar at the entry fill plus half that at
+  the exit fill, each over its mid, instead of the holding bar's mean spread (ADR 0040).
+- EDA-006 `xq research admit-horizons` refuses a list priced with placeholder costs unless
+  `--allow-placeholder-costs` is passed; `config/horizons.yaml` records the cost basis, whether the
+  costs were provisional, the flag and the source report and run (ADR 0040).
+- EDA-006 analytic test: on a Gaussian random walk with known sigma and a constant spread, the mean
+  absolute move over h matches sigma·sqrt(2h/π), the ratio matches spread ÷ that move, and
+  admission flips at the 0.3 bound (ADR 0040).
+- EDA-006 reports the median absolute move, the median cost and the median-based ratio beside the
+  means (table, figure, admission list); admission stays on the mean ratio (ADR 0040).
+- EDA-006 slippage sigma-hat without an earlier one-minute return: an expanding median of the
+  sigma-hats of periods entered earlier, and the period is dropped when there is none; the
+  whole-window median used data from after the entry (ADR 0040).
+- EDA-006 per-session admission is report-only (ADR 0041): the admission list and
+  `config/horizons.yaml` admit on the overall ratio only; the table's per-row flag is `below_bound`.
 - BASE-005 H-0001 draft revised at the owner's request (ADR 0035, C-15), still unregistered: rule
   baselines are evaluated over the full pre-vault history after each rule's warm-up, with the
   fold-aligned version stored for comparison; they run on 1d and 1h signal bars (not 15m), so the

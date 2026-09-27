@@ -134,6 +134,9 @@ def test_report_has_every_section_and_its_provenance(
     assert {"git_sha", "app_config_hash", "eda_config_hash", "seed"} <= set(metadata)
     horizons = (first / "horizons.md").read_text()
     assert "screening, placeholder costs" in horizons
+    table = pd.read_csv(first / "tables" / "horizons-cost-to-vol.csv")
+    assert {"n", "crosses_close_share"} <= set(table.columns)
+    assert (table["n"] > 0).all()
     timeframes = ("1m", "5m", "15m", "1h", "4h", "1d")
     assert all((first / "figures" / f"distributions-qq-{tf}.png").is_file() for tf in timeframes)
     assert all((first / "tables" / f"dependence-acf-{tf}.csv").is_file() for tf in timeframes)

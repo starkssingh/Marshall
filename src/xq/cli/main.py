@@ -582,12 +582,26 @@ def research_eda(
 def research_admit_horizons(
     ctx: typer.Context,
     report: Annotated[Path, typer.Option("--report", help="EDA report directory.")],
+    allow_placeholder_costs: Annotated[
+        bool,
+        typer.Option(
+            "--allow-placeholder-costs",
+            help="Write a list priced with provisional (placeholder) costs; recorded in the file.",
+        ),
+    ] = False,
 ) -> None:
-    """Copy a confirmatory EDA report's horizon admission list to config/horizons.yaml."""
+    """Copy a confirmatory EDA report's horizon admission list to config/horizons.yaml.
+
+    Refused while the report's costs are placeholders, unless --allow-placeholder-costs is given.
+    """
     state: CliContext = ctx.obj
     with cli_errors():
         state.config  # noqa: B018 - validate the configuration directory before writing into it
-        target = write_admission(report, state.config_dir or DEFAULT_CONFIG_DIR)
+        target = write_admission(
+            report,
+            state.config_dir or DEFAULT_CONFIG_DIR,
+            allow_placeholder_costs=allow_placeholder_costs,
+        )
     typer.echo(f"horizon admission list written to {target}")
 
 
