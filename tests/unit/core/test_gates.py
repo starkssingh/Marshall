@@ -186,6 +186,17 @@ def test_criterion_comparisons() -> None:
     assert not GateCriterion("R", "k", "m", ">=", 1.0).passes(math.nan)
 
 
+def test_a_criterion_is_found_by_gate_and_key_and_checks_a_value() -> None:
+    gates = load_config("research", config_dir=REPO_CONFIG).gates_config()
+    criterion = gates.criterion("R2", "stressed_costs.net_sharpe_min")
+    assert (criterion.op, criterion.threshold) == (">", 0.0)
+    assert criterion.check(0.3).passed
+    assert not criterion.check(0.0).passed  # a Sharpe ratio of exactly 0 is no edge
+    assert "FAIL" in criterion.check(math.nan).describe()
+    with pytest.raises(KeyError, match="no criterion"):
+        gates.criterion("R1", "pbo_max")
+
+
 def test_trial_review_flag() -> None:
     conventions = load_config("research", config_dir=REPO_CONFIG).gates_config().conventions
     assert conventions.needs_trial_review(101, 10)

@@ -12,8 +12,8 @@ answer is known before the method runs (ADR 0054):
   a *single-point optimum on noise*. Its neighbours are no better than noise.
 - `drift_returns` / `trend_positions`: returns carrying a slowly varying drift (a persistent AR(1)
   mean) plus noise, and a trend-following rule that holds the sign of the trailing mean of the
-  last `lookback` returns — a genuine edge that survives nearby lookbacks and decays smoothly when
-  entries are delayed.
+  last `lookback` returns (flat inside a t-statistic `deadband`) — a genuine edge that survives
+  nearby parameters and decays smoothly when entries are delayed.
 """
 
 from __future__ import annotations
@@ -46,17 +46,20 @@ def point_seed(*params: float) -> int:
     return int(digest[:12], 16)
 
 
-def overfit_returns(a: float, b: float, periods: int, *, sigma: float = 0.01) -> FloatArray:
-    """The returns of the overfit strategy at parameter point (a, b): pure noise."""
-    return np.random.default_rng(point_seed(a, b)).normal(0.0, sigma, periods)
+def overfit_returns(
+    a: float, b: float, periods: int, *, sigma: float = 0.01, salt: int = 0
+) -> FloatArray:
+    """The returns of the overfit strategy at parameter point (a, b): pure noise. `salt` gives
+    independent replications of the whole strategy."""
+    return np.random.default_rng(point_seed(salt, a, b)).normal(0.0, sigma, periods)
 
 
 def overfit_grid(
-    a_values: list[float], b_values: list[float], periods: int
+    a_values: list[float], b_values: list[float], periods: int, *, salt: int = 0
 ) -> tuple[FloatArray, list[tuple[float, float]]]:
     """The configuration matrix of the overfit strategy over a parameter grid, and its points."""
     points = [(a, b) for a in a_values for b in b_values]
-    matrix = np.column_stack([overfit_returns(a, b, periods) for a, b in points])
+    matrix = np.column_stack([overfit_returns(a, b, periods, salt=salt) for a, b in points])
     return matrix, points
 
 
@@ -80,11 +83,15 @@ def drift_returns(
     return mu + rng.normal(0.0, noise_sigma, periods)
 
 
-def trend_positions(returns: FloatArray, lookback: int) -> FloatArray:
-    """+1/-1 by the sign of the mean of the previous `lookback` returns (0 before that): causal."""
-    series = pd.Series(returns)
-    signal = series.rolling(int(lookback)).mean().shift(1)
-    return np.sign(signal.fillna(0.0)).to_numpy(np.float64)
+def trend_positions(returns: FloatArray, lookback: int, deadband: float = 0.0) -> FloatArray:
+    """+1/-1 by the sign of the mean of the previous `lookback` returns, flat while the mean's
+    t-statistic lies within +/- `deadband` (and before `lookback` returns exist): causal."""
+    window = pd.Series(returns).rolling(int(lookback))
+    mean = window.mean().shift(1).to_numpy(np.float64)
+    std = window.std().shift(1).to_numpy(np.float64)
+    with np.errstate(divide="ignore", invalid="ignore"):
+        t_stat = mean / (std / np.sqrt(lookback))
+    return np.where(np.abs(t_stat) > deadband, np.sign(mean), 0.0)
 
 
 def strategy_returns(

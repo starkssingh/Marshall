@@ -633,6 +633,14 @@ IDs from `docs/specs/development-plan.md`.
   it) and Bonferroni, adjusted within each family (`adjust_by_family`); the Sprint 6
   `holm_adjust` now delegates to it. Hand-computed references, agreement with statsmodels, and the
   controlled error rates on simulated nulls. ADR 0054.
+- ROB-001: parameter perturbation and plateau metrics (`xq.robustness.perturb`) — each parameter
+  moved by ±10/20/30 % (integers to the nearest integer at least one step away, gridded
+  parameters to the neighbouring allowed values), one at a time, jointly and over pairwise heat-map
+  grids; per level the joint neighbourhood's profitable share, median, worst and
+  median-to-nominal ratio; the R2 `parameter_neighbourhood` check read from `config/gates.yaml`
+  (`GatesConfig.criterion`, `GateCheck`). Proven on known truth: a single-point optimum on noise,
+  chosen in sample, fails in about 85 % of replications; a genuine trend edge chosen the same way
+  passes in at least 90 %. ADR 0054.
 
 ### Changed
 

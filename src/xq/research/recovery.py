@@ -28,6 +28,7 @@ _SELECTION = "tests/unit/models/test_volatility_selection.py"
 _PBO = "tests/unit/validation/test_pbo.py"
 _SPA = "tests/unit/validation/test_spa.py"
 _MULTIPLE = "tests/unit/validation/test_multiple_testing.py"
+_PERTURB = "tests/unit/robustness/test_perturb.py"
 
 RECOVERY_TESTS: Mapping[str, tuple[str, ...]] = {
     "ADF": (
@@ -146,6 +147,11 @@ RECOVERY_TESTS: Mapping[str, tuple[str, ...]] = {
         f"{_MULTIPLE}::test_hand_computed_reference_values",
         f"{_MULTIPLE}::test_the_adjustments_match_statsmodels",
         f"{_MULTIPLE}::test_holm_controls_the_family_wise_error_and_bh_the_false_discovery_rate",
+    ),
+    "parameter_perturbation": (
+        f"{_PERTURB}::test_a_single_point_optimum_on_noise_fails_the_neighbourhood_gate",
+        f"{_PERTURB}::test_a_genuine_trend_edge_passes_the_neighbourhood_gate",
+        f"{_PERTURB}::test_the_designs_evaluate_the_points_they_state",
     ),
 }
 

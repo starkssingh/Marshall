@@ -70,3 +70,30 @@ simulations (`tests/helpers/strategies.py`) are:
    simulated nulls the family-wise error (Holm) and the false discovery rate (BH) at or below the
    level. Recording adjusted p-values in a `stat_tests` table waits for the validation report
    (`xq validate-strategy`), which the plan attaches to Phase 17's report, not to VAL-006.
+
+## ROB-001 — parameter perturbation and plateau metrics
+
+1. **Values.** At each level (10, 20 and 30 %) a parameter moves to `nominal ± level × scale`,
+   where scale is |nominal| unless the parameter declares one (a zero nominal must). An integer
+   parameter moves to the nearest integer (halves round up), and always at least one step, so a
+   short lookback is still perturbed. A parameter with a grid of allowed values moves to the
+   allowed value nearest the target on each side: the plan's "neighbouring discrete values".
+   Values below a declared minimum are dropped, not clipped, so no point is counted twice.
+2. **Designs.** One at a time; jointly (every combination of {down, nominal, up}, the nominal
+   excluded, 3^k − 1 points for k parameters); and for heat maps every pair of parameters over all
+   levels' values, the others at nominal. Each distinct point is evaluated once. The heat maps
+   are returned as tables; drawing them belongs to the robustness report (ROB-008).
+3. **The gate reads the joint neighbourhood.** R2's `parameter_neighbourhood` compares the share
+   of the joint ±20 % neighbourhood with net Sharpe > 0 against 0.70, with the boundary rule of
+   `GatesConfig.criteria` (at least). A point without variance, such as one that never trades, is
+   not profitable. The joint design is the stricter reading: a strategy can be flat in each
+   parameter alone and still fall apart when two move together. The median-to-nominal ratio is
+   reported with it; it is not gated.
+4. **Known truth.** The strategy is chosen in sample in both simulations, as a real one would be.
+   A single-point optimum on noise (the best of a 10 × 5 grid of pure-noise points) has eight
+   fresh-noise neighbours: it passes only when at least six of eight are positive, 37/256 =
+   14.5 %. Over 300 replications 84 % failed, and the test asserts that at most 25 % of 100 pass.
+   A trend rule (lookback and a t-statistic deadband) on returns with a persistent drift, best of
+   an 18-point grid, passes in 98 % of 60 replications (asserted at 90 %), with a median
+   median-to-nominal ratio above 0.7. The genuine edge's annualized Sharpe is about 0.9: a
+   plausible edge, not a leak.

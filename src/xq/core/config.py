@@ -1119,6 +1119,31 @@ class GateCriterion:
             return value < self.threshold
         return value <= self.threshold
 
+    def check(self, value: float) -> GateCheck:
+        """The criterion applied to a measured `value`."""
+        return GateCheck(self, float(value))
+
+
+@dataclass(frozen=True)
+class GateCheck:
+    """A gate criterion applied to a measured value (robustness and validation evidence)."""
+
+    criterion: GateCriterion
+    value: float
+
+    @property
+    def passed(self) -> bool:
+        """Whether the value satisfies the criterion (NaN never does)."""
+        return self.criterion.passes(self.value)
+
+    def describe(self) -> str:
+        """One line: the measure, its value, the rule and the outcome."""
+        c = self.criterion
+        outcome = "pass" if self.passed else "FAIL"
+        return (
+            f"{c.gate} {c.key}: {c.measure} = {self.value:.4g} ({c.op} {c.threshold:g}) {outcome}"
+        )
+
 
 class GateBootstrapConfig(FrozenModel):
     """Stationary bootstrap of daily net returns used by gate statistics (VAL-001)."""
@@ -1390,6 +1415,17 @@ class GatesConfig(FrozenModel):
                 r4.unresolved_incidents_max,
             ),
         ]
+
+    def criterion(self, gate: str, key: str) -> GateCriterion:
+        """The criterion of `gate` (``"R2"``) with threshold `key` (a dotted gates.yaml path).
+
+        Raises:
+            KeyError: for an unknown gate or key.
+        """
+        for item in self.criteria():
+            if (item.gate, item.key) == (gate, key):
+                return item
+        raise KeyError(f"no criterion {key!r} in gate {gate!r}")
 
 
 def gates_hash(gates: GatesConfig) -> str:
