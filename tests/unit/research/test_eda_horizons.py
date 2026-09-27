@@ -29,6 +29,7 @@ from xq.research.eda.horizons import (
     AdmissionError,
     admission,
     admission_yaml,
+    causal_fill,
     cost_to_volatility_figure,
     cost_to_volatility_table,
     decision_times,
@@ -63,6 +64,11 @@ def drifting_bars(spread_bps: float = 1.0) -> pd.DataFrame:
     return minute_bars(
         sessions, FIRST, LAST, log_mid=DRIFT * np.arange(count), spread_bps=spread_bps
     )
+
+
+def drift_returns(bars: pd.DataFrame) -> pd.DataFrame:
+    """The 1m returns of `drifting_bars`, ending at each bar's availability."""
+    return pd.DataFrame({"ret_end": bars["available_at_utc"], "ret": np.full(len(bars), DRIFT)})
 
 
 def periods_of(bars: pd.DataFrame, label: str) -> pd.DataFrame:
@@ -102,7 +108,8 @@ def test_spreads_are_quoted_at_the_fills_not_bar_means() -> None:
     exit_ = np.searchsorted(stamps, periods["label_end"].to_numpy())
     np.testing.assert_allclose(periods["entry_spread"], bars["spread_close"].to_numpy()[entry])
     np.testing.assert_allclose(periods["exit_spread"], bars["spread_close"].to_numpy()[exit_])
-    costs = period_costs(periods, cost_model(), minutes(), sigma_minutes=60)
+    costs = period_costs(periods, cost_model(), drift_returns(bars), sigma_minutes=60)
+    assert costs.index.equals(periods.index)  # every entry has a sigma-hat from earlier returns
     expected = 0.5 * (1.0 + hours[entry]) + 0.5 * (1.0 + hours[exit_])  # bps of each mid
     np.testing.assert_allclose(costs["spread_bps"], expected, rtol=1e-9)
 
@@ -163,6 +170,30 @@ def test_trailing_rms() -> None:
     np.testing.assert_allclose(rms[1:], [np.sqrt(2.5), np.sqrt(6.5), np.sqrt(12.5)])
 
 
+def test_causal_fill_uses_only_earlier_values() -> None:
+    values = np.array([np.nan, 2.0, np.nan, 4.0, np.nan])
+    filled, usable = causal_fill(values, np.array([1, 2, 3, 4, 5], dtype=np.int64))
+    np.testing.assert_allclose(filled[1:], [2.0, 2.0, 4.0, 3.0])  # expanding medians
+    assert np.isnan(filled[0])  # nothing earlier: not filled (a whole-window median would be 3)
+    assert usable.tolist() == [False, True, True, True, True]
+    # Order follows time, not position; a value at the same instant is not "earlier".
+    same = causal_fill(np.array([np.nan, 5.0, np.nan, 1.0]), np.array([9, 1, 1, 0], dtype=np.int64))
+    np.testing.assert_allclose(same[0], [3.0, 5.0, 1.0, 1.0])
+    assert same[1].tolist() == [True, True, True, True]
+
+
+def test_periods_without_a_known_sigma_are_dropped() -> None:
+    periods = two_periods()
+    early = periods.iloc[[0]].copy()
+    early.index = pd.DatetimeIndex(["2024-03-11T22:59:59Z"], name="decision_time")
+    early["label_start"] = pd.Timestamp("2024-03-11T23:00:00Z")  # before any 1m return
+    early["label_end"] = pd.Timestamp("2024-03-12T01:00:00Z")
+    out = period_costs(pd.concat([early, periods]), cost_model(), minutes(), sigma_minutes=60)
+    assert out.index.equals(periods.index)
+    reference = period_costs(periods, cost_model(), minutes(), sigma_minutes=60)
+    pd.testing.assert_frame_equal(out, reference)
+
+
 def cost_model() -> CostModel:
     return CostModel.from_config(config(REPO), "xauusd")
 
@@ -218,13 +249,10 @@ def test_period_costs_components() -> None:
 
 def test_cost_table_and_admission() -> None:
     bars = drifting_bars()
-    minute_returns = pd.DataFrame(
-        {"ret_end": bars["available_at_utc"], "ret": np.full(len(bars), DRIFT)}
-    )
     periods = {label: periods_of(bars, label) for label in ("5m", "4h")}
     table = cost_to_volatility_table(
         periods,
-        minute_returns,
+        drift_returns(bars),
         cost_model(),
         config(REPO).sessions_config(),
         max_cost_to_vol=0.3,

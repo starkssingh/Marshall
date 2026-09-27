@@ -19,8 +19,10 @@ Its **round-trip cost** in basis points, from the configured cost model (BT-001,
   selling at the bid costs half a spread each way, at the instants the trade happens);
 - **commission** — both sides' commission of one lot at the entry mid, over its notional;
 - **slippage** — the model's slippage at the entry fill and at the exit fill, with sigma-hat the RMS
-  of the last ``horizons.sigma_1m_minutes`` one-minute returns completed by the entry (the median
-  of those RMS values where none precede it);
+  of the last ``horizons.sigma_1m_minutes`` one-minute returns completed by the entry. Where no
+  one-minute return precedes the entry, sigma-hat is the median of the sigma-hats of the periods
+  entered earlier (an expanding median, so nothing later is used); a period with no earlier one is
+  dropped;
 - **financing** — the rollovers between the fills (three on the triple weekday) at the mean of the
   long and short rates (direction-neutral research).
 
@@ -240,6 +242,28 @@ def trailing_rms(
     return rms
 
 
+def causal_fill(
+    values: FloatArray, times: npt.NDArray[np.int64]
+) -> tuple[FloatArray, npt.NDArray[np.bool_]]:
+    """Fill missing `values` with the median of the values at strictly earlier `times`.
+
+    Returns the filled values and which ones are usable: a missing value with no earlier value is
+    not filled (and not usable). Nothing at or after a value's own time is used for it.
+    """
+    order = np.argsort(times, kind="stable")
+    ordered = pd.Series(values[order])
+    ordered_times = times[order]
+    # The median of every non-missing value up to each position, then taken at the last position
+    # with a strictly earlier time.
+    running = ordered.expanding().median().to_numpy(dtype=np.float64)
+    earlier = np.searchsorted(ordered_times, ordered_times, side="left") - 1
+    prior = np.where(earlier >= 0, running[np.maximum(earlier, 0)], np.nan)
+    filled_ordered = np.where(np.isnan(ordered.to_numpy()), prior, ordered.to_numpy())
+    filled = np.empty(len(values))
+    filled[order] = filled_ordered
+    return filled, np.isfinite(filled)
+
+
 def rollover_weights(
     cost: CostModel, starts: npt.NDArray[np.int64], ends: npt.NDArray[np.int64]
 ) -> FloatArray:
@@ -264,10 +288,13 @@ def period_costs(
     *,
     sigma_minutes: int,
 ) -> pd.DataFrame:
-    """Round-trip cost components (bps) and the absolute move of every holding period."""
+    """Round-trip cost components (bps) and the absolute move of every holding period.
+
+    Periods without a sigma-hat (none can be known at their entry) are left out (module
+    docstring).
+    """
     starts = instants_ns(periods["label_start"])
     ends = instants_ns(periods["label_end"])
-    price = periods["entry_mid"].to_numpy(dtype=np.float64)
     minute_ends = instants_ns(minute_returns["ret_end"])
     order = np.argsort(minute_ends, kind="stable")
     sigma = trailing_rms(
@@ -276,9 +303,10 @@ def period_costs(
         starts,
         sigma_minutes,
     )
-    if np.isnan(sigma).any():
-        known = sigma[np.isfinite(sigma)]
-        sigma = np.where(np.isnan(sigma), float(np.median(known)) if len(known) else 0.0, sigma)
+    sigma, usable = causal_fill(sigma, starts)
+    periods = periods.loc[usable]
+    starts, ends, sigma = starts[usable], ends[usable], sigma[usable]
+    price = periods["entry_mid"].to_numpy(dtype=np.float64)
     contract = float(cost.instrument.contract_size)
     commission = 2 * cost.commission_usd(np.ones(len(price)), price) / (contract * price) * _BPS
     slippage = cost.slippage_bps(
@@ -322,8 +350,10 @@ def cost_to_volatility_table(
         if periods.empty:
             continue
         costs = period_costs(periods, cost, minute_returns, sigma_minutes=sigma_minutes)
-        inside = calendar_columns(pd.DatetimeIndex(periods.index), sessions)
-        groups = {ALL_SESSIONS: np.ones(len(periods), dtype=bool)}
+        if costs.empty:
+            continue
+        inside = calendar_columns(pd.DatetimeIndex(costs.index), sessions)
+        groups = {ALL_SESSIONS: np.ones(len(costs), dtype=bool)}
         groups |= {name: inside[f"in_{name}"].to_numpy(dtype=bool) for name in names}
         for session, mask in groups.items():
             if not mask.any():

@@ -59,3 +59,10 @@ means, overall and per session, and the admission list carries the median ratios
 Admission stays on the mean ratio (the plan's cost ÷ expected absolute move). For a normal move
 the median ratio is about 1.18 times the mean one, so a horizon admitted near the bound can show a
 median ratio above it; heavier tails widen the gap.
+
+## Decision 6 — A causal fallback for sigma-hat
+
+Where no one-minute return precedes a period's entry, the slippage sigma-hat is the median of the
+sigma-hats of the periods entered strictly earlier (an expanding median), and a period with no
+earlier one is dropped, so n counts only priced periods. The whole-window median used before
+priced early periods with volatility measured after them.
