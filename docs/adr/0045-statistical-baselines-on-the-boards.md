@@ -1,6 +1,7 @@
 # ADR 0045 — Statistical baselines on the boards (BASE-003)
 
-- **Status:** accepted (the H-0001 question is open for the owner)
+- **Status:** accepted; the H-0001 question was decided by the owner in ADR 0046 (`ar1` stays off
+  H-0001)
 - **Date:** 2026-09-27
 - **Tasks:** BASE-003 (on STAT-006 and VOL-003)
 
@@ -31,5 +32,6 @@ owner approved with a trial budget of 36 (ADR 0035, ADR 0041); every forecast ba
 
 ## Consequences
 
-- Open owner decision: include `ar1` in H-0001 (budget 40) or evaluate it under its own
-  pre-registered hypothesis.
+- Decided in ADR 0046: `ar1` stays off H-0001 (budget 36), remains on benchmark boards, and gets
+  its own hypothesis H-0002 (linear predictability) only if STAT-002 or STAT-003 finds dependence
+  on real data.
