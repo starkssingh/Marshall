@@ -301,6 +301,15 @@ IDs from `docs/specs/development-plan.md`.
   latest completed bar of the horizon's timeframe, joined on availability; `random_walk_columns`),
   `historical_mean` (the training fold's mean, expanding with the windows) and `climatology` (the
   training fold's frequency of positive targets). Known outputs per fold are tested.
+- BASE-002: rule baselines with fixed parameters (`xq.models.baselines`) — `buy_and_hold`,
+  `time_series_momentum`, `zscore_reversion`, `ma_crossover`, `donchian_breakout` (channel exit
+  and ATR stop fixed at entry), each optionally volatility-targeted (`VolTargetConfig`), computed
+  on signal bars (the dataset's distinct context bars indexed by availability, `signal_bars`) and
+  placed at decision times by an as-of join on availability (`positions_at`); the random-entry null
+  (`random_entry`, `random_entry_null`) keeps a template's holding episodes — trade count, holding
+  times, exposure paths and sides — and randomizes their timing uniformly. Hand-built series give
+  known positions and screened trades; every rule passes the leakage harness, which catches a
+  planted bar-start placement. ADR 0033.
 
 ### Changed
 
