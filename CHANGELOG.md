@@ -255,6 +255,13 @@ IDs from `docs/specs/development-plan.md`.
   trading day's 17:00 New York rollover by side with a triple weekday, hour-of-week spread
   fallback, latency and maximum fill delay. The placeholder values are PROVISIONAL (no broker
   named). Golden tests include the triple rollover and a Good Friday with no rollover. ADR 0029.
+- BT-002: vectorized screener (`xq.backtest.vectorized.run_vectorized`) — target exposures filled
+  at the first quote `latency` of market time after the decision, buying at the ask and selling at
+  the bid plus slippage (never at the signal bar's close or at mid); late fills are missed and
+  retried; daily P&L by trading day with `gross − spread − slippage − commission − financing =
+  net` exactly, financing at each rollover; holding-episode trades with net P&L. Golden tests
+  include a hand-computed round trip, four nights over the triple rollover, a Friday-close
+  decision filled at the Sunday reopen and a side flip. ADR 0030.
 
 ### Changed
 
