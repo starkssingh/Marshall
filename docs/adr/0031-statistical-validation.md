@@ -2,7 +2,7 @@
 
 - **Status:** accepted
 - **Date:** 2026-09-27
-- **Tasks:** VAL-001 (VAL-002 and VAL-005 add sections below)
+- **Tasks:** VAL-001, VAL-002 (VAL-005 adds a section below)
 
 ## Context
 
@@ -35,6 +35,18 @@ published examples.
    fat-tailed, and AR(1) returns. Lo's eta(q) is checked against its closed form for AR(1)
    autocorrelations. No published numerical table was reproduced for VAL-001. The published
    Deflated Sharpe Ratio example is reproduced in VAL-002.
+
+6. **PSR and DSR (VAL-002).** `xq.validation.dsr` implements the probabilistic Sharpe ratio, the
+   expected maximum Sharpe ratio of N trials under the null (Euler–Mascheroni approximation), and
+   the deflated Sharpe ratio. Trials record **annualized** Sharpe ratios of daily net returns;
+   their variance is divided by `periods_per_year` for per-period units.
+   `deflated_sharpe_for_family` uses the family's **effective** trial count (ADR 0023, clustering
+   near-duplicates) by default, and `use_effective=False` gives the raw count. Reports show both.
+   With fewer than two trials the benchmark is 0.
+7. **DSR verification.** The published example (Bailey & López de Prado 2014: annualized SR 2.5,
+   T = 1250, N = 100, V = 0.5, skewness −3, kurtosis 10) is reproduced: expected maximum 0.1132,
+   DSR 0.9004. On simulated pure-noise families of 20 strategies, the best strategy passes
+   DSR > 0.95 in at most 8 % of families, where the undeflated PSR passes in more than 30 %.
 
 ## Consequences
 

@@ -277,6 +277,11 @@ IDs from `docs/specs/development-plan.md`.
   factor, stationary-bootstrap percentile interval and minimum track record length. Verified by
   closed forms and Monte Carlo on normal, skewed and AR(1) returns (no published table was
   reproduced for this task). ADR 0031.
+- VAL-002: probabilistic and deflated Sharpe ratios (`xq.validation.dsr`) — PSR, expected maximum
+  Sharpe ratio of N trials, DSR, and `deflated_sharpe_for_family` using the registry's effective
+  trial count and trial Sharpe variance (trials record annualized Sharpe ratios). Reproduces the
+  published example (DSR 0.9004); on pure-noise families the selected best passes DSR > 0.95 in at
+  most 8 % of simulations. ADR 0031.
 
 ### Changed
 
