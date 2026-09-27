@@ -177,3 +177,38 @@ on synthetic data only (ADR 0048).
    multipliers built once per trading day (`CostModel.slippage_bps_at`), exact because every
    configured boundary falls on a whole minute (otherwise it computes the multiplier directly);
    a test shows it equals the vectorized formula across a DST change.
+
+## BT-010 — report
+
+1. **One report for both tiers** (`build_backtest_report`, deterministic `ReportBuilder` output):
+   the tier and data mode; the cost basis on every net figure ("screening, placeholder costs"
+   while costs are provisional) and, for the event tier, the risk approver's label (the Sprint 11
+   PLACEHOLDER says it checks nothing); the BT-003 metrics; the cost decomposition (gross at the
+   reference mids, spread, slippage, commission, financing, net); equity and drawdown; monthly
+   returns compounded by month of the trading day; the trade distribution; exposure by session;
+   the ambiguous-bar share and its resolution; and, for the event tier, the ledger summary and
+   its broken links.
+2. **Cost-fragile** when gross P&L is below 1.5 × total costs (plan Phase 13, research
+   validation); a strategy without a gross edge is cost-fragile by that rule.
+3. **Exposure by session** is measured on a five-minute grid of market-open time, valuing the
+   position at its latest fill's mid (both tiers have fills; the screener has no per-quote
+   marks). It is a description of where the strategy holds risk, not a P&L attribution.
+4. **Records.** `write_backtest` writes the report (and the event tier's ledger) under
+   `reports/backtests/<run_id>/<name>/`, logs them as run artifacts and adds a row to the new
+   `backtests` table (migration 0009): the plan's columns (`backtest_id, run_id,
+   strategy_version, cost_model_version, start, end, metrics_json, ledger_path`) plus `tier`,
+   `strategy_id` and `report_path`. `cost_model_version` is the venue and a hash of the cost
+   configuration.
+5. **No CLI yet.** Like the Sprint 6 reports, event backtests and reconciliations have no CLI
+   command until there is real data to run them on; they run from library code and tests.
+
+## Open points for the owner's review of Sprint 11
+
+- The weekly-close blackout length (60 minutes) and the flat-before-weekend lead (30 minutes)
+  are provisional defaults of this ADR.
+- The reconciliation tolerance applies to the raw equity difference, sizing included; at small
+  capital, lot-step rounding alone can exceed 5 % of costs (reported separately as sizing).
+- Limit orders never fill better than their price (no improvement) — pessimistic until paper
+  trading measures the venue.
+- The event tier is pure Python and replays every quote; its speed on four years of real ticks is
+  unmeasured.

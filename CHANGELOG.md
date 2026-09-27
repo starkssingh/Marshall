@@ -528,6 +528,15 @@ IDs from `docs/specs/development-plan.md`.
   and window multipliers, missed and closed decisions, blackouts as explained differences, and
   planted disagreements (commission, latency) caught as unexplained. `CostModel.slippage_bps_at`
   prices one fill from a per-minute multiplier table built once per trading day. ADR 0049.
+- BT-010: backtest report for both tiers (`xq.backtest.report.build_backtest_report`) — the cost
+  basis on every net figure and the risk approver's label (PLACEHOLDER in Sprint 11), the BT-003
+  metrics, the cost decomposition (gross, spread, slippage, commission, financing, net) with the
+  cost-fragility flag (gross below 1.5x costs), equity and drawdown, compounded monthly returns,
+  the trade distribution, exposure by session, the ambiguous-bar share with its resolution, and
+  the ledger summary of the event tier. `write_backtest` stores the report and the ledger as run
+  artifacts and records the backtest in the new `backtests` table (migration 0009). Tested on a
+  baseline rule through both tiers, bar-mode ambiguity, determinism and an experiment run.
+  ADR 0049.
 
 ### Changed
 

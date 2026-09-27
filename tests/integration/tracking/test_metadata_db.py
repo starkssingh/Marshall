@@ -48,8 +48,9 @@ TABLES = {
     "target_sets",
     "fold_results",
     "conclusions",
+    "backtests",
 }
-LATEST = "0008"
+LATEST = "0009"
 NOW = pd.Timestamp("2026-09-26 01:00:00.123456789", tz="UTC")
 
 

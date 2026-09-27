@@ -30,6 +30,7 @@ from xq.data.raw_store import sha256_file
 from xq.tracking.db import session_factory
 from xq.tracking.models import (
     Artifact,
+    BacktestRecord,
     Experiment,
     FoldResultRecord,
     Hypothesis,
@@ -492,6 +493,99 @@ def list_artifacts(engine: Engine, run_id: str) -> list[ArtifactRecord]:
             select(Artifact).where(Artifact.run_id == run_id).order_by(Artifact.artifact_id)
         ).all()
         return [ArtifactRecord(a.run_id, a.kind, a.path, a.sha256) for a in rows]
+
+
+@dataclass(frozen=True)
+class BacktestRef:
+    """A recorded backtest (BT-010)."""
+
+    backtest_id: str
+    run_id: str
+    tier: str
+    strategy_id: str
+    strategy_version: str
+    cost_model_version: str
+    start: pd.Timestamp
+    end: pd.Timestamp
+    metrics: dict[str, Any]
+    ledger_path: str | None
+    report_path: str
+
+
+def add_backtest(
+    engine: Engine,
+    run_id: str,
+    *,
+    tier: str,
+    strategy_id: str,
+    strategy_version: str,
+    cost_model_version: str,
+    start: pd.Timestamp,
+    end: pd.Timestamp,
+    metrics: dict[str, Any],
+    ledger_path: str | None,
+    report_path: str,
+) -> BacktestRef:
+    """Record a backtest of a running run; non-finite metrics are stored as null."""
+    clean = {k: (float(v) if math.isfinite(float(v)) else None) for k, v in metrics.items()}
+    backtest_id = new_ulid()
+    with session_factory(engine)() as session:
+        _running(session.get(Run, run_id), run_id)
+        session.add(
+            BacktestRecord(
+                backtest_id=backtest_id,
+                run_id=run_id,
+                tier=tier,
+                strategy_id=strategy_id,
+                strategy_version=strategy_version,
+                cost_model_version=cost_model_version,
+                start=start,
+                end=end,
+                metrics_json=clean,
+                ledger_path=ledger_path,
+                report_path=report_path,
+            )
+        )
+        session.commit()
+    return BacktestRef(
+        backtest_id,
+        run_id,
+        tier,
+        strategy_id,
+        strategy_version,
+        cost_model_version,
+        start,
+        end,
+        clean,
+        ledger_path,
+        report_path,
+    )
+
+
+def list_backtests(engine: Engine, run_id: str) -> list[BacktestRef]:
+    """The backtests recorded by a run, in the order they were recorded."""
+    with session_factory(engine)() as session:
+        rows = session.scalars(
+            select(BacktestRecord)
+            .where(BacktestRecord.run_id == run_id)
+            .order_by(BacktestRecord.backtest_id)
+        ).all()
+        return [
+            BacktestRef(
+                r.backtest_id,
+                r.run_id,
+                r.tier,
+                r.strategy_id,
+                r.strategy_version,
+                r.cost_model_version,
+                r.start,
+                r.end,
+                dict(r.metrics_json),
+                r.ledger_path,
+                r.report_path,
+            )
+            for r in rows
+        ]
 
 
 def count_runs(engine: Engine, *, experiment_id: str | None = None) -> int:
