@@ -15,7 +15,8 @@ from xq.core.config import CostModelConfig, load_config
 from xq.core.time import to_ns
 from xq.core.types import Side
 from xq.data.calendar import MarketClock
-from xq.signals.schema import OrderIntent, RiskDecision
+from xq.risk.engine import issue_decision
+from xq.signals.schema import OrderIntent
 
 CFG = load_config("research", config_dir=REPO / "config")
 CLOCK = MarketClock.for_range(CFG.sessions_config(), date(2024, 3, 1), date(2024, 3, 31))
@@ -80,13 +81,16 @@ def order(
     target: float | None = None,
     expected: float = 0.0,
 ) -> OrderIntent:
-    decision = RiskDecision(
+    # the broker's unit tests stand in for the risk engine: an issued decision for each order
+    decision = issue_decision(
         decision_id=f"D-I{n:06d}",
         intent_id=f"I{n:06d}",
         decided_at=pd.Timestamp("2024-03-12 14:00", tz="UTC"),
         approved=True,
         side=side,
         size_lots=lots,
+        order_type=kind,
+        price=price,
         adjusted_stop=stop,
         target=target,
         reasons=("test",),

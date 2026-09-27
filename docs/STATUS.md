@@ -19,9 +19,9 @@ with the repository, the repository wins.
   instruction, ADR 0048): BT-004, BT-005, BT-006, BT-007, BT-008, BT-009 and BT-010 are
   implemented and tested on hand-computed cases and simulated quotes (ADR 0049). Before them, the
   reserved-family guard landed (ADR 0047): no hypothesis can be registered in `linear_forecasts`
-  or `volatility_models`. The event tier routes every intent through a **PLACEHOLDER pass-through
-  risk approver that performs no risk checks** (`xq.risk.placeholder`); every decision, result and
-  report says so, and RISK-005 replaces it in Sprint 12. Reconciling the tiers found and fixed two
+  or `volatility_models`. Sprint 11 routed every intent through a placeholder pass-through
+  approver; Sprint 12 A's RISK-005 has replaced it with the real `RiskEngine` everywhere (the
+  placeholder module is removed). Reconciling the tiers found and fixed two
   screener (BT-002) defects: a closed-market quote could be a fill quote, and an open position was
   not charged the rollover ending the last quote's trading day. **Nothing has run on real data.**
 - **Working system:** library code, exercised by the tests: `run_event_backtest` (tick mode on
@@ -146,7 +146,7 @@ their dependencies.
 | Costs (commission, slippage, financing) | placeholder model, PROVISIONAL: commission 3.5 USD/lot/side; slippage 0.5 bp + 0.1·σ̂₁ₘ, ×3 rollover window, ×2 US release; financing 6 %/yr long, 2 %/yr short (both a cost, required while provisional), act/360, triple Wednesday; spread fallback p90 | `config/costs/placeholder.yaml`, ADR 0029, ADR 0032 | broker terms, paper trading |
 | Execution latency | 1 s (market time from ADR 0026) | `config/targets.yaml` `fwd_returns.v1`, cost model | BT-001, paper trading |
 | Event-tier execution rules | margin 5 % of notional (1:20); limit orders fill at their price, never better, and only when the price trades through them by at least one tick; bar mode (no ticks) resolves a bar touching both bracket legs to the stop; entry blackouts: rollover window, US release window, last 60 min before a weekly close; optional weekend exit 30 min before it (off) | `config/base.yaml` `backtest.event`, ADR 0049, ADR 0050 (defaults approved by the owner) | broker terms, paper trading |
-| Risk approver of the event tier | PLACEHOLDER pass-through: no risk checks; sizes the requested exposure of the initial capital at the decision's mid, rounded down to the lot step | `xq.risk.placeholder`, ADR 0048, ADR 0049 | RISK-005 (Sprint 12) |
+| Risk profile of the event tier | `RiskEngine` with `config/risk/default.yaml` (`risk-1`, PROVISIONAL): 0.5 % of equity to the stop and the 15 % drawdown halt are the owner's plan defaults; throttle 5 %→15 %, probability scaling 0.5→0.6, 20 lots, 3 × equity notional, 50 % margin use, 3 % daily loss, 4 h cooldown after 5 losses, 12 entries a day, stops within 3 spreads and 5 daily sigma-hats | `config/risk/default.yaml`, ADR 0052 | paper trading; the owner's review of Sprint 12 A |
 | Maximum fill delay | 300 s | `fwd_returns.v1`, cost model | ADR 0026: kept, provisional |
 | Bar publication latency | 0 ms | `config/base.yaml` `bars` | live feed measurement |
 | Quality thresholds | ratified provisional; one change allowed after DQ-008 | `config/quality.yaml`, ADR 0013 | DQ-008 review |
@@ -242,7 +242,7 @@ their dependencies.
 | 10 Baselines | BASE-001, BASE-002, BASE-003, BASE-005, BASE-006 (BASE-004 later) | yes | yes | no |
 | 12 Walk-forward | WF-001, WF-002, WF-003, WF-006 (WF-004, WF-005 later) | yes | yes | no |
 | 13 Backtesting | BT-001 … BT-010 | yes | yes (hand-computed trades, simulated quotes, reconciliation of the tiers) | no |
-| 14 Risk engine | none; a pass-through placeholder approver stands in until RISK-005 (Sprint 12) | placeholder only | placeholder only | no |
+| 14 Risk engine | RISK-001 … RISK-005 (Sprint 12 A, in progress) | yes | yes (hand-computed cases, property tests, architectural test, synthetic runs) | no |
 | 15 Signal engine | `TradeIntent`, `RiskDecision`, `OrderIntent` schemas (part of SIGNAL-001, ADR 0049) | partly | yes | no |
 | 17 Statistical validation | VAL-001, VAL-002, VAL-005, VAL-007 (VAL-003, VAL-004, VAL-006 later) | yes | yes | no |
 | 18 Experiment tracking | EXP-001 … EXP-005 (EXP-006 later); reserved trial families (ADR 0047); `backtests` table (migration 0009) | yes | yes | not applicable until real research runs |

@@ -1,6 +1,15 @@
 """BT-009: vectorized versus event reconciliation on shared market-order strategies — within 5 % of
 total costs, every difference explained, the mechanical residual zero, and planted disagreements
-caught."""
+caught.
+
+The event tier runs through the real risk engine (RISK-005). To compare execution mechanics, most
+tests give it a profile in which the requested exposure binds — a 5 % risk budget to stops 4.5
+daily sigma-hats away and a lot cap at the instrument's maximum, so the size is the strategy's
+exposure as in the screener — and the halts never do; a sigma-hat of 1 % is known from the start,
+so no entry is refused for want of one. The stops are far enough never to fill in these two weeks
+(the screener has none). With the default profile the risk engine's sizes and refusals are
+explained differences too (the last test).
+"""
 
 import numpy as np
 import pandas as pd
@@ -10,9 +19,12 @@ from helpers.event_backtest import (
     CAPITAL,
     CFG,
     CLOCK,
+    RISK,
+    SIGMA,
     ScriptedStrategy,
     exact_costs,
     random_quotes,
+    risk_engine,
 )
 from xq.backtest.constraints import SessionConstraints
 from xq.backtest.costs import CostModel
@@ -22,10 +34,22 @@ from xq.backtest.strategies import ExposureStrategy, RuleStrategy, signal_frame
 from xq.core.config import CostModelConfig
 from xq.core.types import Timeframe
 from xq.models.baselines import RuleStrategyConfig, rule_exposure
+from xq.risk.engine import RiskEngine
 from xq.signals.schema import TradeIntent
 
 TOLERANCE = CFG.backtest_config().event_config().reconcile_tolerance
 PLACEHOLDER = CostModel.from_config(CFG, "xauusd")  # rollover and release slippage multipliers
+#: The requested exposure binds (5 % of equity to a 4.5-sigma stop is more, and the lot cap is
+#: the instrument's), no halt binds.
+MECHANICS = risk_engine(
+    risk_per_trade=0.05,
+    max_lots=100,
+    max_daily_loss=0.99,
+    max_drawdown=0.99,
+    max_consecutive_losses=1_000_000,
+    max_trades_per_day=1_000_000,
+)
+STOP_SIGMAS = 4.5
 RULES = {
     "ma_crossover": RuleStrategyConfig(rule="ma_crossover", params={"fast": 4, "slow": 16}),
     "momentum": RuleStrategyConfig(rule="time_series_momentum", params={"lookback": 8}),
@@ -48,18 +72,21 @@ def run_both(
     constraints: SessionConstraints | None = None,
     sigma: pd.Series | None = None,
     event_costs: CostModel | None = None,
+    risk: RiskEngine = MECHANICS,
 ) -> tuple[EventBacktestResult, Reconciliation]:
     data = MarketData.from_ticks(q, Timeframe.M15)
     positions = rule_exposure(signal_frame(data.bars), rule)
     event = run_event_backtest(
-        RuleStrategy(rule),
+        RuleStrategy(rule, stop_sigmas=STOP_SIGMAS),
         data,
         event_costs or costs,
         CLOCK,
         capital=capital,
         margin_rate=0.05,
+        risk=risk,
         constraints=constraints,
         sigma_1m_bps=sigma,
+        sigma_daily=SIGMA,
     )
     result = reconcile(positions, q, event, costs, CLOCK, tolerance=TOLERANCE, sigma_1m_bps=sigma)
     return event, result
@@ -95,11 +122,12 @@ def test_every_sizing_difference_is_itemized_and_accounts_for_the_gap() -> None:
     event, result = run_both(RULES["ma_crossover"], two_weeks(), costs=exact_costs())
     sizing = result.decisions.loc[result.decisions["cause"] == "sizing"]
     assert len(sizing) > 0
-    # the positions differ by less than one lot step: the event tier rounds down
+    # the positions differ by one lot step of rounding down at most, plus the drift of equity
+    # from the capital: the risk engine sizes the exposure of equity, the screener of capital
     held_event = event.fills["position_lots"].abs().to_numpy()
     held_screen = result.screener.fills["position_lots"].abs().to_numpy()
-    assert ((held_screen - held_event) > -1e-6).all()
-    assert ((held_screen - held_event) < 0.01 + 1e-3).all()
+    drift = float(np.max(np.abs(event.daily["equity"] / CAPITAL - 1)))
+    assert (np.abs(held_screen - held_event) < 0.01 + held_screen * drift + 1e-3).all()
     daily = result.daily
     np.testing.assert_allclose(
         daily["difference"], daily["execution_effect"] + daily["residual"], atol=1e-9
@@ -184,7 +212,14 @@ def test_an_exposure_schedule_replays_the_screeners_positions(capital: float) ->
     positions = pd.Series(np.where(rng.random(len(times)) < 0.1, levels, np.nan), index=times)
     positions = positions.ffill().fillna(0.0)
     event = run_event_backtest(
-        ExposureStrategy(positions), data, exact_costs(), CLOCK, capital=capital, margin_rate=0.05
+        ExposureStrategy(positions, stop_sigmas=STOP_SIGMAS),
+        data,
+        exact_costs(),
+        CLOCK,
+        capital=capital,
+        margin_rate=0.05,
+        risk=MECHANICS,
+        sigma_daily=SIGMA,
     )
     result = reconcile(positions, q, event, exact_costs(), CLOCK, tolerance=TOLERANCE)
     assert len(event.fills) > 10
@@ -201,7 +236,9 @@ def test_an_exposure_schedule_replays_the_screeners_positions(capital: float) ->
 
 def test_only_market_orders_can_be_reconciled() -> None:
     q = two_weeks()
-    script = {"2024-03-05 14:00": [TradeIntent(direction="long", exposure=1.0, stop=1900.0)]}
+    known = q.loc[q["ts_utc"] <= pd.Timestamp("2024-03-05 14:00", tz="UTC")].iloc[-1]
+    stop = float(known["bid"]) - 30.0
+    script = {"2024-03-05 14:00": [TradeIntent(direction="long", exposure=1.0, stop=stop)]}
     event = run_event_backtest(
         ScriptedStrategy(script),
         MarketData.from_ticks(q, Timeframe.M15),
@@ -209,10 +246,26 @@ def test_only_market_orders_can_be_reconciled() -> None:
         CLOCK,
         capital=CAPITAL,
         margin_rate=0.05,
+        risk=RISK,
+        sigma_daily=SIGMA,
     )
+    assert len(event.fills) > 0
     positions = pd.Series([1.0], index=pd.DatetimeIndex(["2024-03-05 14:00"], tz="UTC"))
     if (event.fills["order_type"] != "market").any():
         with pytest.raises(ValueError, match="market-order"):
             reconcile(positions, q, event, exact_costs(), CLOCK, tolerance=TOLERANCE)
     else:  # the stop never triggered: nothing but market orders to compare
         assert reconcile(positions, q, event, exact_costs(), CLOCK, tolerance=TOLERANCE).explained
+
+
+def test_the_default_risk_profile_reconciles_as_sizing_and_risk_rules() -> None:
+    event, result = run_both(RULES["ma_crossover"], two_weeks(), costs=exact_costs(), risk=RISK)
+    assert result.explained  # the risk engine's sizes and refusals are all causes
+    assert result.max_abs_residual < 0.01
+    # 0.5 % of equity to a stop 4.5 sigma-hats (90 USD) away: 0.05 lots, not the exposure's 0.5
+    assert (event.fills["position_lots"].abs() <= 0.06).all()
+    decisions = result.decisions
+    assert (decisions["cause"] == "sizing").sum() > 20
+    rules = decisions.loc[decisions["cause"] == "event rule", "detail"]
+    assert rules.str.startswith("rejected: cooldown").any()  # new exposure halted (RISK-003)
+    assert rules.str.startswith("risk rule: cooldown").any()  # a flip cut to an exit (RISK-005)

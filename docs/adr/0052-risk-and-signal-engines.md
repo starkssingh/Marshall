@@ -80,3 +80,56 @@
 3. **Sanity of the bracket.** A target must be on the winning side of the entry reference (a
    target already through the market would close the position at once), and a time stop must be
    after the decision time.
+
+## RISK-005 — the risk engine and the `OrderIntent` construction rule
+
+1. **Pure evaluation.** `RiskEngine.evaluate(intent, state, market)` reads nothing but its inputs
+   (no clock, file or environment): the event engine assembles the `RiskState` and the
+   `MarketState` and records every decision in the decision ledger ("every decision logged").
+   Decisions are deterministic: the same inputs give an equal decision.
+2. **Order of the checks.** Exits (`flat`) are always approved, with a market order, whatever
+   halts or missing data are in force. New exposure passes, in order: the data it needs (a quote;
+   a win probability, when the intent carries one, must be calibrated — an uncalibrated one never
+   sizes a position), the stop policy, sizing, the halts (only when the sized target opens,
+   increases or flips the position) and the caps. Sizing measures the stop distance from the
+   entry reference and values exposure at the decision's mid, with the equity of the risk state.
+3. **What a refusal does.** A refused intent is rejected — the position is held with its bracket,
+   since no order is sent — except when the position is on the other side: the strategy no longer
+   wants it and closing it only reduces risk, so the decision is an approved market exit whose
+   first reason starts `risk rule:`. Halts never block an intent whose sized target only reduces
+   the position on the same side. A target equal to the position needs no order (approved,
+   "target unchanged: no order").
+4. **Audit.** `limits_snapshot` holds the risk state, the limits, the market (quote, age,
+   sigma-hat, sessions), the entry reference and stop distance, and every sizing step;
+   `config_version` is `<profile version>@<first 12 hex digits of the SHA-256 of the profile>`;
+   the ledger keeps the reasons in order.
+5. **Construction rule, enforced twice.** A `RiskDecision` carries a private *issued* mark that
+   only `issue_decision` in `xq/risk/engine.py` sets; copies (`model_copy`) and decisions
+   rebuilt from data are not issued. `OrderIntent` validates that its decision is approved and
+   issued and that its side, size, order type, price, stop and target are the decision's (the
+   decision now carries `order_type` and `price`, so a risk-forced exit is a market order even
+   for a limit-entry intent); `OrderIntent.model_construct` and `model_copy(update=...)` raise.
+   An AST test over `src/` fails on any `OrderIntent(...)` other than in
+   `OrderIntent.from_decision`, any `OrderIntent.model_construct/model_validate*/model_copy`, any
+   `RiskDecision(...)` or `issue_decision(...)` outside the risk engine, and any write of the mark
+   outside the schema and the engine, including through aliases and module attributes; planted
+   violations prove each form is caught. Python cannot make the rule absolute (a determined
+   caller can still reach private attributes), which is why the static test exists.
+6. **The event engine accepts only a `RiskEngine`** (a type check, not a protocol), so no other
+   approver can be plugged in; the placeholder module is removed. The risk state's position must
+   equal the broker's at every decision (checked).
+7. **Sigma-hat in the event tier.** A supplied series (the value known at each instant) or, by
+   default, the interim EWMA of signal-bar log returns with the profile's span (96 bars, the
+   STATUS interim sigma-hat) scaled by the square root of the signal bars in a regular trading
+   day, unknown before 20 returns (entries are refused until then: no stop can be bounded). It is
+   the dataset primitive `ewma_volatility`, computed online (tested equal). Strategies see the
+   same value in their context, so their stops are in sigma-hat units; `ExposureStrategy` and
+   `RuleStrategy` place a stop `stop_sigmas` (default 3) daily sigma-hats from the mid, on the
+   losing side of the entry quote. VOL-006's selection replaces the interim estimate when it is
+   approved (C-18).
+8. **Reconciliation with a real risk engine.** The screener has no risk rules. Sizing differences
+   are the sizing effect; rejections and risk-forced exits are *event rules* (explained, and
+   inside the tolerance check). Tests of execution mechanics run the real engine with a profile in
+   which the requested exposure binds and the halts cannot (a 5 % budget to 4.5-sigma stops, the
+   instrument's lot cap); a test with the default profile shows its sizes, cooldown rejections and
+   flips cut to exits are all explained.

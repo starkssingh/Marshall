@@ -10,7 +10,10 @@ import pytest
 from helpers.event_backtest import (
     CAPITAL,
     CLOCK,
+    RISK,
     SESSIONS,
+    SIGMA,
+    UNHALTED,
     RandomStrategy,
     exact_costs,
     random_quotes,
@@ -41,7 +44,14 @@ def tiers() -> tuple[BacktestResult, EventBacktestResult]:
     positions = rule_exposure(signal_frame(data.bars), RULE)
     screener = run_vectorized(positions, q, exact_costs(), CLOCK, capital=CAPITAL)
     event = run_event_backtest(
-        RuleStrategy(RULE), data, exact_costs(), CLOCK, capital=CAPITAL, margin_rate=0.05
+        RuleStrategy(RULE),
+        data,
+        exact_costs(),
+        CLOCK,
+        capital=CAPITAL,
+        margin_rate=0.05,
+        risk=UNHALTED,  # the tiers are compared: no halts in the way
+        sigma_daily=SIGMA,
     )
     return screener, event
 
@@ -67,7 +77,7 @@ def test_baseline_reports_are_produced_by_both_tiers(
         assert "Cost-fragile:" in summary
         assert "Ambiguous bars:" in summary
     event_summary = (tmp_path / "event" / "summary.md").read_text()
-    assert "PLACEHOLDER pass-through risk approver" in event_summary
+    assert f"Risk engine:** RiskEngine {UNHALTED.config_version}" in event_summary
     assert "ledger.md" in build(event, tmp_path / "event-again")
     assert "Broken links: none." in (tmp_path / "event" / "ledger.md").read_text()
     screener_summary = (tmp_path / "screener" / "summary.md").read_text()
@@ -158,7 +168,14 @@ def test_the_ambiguous_bar_share_is_reported_in_bar_mode(tmp_path: Path) -> None
     bars = MarketData.from_bars(ticks.bars, Timeframe.M15, execution_bars=ticks.minute_bars)
     strategy = RandomStrategy(seed=3, trade_probability=0.3)
     result = run_event_backtest(
-        strategy, bars, exact_costs(), CLOCK, capital=CAPITAL, margin_rate=0.05
+        strategy,
+        bars,
+        exact_costs(),
+        CLOCK,
+        capital=CAPITAL,
+        margin_rate=0.05,
+        risk=RISK,
+        sigma_daily=SIGMA,
     )
     a = result.ambiguity
     assert a["resolution"] == "pessimistic: the stop loss is assumed first"
@@ -178,6 +195,8 @@ def test_the_ambiguous_bar_share_is_reported_in_bar_mode(tmp_path: Path) -> None
         CLOCK,
         capital=CAPITAL,
         margin_rate=0.05,
+        risk=RISK,
+        sigma_daily=SIGMA,
     )
     assert tick_result.ambiguity["resolution"] == "ticks"
     assert tick_result.ambiguity["bracket_bars"] > 0

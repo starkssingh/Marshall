@@ -16,7 +16,7 @@ The ranks at one instant (`Rank`) encode what "at or after" means for the execut
 3. ``MARKET`` — a quote (`TickEvent`) or, without ticks, an execution bar (`ExecutionBarEvent`).
 4. ``FILL`` — a fill is booked into the account.
 5. ``BAR`` — a signal bar becomes available (at its ``available_at``); the strategy decides.
-6. ``SIGNAL`` — a strategy's intent goes through the session constraints and the risk approver.
+6. ``SIGNAL`` — a strategy's intent goes through the session constraints and the risk engine.
 
 `SimulationClock` is the engine's clock. It moves only when an event is processed and never goes
 backwards, so nothing can be scheduled in the past.
@@ -96,7 +96,7 @@ class ExecutionBar:
 
 @dataclass(frozen=True, slots=True)
 class AccountState:
-    """What the account holds at an instant (the risk approver's view of the account).
+    """What the account holds at an instant (what the risk state observes, RISK-001).
 
     ``equity = cash + unrealized``; ``mark`` is the mid the position is valued at (NaN before the
     first quote).

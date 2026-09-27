@@ -10,7 +10,13 @@ tiers and be reconciled:
 
 Both behave like the screener: an intent is sent when the target differs from the exposure of the
 last target that was actually executed, so a missed, refused or expired decision is retried at
-the next decision. The exposure is a request to the risk layer, which sizes it; they never size.
+the next decision. The exposure is a request to the risk engine, which sizes it; they never size.
+
+Every long or short intent carries a protective stop ``stop_sigmas`` daily sigma-hats (the value
+in the strategy's context, the one the risk engine uses) from the mid, on the losing side of the
+entry quote — the stop policy (RISK-004) requires one. Without a sigma-hat or a quote the intent
+goes without a stop, and the risk engine refuses it. The screener has no stops: a reconciliation
+of the two tiers is only meaningful while no stop fills.
 """
 
 from __future__ import annotations
@@ -27,11 +33,14 @@ from xq.signals.schema import Direction, TradeIntent
 class _TargetStrategy(Strategy):
     """Sends a market intent when the target differs from the last executed target."""
 
-    def __init__(self) -> None:
+    def __init__(self, stop_sigmas: float) -> None:
+        if stop_sigmas <= 0:
+            raise ValueError("stop_sigmas must be positive")
+        self.stop_sigmas = stop_sigmas
         self.held = 0.0
         self._pending: float | None = None
 
-    def _intents(self, target: float) -> list[TradeIntent]:
+    def _intents(self, target: float, ctx: StrategyContext) -> list[TradeIntent]:
         self._pending = None
         if target == self.held:
             return []
@@ -39,8 +48,17 @@ class _TargetStrategy(Strategy):
         if target == 0:
             return [TradeIntent(direction="flat", strategy_id=self.strategy_id)]
         direction: Direction = "long" if target > 0 else "short"
+        stop = None
+        if ctx.quote is not None and ctx.sigma_daily is not None:
+            distance = self.stop_sigmas * ctx.sigma_daily * ctx.quote.mid
+            stop = ctx.quote.ask - distance if target > 0 else ctx.quote.bid + distance
         return [
-            TradeIntent(direction=direction, exposure=abs(target), strategy_id=self.strategy_id)
+            TradeIntent(
+                direction=direction,
+                exposure=abs(target),
+                stop=stop if stop is None or stop > 0 else None,
+                strategy_id=self.strategy_id,
+            )
         ]
 
     def on_fill(self, fill: Fill, ctx: StrategyContext) -> None:
@@ -55,8 +73,10 @@ class _TargetStrategy(Strategy):
 class ExposureStrategy(_TargetStrategy):
     """Replays target exposures decided in advance (the screener's positions)."""
 
-    def __init__(self, positions: pd.Series, *, strategy_id: str = "exposure") -> None:
-        super().__init__()
+    def __init__(
+        self, positions: pd.Series, *, strategy_id: str = "exposure", stop_sigmas: float = 3.0
+    ) -> None:
+        super().__init__(stop_sigmas)
         index = pd.DatetimeIndex(positions.index)
         if index.tz is None:
             raise ValueError("positions must be indexed by tz-aware decision times")
@@ -69,7 +89,7 @@ class ExposureStrategy(_TargetStrategy):
     def on_bar(self, bar: Bar, ctx: StrategyContext) -> list[TradeIntent]:
         """The scheduled target at this decision time, if one is scheduled."""
         target = self.targets.get(ctx.now)
-        return [] if target is None else self._intents(target)
+        return [] if target is None else self._intents(target, ctx)
 
 
 class RuleStrategy(_TargetStrategy):
@@ -82,8 +102,9 @@ class RuleStrategy(_TargetStrategy):
         vol_target: VolTargetConfig | None = None,
         periods_per_year: int = 252,
         strategy_id: str | None = None,
+        stop_sigmas: float = 3.0,
     ) -> None:
-        super().__init__()
+        super().__init__(stop_sigmas)
         self.rule = rule
         self.vol_target = vol_target
         self.periods_per_year = periods_per_year
@@ -99,7 +120,7 @@ class RuleStrategy(_TargetStrategy):
             vol_target=self.vol_target,
             periods_per_year=self.periods_per_year,
         )
-        return self._intents(float(exposure.iloc[-1]))
+        return self._intents(float(exposure.iloc[-1]), ctx)
 
 
 def signal_frame(bars: list[Bar] | pd.DataFrame) -> pd.DataFrame:

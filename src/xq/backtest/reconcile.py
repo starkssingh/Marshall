@@ -14,7 +14,8 @@ three steps, each by replaying positions through the screener:
 2. **Tolerance, after sizing** (ADR 0050). The tiers agree within tolerance when the largest
    absolute daily ``difference_after_sizing`` = event - sized is at most ``tolerance`` (default
    5 %, ``backtest.event.reconcile_tolerance``) of the screener's total costs. Event-only rules
-   (entry blackouts, risk rejections, weekend exits) and their follow-ons stay inside this check.
+   (entry blackouts, risk-engine rejections and exits a risk rule forced, weekend exits) and
+   their follow-ons stay inside this check.
 3. **Every difference explained.** The event tier's *executed* positions replayed through the
    screener (the *adjusted* screen) split the whole difference into ``execution_effect`` =
    adjusted - screener, itemized per decision with a cause (``decisions``: sizing, an event-tier
@@ -40,6 +41,7 @@ from xq.backtest.costs import CostModel
 from xq.backtest.engine import EventBacktestResult
 from xq.backtest.vectorized import BacktestResult, run_vectorized
 from xq.data.calendar import MarketClock
+from xq.risk.engine import RISK_RULE
 
 COST_COLUMNS = ["spread_cost", "slippage_cost", "commission", "financing"]
 #: Causes that explain a difference, with what they mean.
@@ -291,7 +293,7 @@ def _decisions(
 def _cause(row: dict[str, Any], fate: str, diverged: bool) -> tuple[str, str]:
     """The cause of one decision's difference between the tiers ("match" when there is none)."""
     screener, event = row["screener"], row["event"]
-    if fate.startswith("engine exit"):
+    if fate.startswith(("engine exit", "risk rule")):
         return "event rule", fate
     if screener == "filled" and event == "filled":
         if row["screener_fill"] != row["event_fill"]:
@@ -342,6 +344,8 @@ def _event_fates(ledger: pd.DataFrame) -> pd.Series:
     ):
         if not approved:
             by_intent.setdefault(intent_id, f"rejected: {reason}")
+        elif reason.startswith(RISK_RULE):  # an exit a risk rule forced (RISK-005)
+            by_intent.setdefault(intent_id, reason)
         elif side is None or (isinstance(side, float) and np.isnan(side)):
             by_intent.setdefault(intent_id, "no order: target unchanged")
     fates = {}

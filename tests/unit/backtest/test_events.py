@@ -1,5 +1,5 @@
 """BT-004: event queue and clock, the market-data stream, the strategy interface, the decision
-schemas and the placeholder risk approver, and the engine loop's ordering and determinism."""
+schemas, and the engine loop's ordering and determinism (with the real risk engine, RISK-005)."""
 
 from datetime import date
 
@@ -8,6 +8,7 @@ import pandas as pd
 import pytest
 from pydantic import ValidationError
 
+from helpers.event_backtest import RISK, SIGMA, market_state, risk_state
 from helpers.pipeline import REPO
 from xq.backtest.costs import CostModel
 from xq.backtest.engine import EventEngine, MarketData, Strategy, StrategyContext
@@ -34,11 +35,7 @@ from xq.core.errors import NaiveTimestampError
 from xq.core.time import to_ns
 from xq.core.types import Side, Timeframe
 from xq.data.calendar import MarketClock
-from xq.risk.placeholder import (
-    PLACEHOLDER_CONFIG_VERSION,
-    PLACEHOLDER_REASON,
-    PassThroughRiskApprover,
-)
+from xq.risk.state import SeriesSigma
 from xq.signals.schema import OrderIntent, RiskDecision, TradeIntent
 
 CFG = load_config("research", config_dir=REPO / "config")
@@ -69,10 +66,6 @@ def minute_quotes(start: str, end: str, *, price: float = 2000.0, seed: int = 3)
     rng = np.random.default_rng(seed)
     mid = price + np.cumsum(rng.normal(0, 0.1, len(times)))
     return pd.DataFrame({"ts_utc": times, "bid": mid - 0.1, "ask": mid + 0.1})
-
-
-def state(position: float = 0.0) -> AccountState:
-    return AccountState(0, 100_000.0, 100_000.0, 0.0, 100_000.0, position, 0.0, 2000.0)
 
 
 def stamped(intent: TradeIntent, n: int = 1, at: str = "2024-03-12 14:00") -> TradeIntent:
@@ -210,7 +203,7 @@ def test_market_data_is_validated() -> None:
         MarketData.from_ticks(unordered, Timeframe.M15)
 
 
-# --- schemas and the placeholder approver -------------------------------------------------------
+# --- schemas ------------------------------------------------------------------------------------
 
 
 def test_trade_intents_are_validated() -> None:
@@ -228,13 +221,12 @@ def test_trade_intents_are_validated() -> None:
 
 def test_an_order_can_only_be_built_from_an_approved_decision() -> None:
     intent = stamped(TradeIntent(direction="long", exposure=1.0, stop=1990.0))
-    approver = PassThroughRiskApprover(INSTRUMENT, 100_000.0)
-    decision = approver.evaluate(intent, state(), Quote(0, 1999.9, 2000.1))
+    decision = RISK.evaluate(intent, risk_state(), market_state())
     order = OrderIntent.from_decision(decision, intent, expected_position_lots=0.0)
-    assert (order.side, order.size_lots, order.stop) == (Side.BUY, 0.5, 1990.0)
+    assert (order.side, order.size_lots, order.stop) == (Side.BUY, 0.49, 1990.0)
     assert order.decision_id == decision.decision_id == "D-I000001"
     assert order.order_id == "O-I000001"
-    assert order.signed_lots == 0.5
+    assert order.signed_lots == 0.49
     rejected = RiskDecision(
         decision_id="D-x",
         intent_id="I000001",
@@ -277,40 +269,6 @@ def test_an_order_can_only_be_built_from_an_approved_decision() -> None:
             reasons=("x",),
             config_version="test",
         )
-
-
-def test_the_placeholder_approves_everything_and_says_so() -> None:
-    approver = PassThroughRiskApprover(INSTRUMENT, 100_000.0)
-    quote = Quote(0, 2000.9, 2001.1)  # mid 2001
-    # 0.7 * 100,000 / (2001 * 100 oz) = 0.34983 lots, rounded down to the 0.01 lot step
-    long = approver.evaluate(stamped(TradeIntent(direction="long", exposure=0.7)), state(), quote)
-    assert long.approved
-    assert long.side is Side.BUY
-    assert (long.size_lots, long.target_lots) == (0.34, 0.34)
-    assert long.reasons[0] == PLACEHOLDER_REASON
-    assert "PLACEHOLDER" in long.reasons[0]
-    assert long.config_version == PLACEHOLDER_CONFIG_VERSION
-    assert long.limits_snapshot["requested_lots"] == pytest.approx(0.7 * 1000 / 2001)
-    flip = approver.evaluate(
-        stamped(TradeIntent(direction="short", exposure=0.5)), state(0.34), quote
-    )
-    assert (flip.side, flip.size_lots, flip.target_lots) == (Side.SELL, 0.58, -0.24)
-    flat = approver.evaluate(stamped(TradeIntent(direction="flat")), state(-0.24), quote)
-    assert (flat.side, flat.size_lots, flat.target_lots) == (Side.BUY, 0.24, 0.0)
-    same = approver.evaluate(
-        stamped(TradeIntent(direction="long", exposure=0.7)), state(0.34), quote
-    )
-    assert same.approved
-    assert same.side is None
-    assert same.size_lots == 0
-    assert "unchanged" in same.reasons[1]
-    tiny = approver.evaluate(stamped(TradeIntent(direction="long", exposure=0.001)), state(), quote)
-    assert tiny.side is None  # below the minimum lot: nothing to trade
-    blind = approver.evaluate(stamped(TradeIntent(direction="long", exposure=1.0)), state(), None)
-    assert not blind.approved
-    assert "no quote" in blind.reasons[1]
-    with pytest.raises(ValueError, match="stamps intent_id"):
-        approver.evaluate(TradeIntent(direction="flat"), state(), quote)
 
 
 # --- the engine loop with stub components -------------------------------------------------------
@@ -395,7 +353,12 @@ class LongEveryBar(Strategy):
 
     def on_bar(self, bar: Bar, ctx: StrategyContext) -> list[TradeIntent]:
         self.seen.append((bar.available_at, ctx.now))
-        return [TradeIntent(direction="long", exposure=1.0, strategy_id=self.strategy_id)]
+        assert ctx.quote is not None
+        assert ctx.sigma_daily == 0.01
+        stop = ctx.quote.ask - 10.0
+        return [
+            TradeIntent(direction="long", exposure=1.0, stop=stop, strategy_id=self.strategy_id)
+        ]
 
 
 def run_stub(data: MarketData) -> tuple[EventEngine, list[tuple[int, int, str]]]:
@@ -404,11 +367,12 @@ def run_stub(data: MarketData) -> tuple[EventEngine, list[tuple[int, int, str]]]
         LongEveryBar(),
         data,
         broker=StubBroker(),
-        risk=PassThroughRiskApprover(INSTRUMENT, 100_000.0),
+        risk=RISK,
         account=StubAccount(),
         recorder=StubRecorder(),
         costs=COSTS,
         clock=CLOCK,
+        sigma=SeriesSigma(SIGMA),
         observer=lambda event, now: trace.append((now, int(event.rank), type(event).__name__)),
     )
     engine.run()

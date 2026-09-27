@@ -30,9 +30,10 @@ pass recovery tests on simulated processes; nothing has run on real data and no 
 is promoted. Sprint 11 (the event-driven backtester) is implemented and tested on synthetic data
 only: event queue and clock, a broker simulator (brackets, gaps, pessimistic intrabar resolution,
 no fills while closed), FIFO portfolio accounting, a decision ledger linking every order to its
-risk decision, entry blackouts, reconciliation with the screener and a backtest report. Its risk
-approver is a **placeholder that performs no risk checks** until the risk engine (RISK-005,
-Sprint 12). See [`CHANGELOG.md`](CHANGELOG.md) for
+risk decision, entry blackouts, reconciliation with the screener and a backtest report. Sprint 12
+A (in progress, ADR 0051) replaces its placeholder risk approver with the real risk engine
+(RISK-005): every order now comes from a decision `RiskEngine.evaluate` issued, with a provisional
+risk profile (`config/risk/default.yaml`). See [`CHANGELOG.md`](CHANGELOG.md) for
 completed backlog tasks and [`docs/STATUS.md`](docs/STATUS.md) for the current sprint, open
 decisions and carry-over items.
 

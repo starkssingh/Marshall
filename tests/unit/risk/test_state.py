@@ -1,15 +1,17 @@
 """RISK-001: the risk state — drawdown and its sticky worst, the trading day's P&L and entries,
-consecutive losing round trips — and its reconstruction from the decision ledger."""
+consecutive losing round trips — and its reconstruction from the decision ledger; the market
+state's sigma-hat sources (RISK-005)."""
 
 from datetime import date
 
+import numpy as np
 import pandas as pd
 import pytest
 
 from helpers.event_backtest import (
     CAPITAL,
     CLOCK,
-    INSTRUMENT,
+    RISK,
     RandomStrategy,
     exact_costs,
     ns,
@@ -21,8 +23,14 @@ from xq.backtest.events import AccountState, Fill
 from xq.backtest.ledger import Ledger
 from xq.backtest.portfolio import Portfolio
 from xq.core.types import Timeframe
-from xq.risk.placeholder import PassThroughRiskApprover
-from xq.risk.state import MarketState, RiskStateTracker, rebuild_risk_state
+from xq.datasets.primitives import ewma_volatility, log_returns
+from xq.risk.state import (
+    EwmaSigma,
+    MarketState,
+    RiskStateTracker,
+    SeriesSigma,
+    rebuild_risk_state,
+)
 
 
 def account(at: str, equity: float, position: float = 0.0) -> AccountState:
@@ -129,7 +137,7 @@ def test_the_rebuilt_state_equals_the_live_state_at_every_decision(seed: int) ->
         RandomStrategy(seed=seed, trade_probability=0.2),
         MarketData.from_ticks(q, Timeframe.M15),
         broker=broker,
-        risk=PassThroughRiskApprover(INSTRUMENT, CAPITAL),
+        risk=RISK,
         account=portfolio,
         recorder=ledger,
         costs=costs,
@@ -147,3 +155,46 @@ def test_the_rebuilt_state_equals_the_live_state_at_every_decision(seed: int) ->
     days = frame.loc[(frame["kind"] == "account") & (frame["reason"] == "day_end")]
     assert pd.DatetimeIndex(days["ts"]).is_monotonic_increasing
     assert len(days) >= 5
+
+
+def test_the_interim_sigma_is_the_dataset_ewma_scaled_to_a_trading_day() -> None:
+    closes = 2000.0 * np.exp(np.cumsum(np.random.default_rng(0).normal(0, 0.001, 60)))
+    sigma = EwmaSigma(span_bars=96, min_bars=20, bars_per_day=92.0)
+    online = []
+    for close in closes:
+        sigma.update(float(close))
+        online.append(sigma.at(0))
+    batch = ewma_volatility(log_returns(pd.Series(closes)), span=96, min_periods=20) * 92**0.5
+    assert online[:20] == [None] * 20  # 19 returns after 20 closes: not yet known
+    np.testing.assert_allclose(np.array(online[20:], dtype=float), batch.iloc[20:], rtol=1e-12)
+    assert batch.iloc[:20].isna().all()
+
+
+def test_a_supplied_sigma_is_the_latest_value_known() -> None:
+    index = pd.DatetimeIndex(["2024-03-12 14:00", "2024-03-12 15:00"], tz="UTC")
+    sigma = SeriesSigma(pd.Series([0.01, 0.02], index=index))
+    assert sigma.at(ns("2024-03-12 13:59")) is None
+    assert sigma.at(ns("2024-03-12 14:00")) == 0.01
+    assert sigma.at(ns("2024-03-12 14:59")) == 0.01
+    assert sigma.at(ns("2024-03-12 16:00")) == 0.02
+    with pytest.raises(ValueError, match="tz-aware"):
+        SeriesSigma(pd.Series([0.01], index=pd.DatetimeIndex(["2024-03-12"])))
+
+
+def test_only_the_risk_engine_decides_in_the_event_engine() -> None:
+    q = random_quotes("2024-03-12 14:00", "2024-03-12 16:00", seed=1)
+    costs = exact_costs()
+    portfolio = Portfolio(costs, capital=CAPITAL, margin_rate=0.05)
+    ledger = Ledger()
+    broker = SimulatedBroker(costs, CLOCK, recorder=ledger, margin_rate=0.05, equity=lambda ts: 0.0)
+    with pytest.raises(TypeError, match=r"RiskEngine\.evaluate"):
+        EventEngine(
+            RandomStrategy(seed=1),
+            MarketData.from_ticks(q, Timeframe.M15),
+            broker=broker,
+            risk=object(),  # type: ignore[arg-type]
+            account=portfolio,
+            recorder=ledger,
+            costs=costs,
+            clock=CLOCK,
+        )

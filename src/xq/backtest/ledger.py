@@ -6,8 +6,8 @@ it to the rest of the chain:
 - ``intent`` — a strategy (or engine: time stop, weekend exit) intent, with its decision time;
 - ``refusal`` — an intent refused before the risk decision (market closed, entry blackout),
   with the reason;
-- ``decision`` — the risk decision on an intent: approved or rejected, the size, the reasons and
-  the approver's configuration version (the Sprint 11 placeholder says so in both);
+- ``decision`` — the risk engine's decision on an intent: approved or rejected, the order, the
+  reasons, the limits snapshot and the risk profile's version (RISK-005);
 - ``order`` — an order sent to the broker (``decision_id`` and ``intent_id`` of the decision that
   approved it) or a bracket leg placed when its parent filled (``parent_order_id``; it carries
   the parent's decision, which approved its stop and target);

@@ -1,5 +1,5 @@
-"""Shared pieces for event-backtester tests: exact test costs, synthetic quotes, scripted
-strategies and a recorder that keeps every call."""
+"""Shared pieces for event-backtester tests: exact test costs, the default risk engine, a
+constant sigma-hat, synthetic quotes, scripted strategies and a recorder that keeps every call."""
 
 from __future__ import annotations
 
@@ -17,6 +17,8 @@ from xq.backtest.events import Bar, Fill
 from xq.core.config import CostModelConfig, load_config
 from xq.core.time import to_ns
 from xq.data.calendar import MarketClock
+from xq.risk.engine import RiskEngine
+from xq.risk.state import MarketState, RiskState
 from xq.signals.schema import TradeIntent
 
 CFG = load_config("research", config_dir=REPO / "config")
@@ -25,6 +27,81 @@ INSTRUMENT = CFG.instrument("xauusd")
 CLOCK = MarketClock.for_range(SESSIONS, date(2024, 2, 20), date(2024, 4, 15))
 CAPITAL = 100_000.0
 MINUTE_NS = 60_000_000_000
+#: The default risk profile's engine (0.5 % of equity to the stop, provisional limits).
+RISK = RiskEngine.from_config(CFG)
+
+
+def risk_engine(*, risk_per_trade: float | None = None, **limits: Any) -> RiskEngine:
+    """The default profile's engine with changed sizing budget and limits."""
+    config = CFG.risk_config()
+    sizing = config.sizing
+    if risk_per_trade is not None:
+        sizing = sizing.model_copy(update={"risk_per_trade": risk_per_trade})
+    changed = config.model_copy(
+        update={"sizing": sizing, "limits": config.limits.model_copy(update=limits)}
+    )
+    return RiskEngine(changed, INSTRUMENT, margin_rate=0.05)
+
+
+#: The real risk engine with halts that never bind in a test's few days — for tests of other
+#: mechanics (blackouts, reconciliation) that the halts would otherwise interrupt.
+UNHALTED = risk_engine(
+    max_daily_loss=0.99,
+    max_drawdown=0.99,
+    max_consecutive_losses=1_000_000,
+    max_trades_per_day=1_000_000,
+)
+
+
+def constant_sigma(value: float = 0.01) -> pd.Series:
+    """A daily sigma-hat of `value` known from before any test data (stops bounded at once)."""
+    return pd.Series([value], index=pd.DatetimeIndex(["2024-01-01"], tz="UTC"))
+
+
+SIGMA = constant_sigma()
+
+
+def risk_state(
+    position: float = 0.0,
+    *,
+    equity: float = CAPITAL,
+    at: str = "2024-03-12 14:00",
+    mark: float = 2000.0,
+    **changes: Any,
+) -> RiskState:
+    """A risk state at `at` with no drawdown, losses or entries unless `changes` say otherwise."""
+    fields: dict[str, Any] = {
+        "ts": ns(at),
+        "trading_day": date(2024, 3, 12),
+        "capital": CAPITAL,
+        "equity": equity,
+        "peak_equity": max(equity, CAPITAL),
+        "drawdown": 0.0,
+        "worst_drawdown": 0.0,
+        "day_start_equity": equity,
+        "day_pnl": 0.0,
+        "position_lots": position,
+        "mark": mark,
+        "open_notional": abs(position) * float(INSTRUMENT.contract_size) * mark,
+        "margin_used": 0.0,
+        "consecutive_losses": 0,
+        "last_loss_at": None,
+        "trades_today": 0,
+    }
+    fields.update(changes)
+    return RiskState(**fields)
+
+
+def market_state(
+    bid: float = 1999.9,
+    ask: float = 2000.1,
+    *,
+    at: str = "2024-03-12 14:00",
+    sigma: float | None = 0.01,
+    **changes: Any,
+) -> MarketState:
+    """The market at `at` with a fresh quote and a daily sigma-hat of `sigma`."""
+    return MarketState(ns(at), bid, ask, ns(at), sigma, **changes)
 
 
 def exact_costs(
@@ -112,7 +189,8 @@ class ScriptedStrategy(Strategy):
 
 
 class RandomStrategy(Strategy):
-    """Random intents on some bars: market and bracket entries, flips and exits (seeded)."""
+    """Random intents on some bars: entries with a stop (and half the time a target), flips and
+    exits (seeded)."""
 
     strategy_id = "random"
 
@@ -129,11 +207,11 @@ class RandomStrategy(Strategy):
             return [TradeIntent(direction="flat", strategy_id=self.strategy_id)]
         direction = "long" if choice == 1 else "short"
         exposure = float(self.rng.choice([0.25, 0.5, 1.0]))
-        stop = target = None
-        if self.brackets and self.rng.random() < 0.5:
-            distance = bar.close * float(self.rng.uniform(5, 20)) * 1e-4  # 5-20 bp
-            sign = 1 if direction == "long" else -1
-            stop, target = bar.close - sign * distance, bar.close + sign * 1.5 * distance
+        distance = bar.close * float(self.rng.uniform(5, 20)) * 1e-4  # 5-20 bp
+        sign = 1 if direction == "long" else -1
+        stop, target = bar.close - sign * distance, bar.close + sign * 1.5 * distance
+        if not (self.brackets and self.rng.random() < 0.5):
+            target = None
         return [
             TradeIntent(
                 direction=direction,

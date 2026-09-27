@@ -563,6 +563,21 @@ IDs from `docs/specs/development-plan.md`.
   stop; one farther than 5 daily sigmas, or any stop without a sigma-hat, is refused; targets must
   be on the winning side and time stops after the decision (allowed in addition to the price
   stop). Tested on hand-computed bounds, inclusive at the sigma bound. ADR 0052.
+- RISK-005: the risk engine (`xq.risk.engine.RiskEngine`) and the `OrderIntent` construction
+  rule — `evaluate(intent, state, market)` is pure and deterministic: exits always approved; new
+  exposure passes the data checks (a quote, a calibrated win probability), the stop policy,
+  sizing, the halts and the caps; a refused intent still closes a position on the other side
+  (reason `risk rule: …`); every decision carries the full limits snapshot and
+  `config_version` = profile version @ profile hash. Decisions carry a private *issued* mark set
+  only by the engine; `OrderIntent` refuses a decision that is not approved or not issued (a
+  hand-built, revalidated or copied one), and `model_construct` / `model_copy(update=)` are
+  disabled; an AST architectural test fails on any `OrderIntent`, `RiskDecision` or
+  issue call under `src/` outside the risk engine (planted violations caught). The event
+  engine takes only a `RiskEngine`, assembles the market state (quote, daily sigma-hat from a
+  supplied series or the interim EWMA of signal bars, capped sessions) and hands the same
+  sigma-hat to strategies; `ExposureStrategy` and `RuleStrategy` attach stops in sigma-hat
+  units; `TradeIntent` gains `p_win` and `calibrated`; `RiskDecision` gains `order_type` and
+  `price`. Reconciliation labels exits a risk rule forced as event rules. ADR 0052.
 
 ### Changed
 
@@ -693,6 +708,13 @@ IDs from `docs/specs/development-plan.md`.
   limit, the ask a tick below a buy limit, in tick mode and at a bar's open or over its range; a
   touch is not a fill, and the fill stays at the limit, never better. The bar-mode ambiguity
   check and the tick-mode ambiguous-bar diagnostic use the same rule (owner's decision, ADR 0050).
+- RISK-005 replaces the Sprint 11 placeholder risk approver everywhere: `xq.risk.placeholder` is
+  removed, `run_event_backtest` requires a `RiskEngine` (and takes an optional daily sigma-hat),
+  the report's summary names the risk engine and its profile version, and the event-tier tests
+  run through the real engine — the golden trade's short now carries a stop (its ledger chain
+  gains the stop leg and its cancellation), the financing, constraint and reconciliation tests
+  give their intents stops and, where halts would interrupt another mechanism under test, use the
+  real engine with halts that cannot bind.
 
 ### Fixed
 

@@ -21,13 +21,22 @@ live system had (tested at every decision of engine runs).
 the latest quote and its age, the daily sigma-hat, a reference spread for the abnormal-spread
 breaker, the sessions in force and whether the kill switch is on. The engine assembles it, so
 `RiskEngine.evaluate` stays a pure function of its inputs.
+
+**Sigma-hat** (daily, a fraction of price) comes from a `SigmaSource`: `SeriesSigma` when a
+series known at each instant is supplied, otherwise `EwmaSigma`, the interim estimate until
+VOL-006's selection is wired in — the square root of the bias-adjusted EWMA of squared signal-bar
+log returns (the dataset primitive `ewma_volatility`), scaled by the square root of the signal
+bars in a regular trading day, and unknown until ``min_bars`` returns have been seen. The same
+value is handed to the strategy (for stops in volatility units) and to the risk engine.
 """
 
 from __future__ import annotations
 
 import json
+import math
 from dataclasses import dataclass
 from datetime import date
+from typing import Protocol
 
 import numpy as np
 import pandas as pd
@@ -217,6 +226,71 @@ class RiskStateTracker:
             self._last_loss_at = ts
         else:
             self._losses = 0
+
+
+class SigmaSource(Protocol):
+    """Daily sigma-hat known at each instant (module docstring)."""
+
+    def update(self, close: float) -> None:
+        """A completed signal bar's mid close, at its availability."""
+        ...
+
+    def at(self, ts: int) -> float | None:
+        """Sigma-hat known at `ts` (None while unknown)."""
+        ...
+
+
+class EwmaSigma:
+    """Interim daily sigma-hat from signal-bar mid closes (module docstring)."""
+
+    def __init__(self, span_bars: int, min_bars: int, bars_per_day: float) -> None:
+        if span_bars < 1 or min_bars < 1 or bars_per_day <= 0:
+            raise ValueError("span_bars, min_bars and bars_per_day must be positive")
+        self.decay = 1 - 2 / (span_bars + 1)
+        self.min_bars = min_bars
+        self.bars_per_day = float(bars_per_day)
+        self._last: float | None = None
+        self._num = 0.0
+        self._den = 0.0
+        self._n = 0
+
+    def update(self, close: float) -> None:
+        """Add the log return from the previous close."""
+        if self._last is not None:
+            r = math.log(close / self._last)
+            self._num = self.decay * self._num + r * r
+            self._den = self.decay * self._den + 1.0
+            self._n += 1
+        self._last = close
+
+    def at(self, ts: int) -> float | None:
+        """The latest estimate, once ``min_bars`` returns are in."""
+        if self._n < self.min_bars:
+            return None
+        return math.sqrt(self._num / self._den * self.bars_per_day)
+
+
+class SeriesSigma:
+    """A supplied daily sigma-hat, indexed by the instant each value becomes known."""
+
+    def __init__(self, series: pd.Series) -> None:
+        index = pd.DatetimeIndex(series.index)
+        if index.tz is None:
+            raise ValueError("sigma-hat must be indexed by tz-aware instants")
+        ts = index.tz_convert("UTC").as_unit("ns").to_numpy("datetime64[ns]").view(np.int64)
+        order = np.argsort(ts, kind="stable")
+        self._ts = ts[order]
+        self._values = series.to_numpy(np.float64)[order]
+
+    def update(self, close: float) -> None:
+        """Nothing to update: the series is given."""
+
+    def at(self, ts: int) -> float | None:
+        """The latest value known at `ts`."""
+        i = int(np.searchsorted(self._ts, ts, side="right")) - 1
+        if i < 0 or not np.isfinite(self._values[i]) or self._values[i] <= 0:
+            return None
+        return float(self._values[i])
 
 
 def _drawdown(peak: float, equity: float) -> float:

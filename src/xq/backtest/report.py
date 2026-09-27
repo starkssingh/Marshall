@@ -4,13 +4,13 @@
 `EventBacktestResult` of the event tier into a deterministic report (`xq.research.reports`):
 
 - **Summary.** Which tier, the cost basis ("screening, placeholder costs" while the cost model is
-  provisional) and, for the event tier, the risk approver (the Sprint 11 PLACEHOLDER says it
-  checks nothing); the BT-003 metrics; the **cost decomposition** — gross P&L (fills at the
-  reference mids, no costs), spread, slippage, commission, financing, net P&L — and the
-  **cost-fragility flag**: a strategy whose gross P&L is below 1.5 times its costs is
-  cost-fragile (plan Phase 13, research validation); the **ambiguous-bar share** — the share of
-  bars with an active bracket whose range reached both the stop and the target, and how they
-  were resolved (the screener has no brackets: not applicable).
+  provisional) and, for the event tier, the risk engine and its profile version; the BT-003
+  metrics; the **cost decomposition** — gross P&L (fills at the reference mids, no costs),
+  spread, slippage, commission, financing, net P&L — and the **cost-fragility flag**: a strategy
+  whose gross P&L is below 1.5 times its costs is cost-fragile (plan Phase 13, research
+  validation); the **ambiguous-bar share** — the share of bars with an active bracket whose range
+  reached both the stop and the target, and how they were resolved (the screener has no
+  brackets: not applicable).
 - **Equity and drawdown** per trading day, with the daily table.
 - **Monthly returns**, compounded from daily returns, by year and calendar month of the trading
   day, with the year's total.
@@ -203,7 +203,7 @@ def build_backtest_report(
     }
     if event is not None:
         info.update(
-            risk_approver=event.risk_label,
+            risk_engine=event.risk_label,
             data_mode=event.mode,
             strategy=f"{event.strategy_id} v{event.strategy_version}",
         )
@@ -216,7 +216,7 @@ def build_backtest_report(
         f"- **Tier:** {tier}"
         + (f" ({event.mode} mode)" if event is not None else " (research screener)"),
         f"- **Net results:** {result.cost_basis}",
-        "- **Risk approver:** "
+        "- **Risk engine:** "
         + (
             event.risk_label
             if event is not None
