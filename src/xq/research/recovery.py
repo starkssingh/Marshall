@@ -18,6 +18,7 @@ _ARIMA = "tests/unit/research/test_stats_arima.py"
 _ESTIMATORS = "tests/unit/research/test_vol_estimators.py"
 _REALIZED = "tests/unit/research/test_vol_realized.py"
 _BENCHMARKS = "tests/unit/research/test_vol_benchmarks.py"
+_GARCH = "tests/unit/research/test_vol_garch.py"
 
 RECOVERY_TESTS: Mapping[str, tuple[str, ...]] = {
     "ADF": (
@@ -97,6 +98,14 @@ RECOVERY_TESTS: Mapping[str, tuple[str, ...]] = {
     "deseasonalized": (
         f"{_BENCHMARKS}::test_the_diurnal_adjustment_is_fitted_on_training_periods_only",
         f"{_BENCHMARKS}::test_the_diurnal_adjustment_scales_forecasts_by_the_next_hours",
+    ),
+    "garch": (
+        f"{_GARCH}::test_garch11_parameters_are_recovered",
+        f"{_GARCH}::test_gjr_leverage_is_recovered",
+        f"{_GARCH}::test_egarch_parameters_are_recovered",
+        f"{_GARCH}::test_student_t_degrees_of_freedom_are_recovered",
+        f"{_GARCH}::test_forecasts_follow_the_garch_recursion_and_its_closed_form",
+        f"{_GARCH}::test_forecasts_are_causal_and_reproducible",
     ),
 }
 

@@ -433,6 +433,12 @@ IDs from `docs/specs/development-plan.md`.
   periods with the train-only diurnal factor. EWMA and rolling RV match hand computations; HAR
   recovers the coefficients of a simulated HAR process; every benchmark is causal; the diurnal
   adjustment is fitted on training periods only. ADR 0044.
+- VOL-004: GARCH family (`xq.research.volatility.garch`) — GARCH(1,1), GJR-GARCH and EGARCH
+  with normal, Student-t and skewed-t errors as `VolForecaster`s, refitted per fold on scaled
+  training returns, with analytic multi-step forecasts (EGARCH beyond one step simulated with a
+  seeded distribution) and fit diagnostics. Recovery: GARCH(1,1), GJR leverage, EGARCH and
+  Student-t degrees of freedom recovered within tolerance on simulated data; forecasts match the
+  GARCH recursion and its multi-step closed form; causal and reproducible. ADR 0044.
 
 ### Changed
 

@@ -48,3 +48,13 @@ before any real result; changing one afterwards needs an ADR.
    `Deseasonalized`: the diurnal factor fitted on the training periods' RV, the inner model fitted
    on adjusted data, and its forecast turned back into raw variance with the factors of the next h
    buckets of the trading day's cycle (known from the calendar, never read from future rows).
+6. **VOL-004 GARCH family** with `arch`: GARCH(1,1), GJR-GARCH(1,1) and EGARCH(1,1) with normal,
+   Student-t and skewed-t errors (nine models, `<process>_<distribution>`), refitted per fold on
+   the training periods' returns divided by their training standard deviation, with a zero mean
+   (configurable). Convergence, persistence and warnings are kept as diagnostics, never hidden.
+   Multi-step forecasts are analytic for GARCH and GJR; EGARCH beyond one step is simulated from a
+   distribution seeded through `xq.core.seeds` (reproducible). The variance recursion starts from
+   arch's backcast of the first 75 periods passed; in walk-forward the frame starts with the
+   training data, so every test forecast is causal (a test perturbs later rows). On hourly periods
+   the models run on deseasonalized returns through `Deseasonalized`. FIGARCH is not built
+   (STAT-004, Sprint 8, has not found long memory).
