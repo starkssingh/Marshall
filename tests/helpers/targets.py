@@ -6,10 +6,13 @@ import numpy as np
 import pandas as pd
 
 from xq.core.config import TargetSetConfig
-from xq.targets.base import TargetKind, TargetSpec
+from xq.data.calendar import MarketClock
+from xq.targets.base import Lookahead, TargetKind, TargetSpec
 
 
-def stub_compute(spec: TargetSpec, quotes: pd.DataFrame, sigma: pd.Series) -> pd.DataFrame:
+def stub_compute(
+    spec: TargetSpec, quotes: pd.DataFrame, sigma: pd.Series, clock: MarketClock | None = None
+) -> pd.DataFrame:
     """Value = horizon in minutes; labels span exactly the horizon from the decision time."""
     index = pd.DatetimeIndex(sigma.index)
     return pd.DataFrame(
@@ -17,7 +20,9 @@ def stub_compute(spec: TargetSpec, quotes: pd.DataFrame, sigma: pd.Series) -> pd
             "value": np.full(len(index), spec.horizon / pd.Timedelta(minutes=1)),
             "label_start": index,
             "label_end": index + spec.horizon,
+            "crosses_close": False,
             "scale": np.nan,
+            "fill_delay_s": 0.0,
         },
         index=index,
     )
@@ -37,6 +42,8 @@ STUB_KIND = TargetKind(
     expand=_expand,
     sigma=lambda close, definition, bar: pd.Series(1.0, index=close.index),
     compute=stub_compute,
-    lookahead=lambda definition: max(pd.Timedelta(h) for h in definition.horizons),
+    lookahead=lambda definition: Lookahead(
+        market=max(pd.Timedelta(h) for h in definition.horizons), wall=pd.Timedelta(0)
+    ),
 )
 STUB_DEFINITION = TargetSetConfig(kind="stub", horizons=["15m", "1h"], price_refs=["long", "mid"])

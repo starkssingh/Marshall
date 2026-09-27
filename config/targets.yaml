@@ -4,8 +4,9 @@
 fwd_returns:
   v1:
     kind: forward_return      # TGT-002: execution-aware forward log returns (ADR 0025)
-    # The plan's default horizons. EDA-006 (Sprint 5) decides which are admitted; horizons are
-    # calendar durations, so a label whose exit falls in a market closure has no value.
+    # The plan's default horizons. EDA-006 (Sprint 5) decides which are admitted. Horizons and the
+    # latency are trading time (ADR 0026): only market-open time counts, so a label from a Friday
+    # or just before the close holds over the gap (crosses_close = true). 1d = 24 market hours.
     horizons: [15m, 1h, 4h, 1d]
     price_refs: [long, short, mid]
     params:

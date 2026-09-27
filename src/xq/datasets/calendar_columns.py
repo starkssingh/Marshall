@@ -15,18 +15,20 @@ Columns, for a decision time t in trading day D (``trading_day(t)``, 17:00 New Y
 - per event anchor: ``minutes_to_<anchor>`` (next occurrence at or after t) and
   ``minutes_since_<anchor>`` (last occurrence at or before t), each looked up at most seven days
   away so a value never depends on how far the data extends;
-- per configured event window: ``in_<anchor>_window`` for ``[anchor - before, anchor + after)``.
+- per configured event window: ``in_<name>_window``, for ``[anchor - before, anchor + after)``
+  around the event anchor of that name, or for local clock times ``[start, end)`` on every day
+  (a clock window, ADR 0026; compared on the wall clock, so DST is handled by construction).
 """
 
 from __future__ import annotations
 
-from datetime import timedelta
+from datetime import time, timedelta
 
 import numpy as np
 import numpy.typing as npt
 import pandas as pd
 
-from xq.core.config import SessionsConfig
+from xq.core.config import ClockWindow, EventWindow, SessionsConfig
 from xq.core.time import trading_days
 from xq.data.sessions import build_session_table
 
@@ -74,11 +76,37 @@ def calendar_columns(decision_times: pd.DatetimeIndex, cfg: SessionsConfig) -> p
         out[f"minutes_to_{name}"] = to_next
         out[f"minutes_since_{name}"] = since_last
         window = cfg.event_windows.get(name)
-        if window is not None:
+        if isinstance(window, EventWindow):
             out[f"in_{name}_window"] = (to_next <= window.before_min) | (
                 since_last < window.after_min
             )
+        elif isinstance(window, ClockWindow):
+            out[f"in_{name}_window"] = _in_clock_window(index, window)
+    for name, window in cfg.event_windows.items():
+        if name not in cfg.event_anchors and isinstance(window, ClockWindow):
+            out[f"in_{name}_window"] = _in_clock_window(index, window)
     return out
+
+
+def _in_clock_window(index: pd.DatetimeIndex, window: ClockWindow) -> npt.NDArray[np.bool_]:
+    """Whether the local wall-clock time of each instant lies in ``[start, end)``."""
+    local = index.tz_convert(window.tz)
+    parts = [
+        getattr(local, unit).to_numpy(np.int64)
+        for unit in ("hour", "minute", "second", "microsecond", "nanosecond")
+    ]
+    hour, minute, second, micro, nano = parts
+    clock = ((hour * 60 + minute) * 60 + second) * 1_000_000_000 + micro * 1000 + nano
+    inside: npt.NDArray[np.bool_] = (_clock_ns(window.start) <= clock) & (
+        clock < _clock_ns(window.end)
+    )
+    return inside
+
+
+def _clock_ns(value: time) -> int:
+    """Nanoseconds since local midnight on the wall clock."""
+    seconds = (value.hour * 60 + value.minute) * 60 + value.second
+    return seconds * 1_000_000_000 + value.microsecond * 1000
 
 
 def _around(

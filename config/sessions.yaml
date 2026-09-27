@@ -61,13 +61,16 @@ event_anchors:
     time: "17:00"
     require_open: false    # financing rolls at 17:00 even after an early close
 
-# Dataset calendar columns (DS-007): in_<anchor>_window is true from `before_min` minutes before the
-# anchor until `after_min` minutes after it (half-open). Proposed defaults, fixed before any
-# research result; revisit in EDA with an ADR.
+# Dataset calendar columns (DS-007): in_<name>_window. A window with `before_min` / `after_min` is
+# true from that many minutes before the event anchor of the same name until `after_min` minutes
+# after it; a window with `tz` / `start` / `end` is true for local clock times in [start, end) on
+# every day. Both are half-open. Fixed before any research result; changes require an ADR.
 event_windows:
   us_data_release:
     before_min: 5
     after_min: 30
   rollover:
-    before_min: 15
-    after_min: 15
+    # The pre-close, the daily break and the reopen spread spike, Sunday reopen included (ADR 0026).
+    tz: America/New_York
+    start: "16:45"
+    end: "18:15"

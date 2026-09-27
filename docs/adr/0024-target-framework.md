@@ -25,7 +25,7 @@ target column in a feature matrix; `target_sets(name, version, spec_json, hash, 
    definition hash is also part of the dataset config digest and the kind's code version part of
    the dataset id, so the id pins what the targets mean.
 4. **Storage.** `targets.parquet` holds one row per decision time and target (`target`, `value`,
-   `label_start`, `label_end`, `scale`), covering every feature row (values missing where a target
+   `label_start`, `label_end`, `scale` and, since ADR 0026, `fill_delay_s`), covering every feature row (values missing where a target
    cannot be computed). `target_values(targets, name)` gives one target aligned with the
    features.
 5. **Inputs.** Targets are computed month by month from clean ticks read through the catalog,
@@ -35,7 +35,7 @@ target column in a feature matrix; `target_sets(name, version, spec_json, hash, 
    gated base bars (warm-up included) and taken at each decision time.
 6. **Schema guard.** Before features are written, `check_feature_matrix` refuses any feature
    column that is a target name, a target-frame column (`target`, `value`, `label_start`,
-   `label_end`, `scale`) or starts with a reserved prefix (`tgt_`, `fwd_`). Modelling code
+   `label_end`, `scale`, `fill_delay_s`) or starts with a reserved prefix (`tgt_`, `fwd_`). Modelling code
    (Sprint 4) calls the same guard when it assembles matrices.
 
 ## Consequences

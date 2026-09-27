@@ -421,6 +421,26 @@ class Artifact(Base):
     sha256: Mapped[str] = mapped_column(String(64))
 
 
+class FoldResultRecord(Base):
+    """One walk-forward fold of one evaluation in a run (WF-002).
+
+    `evaluation` names the model and target evaluated (a run may evaluate several); the selected
+    parameters and the fold's metrics are JSON.
+    """
+
+    __tablename__ = "fold_results"
+
+    run_id: Mapped[str] = mapped_column(ForeignKey("runs.run_id"), primary_key=True)
+    evaluation: Mapped[str] = mapped_column(String(128), primary_key=True)
+    fold_id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    train_start: Mapped[pd.Timestamp]
+    train_end: Mapped[pd.Timestamp]
+    test_start: Mapped[pd.Timestamp]
+    test_end: Mapped[pd.Timestamp]
+    params_json: Mapped[dict[str, Any]]
+    metrics_json: Mapped[dict[str, Any]]
+
+
 class TargetSetRecord(Base):
     """The locked definition of a target set version (TGT-001).
 

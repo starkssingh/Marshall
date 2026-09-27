@@ -226,9 +226,103 @@ IDs from `docs/specs/development-plan.md`.
   late (daily break, weekend, excluded day, end of data); `_vol` variants divide by the interim
   EWMA sigma-hat (span 96 bars) scaled to the horizon; horizons 15m, 1h, 4h, 1d (24 targets).
   Every target passes the leakage bound checks; `ds_base.yaml` includes the set. ADR 0025.
+- WF-001: splitters (`xq.validation.splitters`) — `WalkForwardSplitter` (expanding or rolling,
+  calendar-span windows, validation before test, `step >= test_len`), `PurgedKFold` and
+  `CombinatorialPurgedCV`; training and validation labels purged by `label_end` with the embargo as
+  a gap before the next window; `Fold.train_end` is the information cutoff; unlabelled samples are
+  predicted but never trained on. ADR 0027.
+- WF-006: splitter guard property tests (`tests/property/test_splitters.py`) — for random sample
+  spacing, label horizons (some missing) and splitter settings, every label used for fitting or
+  selection ends before `test_start - embargo`, test windows never overlap, purging removes exactly
+  the labels that would reach the next window (no over-purging), and purged k-fold / CPCV never
+  train on a test group's span plus embargo.
+- WF-002: walk-forward runner (`xq.validation.walkforward`) and model interface (`xq.models.base`:
+  `ModelSpec`, `ModelConfig`, `Estimator`) — per fold, grid candidates are fitted on training rows
+  and selected on validation rows, then the selection predicts the test rows; per-fold seeds make
+  serial and `spawn`-parallel runs identical; fold outputs are cached under a key that includes a
+  digest of the rows read; `run_walk_forward` applies the target schema guard, records
+  `fold_results` (migration 0007), logs stitched metrics and records the evaluation as a trial.
+  Tests include an AR(1) hit rate matching 1/2 + arcsin(φ)/π and the purging demonstration.
+  ADR 0028.
+- WF-003: out-of-sample prediction store (`xq.validation.predictions`) — Parquet under
+  `data/predictions/<experiment_id>/<run_id>/` with `decision_time, fold_id, model_version,
+  feature_set_version, y_true, y_pred, p_raw, p_cal, train_end`. The writer refuses the whole frame
+  if any decision time is not after `train_end + embargo` (or is naive, duplicated or unsorted),
+  and records every file as a run artifact. `run_walk_forward` stores its predictions through it.
+- BT-001: cost model (`xq.backtest.costs.CostModel`, `config/costs/placeholder.yaml`,
+  `backtest:` in `config/base.yaml`) — commission per lot and per notional, slippage
+  `(fixed_bps + k·σ̂_1m) × window multiplier` from the calendar columns, financing at each open
+  trading day's 17:00 New York rollover by side with a triple weekday, hour-of-week spread
+  fallback, latency and maximum fill delay. The placeholder values are PROVISIONAL (no broker
+  named). Golden tests include the triple rollover and a Good Friday with no rollover. ADR 0029.
+- BT-002: vectorized screener (`xq.backtest.vectorized.run_vectorized`) — target exposures filled
+  at the first quote `latency` of market time after the decision, buying at the ask and selling at
+  the bid plus slippage (never at the signal bar's close or at mid); late fills are missed and
+  retried; daily P&L by trading day with `gross − spread − slippage − commission − financing =
+  net` exactly, financing at each rollover; holding-episode trades with net P&L. Golden tests
+  include a hand-computed round trip, four nights over the triple rollover, a Friday-close
+  decision filled at the Sunday reopen and a side flip. ADR 0030.
+- BT-003: performance metrics (`xq.backtest.metrics`) — annual return, CAGR, volatility, Sharpe and
+  Sortino on daily returns (252 periods, zero risk-free rate), maximum drawdown (fraction and USD)
+  and its duration, Calmar, recovery factor, CVaR 95/99, worst day, time in market, average
+  exposure, turnover, trade count, win rate, average win and loss, expectancy and profit factor;
+  hand-computed tests and independent pandas cross-checks. ADR 0030.
+- BASE-006: forecast evaluation (`xq.validation.forecast_eval`) — log loss, Brier, expected
+  calibration error and reliability curves (equal-width bins), AUC (Mann–Whitney, ties halved),
+  MSE, MAE, QLIKE, and `loss_series` per-observation losses for Diebold–Mariano tests; matches the
+  scikit-learn documentation examples and scipy's Mann–Whitney statistic. Walk-forward fold
+  metrics and validation selection now use it.
+- VAL-001: Sharpe inference (`xq.validation.sharpe`) — per-period Sharpe ratio with i.i.d.
+  (Lo), non-normal (Mertens) and GMM/Newey–West standard errors, Lo's eta(q) annualization
+  factor, stationary-bootstrap percentile interval and minimum track record length. Verified by
+  closed forms and Monte Carlo on normal, skewed and AR(1) returns (no published table was
+  reproduced for this task). ADR 0031.
+- VAL-002: probabilistic and deflated Sharpe ratios (`xq.validation.dsr`) — PSR, expected maximum
+  Sharpe ratio of N trials, DSR, and `deflated_sharpe_for_family` using the registry's effective
+  trial count and trial Sharpe variance (trials record annualized Sharpe ratios). Reproduces the
+  published example (DSR 0.9004); on pure-noise families the selected best passes DSR > 0.95 in at
+  most 8 % of simulations. ADR 0031.
+- VAL-005: forecast comparison (`xq.validation.forecast_eval`) — Diebold–Mariano with the
+  Harvey–Leybourne–Newbold correction, Giacomini–White conditional predictive ability test and
+  the Model Confidence Set (T_max, stationary bootstrap, MCS p-values). Size checked on simulated
+  nulls and power on simulated alternatives. ADR 0031.
 
 ### Changed
 
+- `docs/STATUS.md` tracks the current sprint and next task, review carry-overs with owners and
+  closing commits, open owner decisions, provisional assumptions, known issues and per-phase
+  status; `CLAUDE.md` gains a session protocol (read it after `CLAUDE.md`, keep it current, record
+  chat decisions in an ADR and in it the same session, the repository wins over memory).
+- DS-003 `resample_causal` respects availability (ADR 0026, C-7): a required keyword `latency`
+  (how long after the end of its bin any member becomes available) labels each bin
+  `bin end + latency`; tests with latency > 0 (hand-computed, a hypothesis property that
+  truncates by availability, a counterexample showing the old labelling read a row two minutes
+  early, and the leakage harness on bars published late).
+- TGT-002 trading-time horizons (ADR 0026, C-5): `MarketClock` (`xq.data.calendar`) counts only
+  market-open time from `config/sessions.yaml`; forward-return horizons and latency are measured
+  on it, so decisions before a close or on a Friday are labelled over the break or weekend and
+  decisions taken while closed are entered at the reopen. Targets gain a boolean `crosses_close`
+  (a market close lies between entry and exit fills). Fill delays stay wall-clock. Target kinds
+  take the clock, and their lookahead is market time plus wall time; the builder reads and gates
+  quotes up to that reach. `forward_return` code version 2 (dataset ids change). Leakage suite:
+  exits are checked against the market-time horizon; property tests for the clock.
+- EXP-004 trial clustering (ADR 0026, C-4): trial returns are summed per trading day (17:00 New
+  York roll) before they are correlated, and a pair needs 60 common trading days
+  (`experiments.trial_clustering.min_common_days`, replacing `min_overlap: 20`); the correlation
+  threshold stays 0.7. `daily_returns` is public for reports.
+- DS-007 rollover window (ADR 0026, C-3): `in_rollover_window` is the New York clock window
+  16:45–18:15 on every day (pre-close, daily break and reopen spread spike, Sunday reopen
+  included) instead of ±15 minutes around the 17:00 anchor. `event_windows` accept clock windows
+  (`tz`, `start`, `end`) beside anchored ones; the US release window is unchanged. Dataset ids
+  change through the config digest.
+- TGT-002 fill-delay diagnostic (ADR 0026, C-2): every target row records `fill_delay_s` (the
+  later fill's delay after its intended time); the manifest (`fill_delays`) and
+  `xq dataset build` report per target the labelled rows, those with a fill more than
+  `datasets.fill_delay_report_s` (5 s) late and the largest delay. Values are unchanged.
+- ADR 0026 records the owner's Sprint 3 review decisions: latency 1 s and fill delay 300 s kept
+  (with a new fill-delay diagnostic), rollover window 16:45–18:15 New York, trial clustering on
+  60 common trading days, trading-time horizons with a `crosses_close` flag, `ds_base.yaml` start
+  and horizons kept, and a Docker re-check.
 - ADR 0013 records the owner's decisions on the Sprint 2 open questions: quality thresholds
   ratified as provisional (one change allowed, by ADR, after the DQ-008 real-data review; never
   after a strategy result exists); hour-of-week spread buckets kept until DQ-008; exact duplicates

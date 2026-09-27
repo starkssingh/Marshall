@@ -3,6 +3,9 @@
 Holiday dates come from the `holidays` package (US financial calendar, observed dates included;
 English bank holidays for LBMA). Which holidays close the market and when early closes happen is
 configuration (`config/sessions.yaml`), because it differs between venues.
+
+`MarketClock` measures trading time — only the market-open intervals count — for horizons that
+skip the daily break, weekends and holidays (ADR 0026).
 """
 
 from __future__ import annotations
@@ -11,6 +14,8 @@ from dataclasses import dataclass
 from datetime import date, time, timedelta
 
 import holidays as holiday_calendars
+import numpy as np
+import numpy.typing as npt
 import pandas as pd
 
 from xq.core.config import WEEKDAYS, SessionsConfig
@@ -116,3 +121,98 @@ class MarketCalendar:
     def _check_covered(self, day: date) -> None:
         if day.year not in self._years:
             raise ValueError(f"{day} is outside the calendar's years {self._years}")
+
+
+#: Integer sentinel for "no instant" in int64 nanosecond arrays (the value of ``NaT``).
+NAT_NS = np.iinfo(np.int64).min
+
+
+class MarketClock:
+    """Trading time over the market-open intervals of a range of trading days (ADR 0026).
+
+    Each open trading day contributes ``[market_open_utc, market_close_utc)``; the daily break,
+    weekends and closed holidays contribute nothing, and early closes shorten their day. Instants
+    are int64 UTC nanoseconds. The clock covers ``[covered_from, covered_to)``: the trading days
+    it was built for.
+    """
+
+    def __init__(
+        self,
+        opens: npt.NDArray[np.int64],
+        closes: npt.NDArray[np.int64],
+        covered_from: int,
+        covered_to: int,
+    ) -> None:
+        if len(opens) != len(closes) or np.any(closes <= opens):
+            raise ValueError("market intervals need an open before each close")
+        if np.any(opens[1:] < closes[:-1]):
+            raise ValueError("market intervals must be sorted and must not overlap")
+        self.opens = opens
+        self.closes = closes
+        self.covered_from = covered_from
+        self.covered_to = covered_to
+        lengths = closes - opens
+        self._elapsed_at_open = np.concatenate([[0], np.cumsum(lengths)[:-1]]).astype(np.int64)
+        self._elapsed_at_close = self._elapsed_at_open + lengths
+
+    @classmethod
+    def for_range(cls, cfg: SessionsConfig, start: date, end: date) -> MarketClock:
+        """The clock of trading days `start` to `end` inclusive."""
+        calendar = MarketCalendar.for_range(cfg, start, end)
+        opens, closes = [], []
+        for offset in range((end - start).days + 1):
+            status = calendar.status(start + timedelta(days=offset))
+            if status.market_open_utc is not None and status.market_close_utc is not None:
+                opens.append(status.market_open_utc.value)
+                closes.append(status.market_close_utc.value)
+        return cls(
+            np.array(opens, dtype=np.int64),
+            np.array(closes, dtype=np.int64),
+            trading_day_bounds(start)[0].value,
+            trading_day_bounds(end)[1].value,
+        )
+
+    def elapsed(self, t: npt.NDArray[np.int64]) -> npt.NDArray[np.int64]:
+        """Market time from the start of the covered range to each instant (nanoseconds)."""
+        self._check_covered(t)
+        k = np.searchsorted(self.opens, t, side="right") - 1
+        inside = k >= 0
+        out = np.zeros(len(t), dtype=np.int64)
+        kk = k[inside]
+        out[inside] = (
+            self._elapsed_at_open[kk] + np.minimum(t[inside], self.closes[kk]) - (self.opens[kk])
+        )
+        return out
+
+    def advance(self, t: npt.NDArray[np.int64], duration: int) -> npt.NDArray[np.int64]:
+        """The first market-open instant at which `duration` of market time has passed since t.
+
+        A t while the market is closed starts counting at the next open, so ``advance(t, 0)`` is
+        t itself when the market is open and the next open otherwise; a result landing exactly on
+        a close moves to the next open. `NAT_NS` where the answer lies beyond the covered range.
+        """
+        if duration < 0:
+            raise ValueError("duration must be non-negative")
+        target = self.elapsed(t) + duration
+        k = np.searchsorted(self._elapsed_at_close, target, side="right")
+        known = k < len(self.opens)
+        out = np.full(len(t), NAT_NS, dtype=np.int64)
+        kk = k[known]
+        out[known] = self.opens[kk] + target[known] - self._elapsed_at_open[kk]
+        return out
+
+    def crosses_close(
+        self, start: npt.NDArray[np.int64], end: npt.NDArray[np.int64]
+    ) -> npt.NDArray[np.bool_]:
+        """Whether a market close c lies in ``start <= c < end`` (a position held over it)."""
+        before_end = np.searchsorted(self.closes, end, side="left")
+        before_start = np.searchsorted(self.closes, start, side="left")
+        crosses: npt.NDArray[np.bool_] = before_end > before_start
+        return crosses
+
+    def _check_covered(self, t: npt.NDArray[np.int64]) -> None:
+        if len(t) and (t.min() < self.covered_from or t.max() >= self.covered_to):
+            raise ValueError(
+                f"instants from {pd.Timestamp(int(t.min()), tz='UTC')} to "
+                f"{pd.Timestamp(int(t.max()), tz='UTC')} are outside the market clock's range"
+            )

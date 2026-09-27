@@ -1,0 +1,24 @@
+# PROVISIONAL placeholder cost model (BT-001, ADR 0029). The execution broker is not yet named, so
+# NONE of these values is a broker fact: they are deliberately conservative retail-level
+# assumptions, to be replaced by the broker's published terms and by paper-trading measurements.
+# A result computed with this model is a screening result, never evidence of net profitability.
+venue: placeholder
+provisional: true
+latency_ms: 1000              # decision to order arrival, counted in market time (as fwd_returns.v1)
+max_fill_delay_s: 300         # no quote within 5 minutes of the intended fill time: the trade is missed
+spread:
+  fallback_quantile: p90      # without bid/ask quotes: this hour-of-week spread percentile (DATA-009)
+commission:
+  per_lot_per_side_usd: 3.5   # 7 USD per lot round turn (raw-spread account level)
+  per_notional_per_side_bps: 0.0
+slippage:
+  fixed_bps: 0.5
+  sigma_multiple: 0.1         # times sigma-hat of 1-minute log returns, in bps
+  multipliers:                # the largest one applying at the fill time multiplies the slippage
+    rollover_window: 3.0
+    us_data_release_window: 2.0
+financing:
+  long_rate_annual_pct: 6.0   # on long notional, per night held over the 17:00 New York rollover
+  short_rate_annual_pct: 2.0  # shorts also pay (conservative: some brokers credit them)
+  day_count: 360
+  triple_weekday: wed         # Wednesday's rollover is charged three times (the weekend)

@@ -22,7 +22,9 @@ SPA. Acceptance: every test-fold evaluation is counted.
    Sharpe ratios; `family=None` counts across all families. `xq exp trials [--family]` prints
    them.
 3. **Effective trials by clustering.** Return series are correlated pairwise (at least
-   `min_overlap` = 20 common observations), clustered by average linkage on `1 - rho`, and cut at
+   `min_overlap` = 20 common observations; since ADR 0026, returns are first summed per trading
+   day and a pair needs `min_common_days` = 60 common trading days), clustered by average linkage
+   on `1 - rho`, and cut at
    `1 - correlation_threshold` with `correlation_threshold` = 0.7: trials whose returns correlate
    above 0.7 on average count as one. Parameters live in `config/base.yaml`
    (`experiments.trial_clustering`); they are proposed values and, like gate thresholds, may not be

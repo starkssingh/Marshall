@@ -17,10 +17,10 @@ from xq.core.errors import NaiveTimestampError
 from xq.tracking import registry
 from xq.tracking.db import create_db_engine, upgrade_to_head
 from xq.tracking.runs import experiment_run
-from xq.tracking.trials import effective_trials, trial_count
+from xq.tracking.trials import daily_returns, effective_trials, trial_count
 
-PARAMS = TrialClusteringConfig(correlation_threshold=0.7, min_overlap=20)
-INDEX = pd.date_range("2024-01-01", periods=300, freq="1h", tz="UTC")
+PARAMS = TrialClusteringConfig(correlation_threshold=0.7, min_common_days=60)
+INDEX = pd.date_range("2024-01-01 22:00", periods=100 * 24, freq="1h", tz="UTC")  # 100 days
 
 
 def returns(seed: int, base: np.ndarray | None = None, noise: float = 1.0) -> pd.Series:
@@ -65,9 +65,34 @@ def test_near_duplicates_count_once() -> None:
 
 def test_too_little_overlap_counts_as_independent() -> None:
     a = returns(1)
-    b = a.iloc[:10].copy()  # identical values, but only 10 common observations
+    b = a.iloc[: 59 * 24].copy()  # identical values, but only 59 common trading days
     assert effective_trials({"a": a, "b": b}, PARAMS) == 2
+    assert effective_trials({"a": a, "b": a.iloc[: 60 * 24].copy()}, PARAMS) == 1
     assert effective_trials({"a": a, "b": a.copy()}, PARAMS) == 1
+
+
+def test_returns_are_compared_as_trading_day_sums() -> None:
+    hourly = returns(1)
+    daily = daily_returns(hourly)
+    # 22:00 UTC is the 17:00 New York roll in winter: the first 24 hours are one trading day.
+    assert daily.index[0] == pd.Timestamp("2024-01-02")
+    assert daily.iloc[0] == pytest.approx(hourly.iloc[:24].sum())
+    assert daily.sum() == pytest.approx(hourly.sum())
+    # The same strategy sampled daily and hourly is one trial, not two.
+    stamps = pd.DatetimeIndex(
+        [INDEX[0] + pd.Timedelta(hours=12) + pd.Timedelta(days=i) for i in range(len(daily))]
+    )
+    assert (
+        effective_trials(
+            {"hourly": hourly, "daily": pd.Series(daily.to_numpy(), index=stamps)}, PARAMS
+        )
+        == 1
+    )
+    # Hourly noise that cancels within each day does not dilute the correlation.
+    wiggle = np.tile([1.0, -1.0], len(INDEX) // 2) * 5
+    assert effective_trials({"a": hourly, "b": hourly + wiggle}, PARAMS) == 1
+    with pytest.raises(NaiveTimestampError):
+        daily_returns(pd.Series([0.1], index=pd.DatetimeIndex(["2024-01-01"])))
 
 
 def test_every_trial_is_counted_per_family_and_globally(cfg: AppConfig, engine: Engine) -> None:

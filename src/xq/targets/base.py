@@ -7,12 +7,17 @@ decision time t comes with:
 - ``label_start``: when the position would actually be entered (the execution time, at or after t);
 - ``label_end``: the last instant whose data the value depends on, used for purging in
   walk-forward splits (a training label whose ``label_end`` reaches into a test fold leaks it);
-- ``scale``: the volatility scale used by vol-normalized variants (missing otherwise).
+- ``crosses_close``: whether the holding period from ``label_start`` to ``label_end`` spans a
+  market close (False without a label; ADR 0026);
+- ``scale``: the volatility scale used by vol-normalized variants (missing otherwise);
+- ``fill_delay_s``: how late the later of the label's fills came after its intended fill time, in
+  seconds (missing without a label); `fill_delay_report` summarizes it for build output.
 
-Targets are stored apart from features, in long form (one row per decision time and target). The
-schema guard `check_feature_matrix` refuses any target column in a feature matrix. A target set's
-definition is hash-locked in ``target_sets`` the first time it is used: changing a definition
-requires a new version.
+Horizons are trading time: kinds receive a `MarketClock` and count only market-open time
+(ADR 0026). Targets are stored apart from features, in long form (one row per decision time and
+target). The schema guard `check_feature_matrix` refuses any target column in a feature matrix. A
+target set's definition is hash-locked in ``target_sets`` the first time it is used: changing a
+definition requires a new version.
 """
 
 from __future__ import annotations
@@ -29,11 +34,12 @@ from sqlalchemy import Engine
 from xq.core.config import PriceRef, TargetSetConfig
 from xq.core.errors import ConfigError, XQError
 from xq.core.time import utc_now
+from xq.data.calendar import MarketClock
 from xq.tracking.db import session_factory
 from xq.tracking.models import TargetSetRecord
 
 #: Columns of a computed target (one target, indexed by decision time).
-VALUE_COLUMNS = ("value", "label_start", "label_end", "scale")
+VALUE_COLUMNS = ("value", "label_start", "label_end", "crosses_close", "scale", "fill_delay_s")
 #: Columns of the long target frame stored in ``targets.parquet``.
 TARGET_FRAME_COLUMNS = ("target", *VALUE_COLUMNS)
 #: Feature names may not start with these; they are reserved for targets.
@@ -58,7 +64,19 @@ class TargetSpec:
     params: Mapping[str, Any]
 
 
-TargetFn = Callable[[TargetSpec, pd.DataFrame, pd.Series], pd.DataFrame]
+@dataclass(frozen=True)
+class Lookahead:
+    """How far after a decision time a kind may read quotes (ADR 0026).
+
+    Up to `market` of trading time (`MarketClock.advance`), then `wall` of clock time more (for
+    example the allowed fill delay).
+    """
+
+    market: pd.Timedelta
+    wall: pd.Timedelta
+
+
+TargetFn = Callable[[TargetSpec, pd.DataFrame, pd.Series, MarketClock], pd.DataFrame]
 SigmaFn = Callable[[pd.Series, TargetSetConfig, pd.Timedelta], pd.Series]
 
 
@@ -73,8 +91,9 @@ class TargetKind:
         sigma: ``sigma(close, definition, bar)``: volatility rate per square-root minute at each
             decision time, from the base close series (indexed by decision time) and the base
             bar length; must be causal. A kind scales it to a horizon h by sqrt(h in minutes).
-        compute: ``compute(spec, quotes, sigma)`` returning `VALUE_COLUMNS` indexed by the
-            decision times of `sigma`; `quotes` has ``ts_utc`` (tz-aware), ``bid`` and ``ask``.
+        compute: ``compute(spec, quotes, sigma, clock)`` returning `VALUE_COLUMNS` indexed by
+            the decision times of `sigma`; `quotes` has ``ts_utc`` (tz-aware), ``bid`` and
+            ``ask``; `clock` measures horizons in trading time and covers every decision time.
         lookahead: How far after a decision time the kind may read quotes.
     """
 
@@ -83,7 +102,7 @@ class TargetKind:
     expand: Callable[[TargetSetConfig], list[TargetSpec]]
     sigma: SigmaFn
     compute: TargetFn
-    lookahead: Callable[[TargetSetConfig], pd.Timedelta]
+    lookahead: Callable[[TargetSetConfig], Lookahead]
 
 
 def definition_hash(definition: TargetSetConfig) -> str:
@@ -126,12 +145,16 @@ def lock_target_set(engine: Engine, name: str, version: str, definition: TargetS
 
 
 def compute_targets(
-    kind: TargetKind, specs: list[TargetSpec], quotes: pd.DataFrame, sigma: pd.Series
+    kind: TargetKind,
+    specs: list[TargetSpec],
+    quotes: pd.DataFrame,
+    sigma: pd.Series,
+    clock: MarketClock,
 ) -> pd.DataFrame:
     """All targets of a set in long form, indexed by decision time (sorted by time, then name)."""
     frames = []
     for spec in specs:
-        values = kind.compute(spec, quotes, sigma)
+        values = kind.compute(spec, quotes, sigma, clock)
         missing = [c for c in VALUE_COLUMNS if c not in values.columns]
         if missing:
             raise ValueError(f"target kind {kind.name} returned no {missing} for {spec.name}")
@@ -153,6 +176,23 @@ def target_values(targets: pd.DataFrame, name: str) -> pd.DataFrame:
         known = ", ".join(sorted(targets["target"].unique())) or "none"
         raise KeyError(f"no target {name!r}; available: {known}")
     return one.drop(columns="target")
+
+
+def fill_delay_report(targets: pd.DataFrame, threshold_s: float) -> dict[str, dict[str, Any]]:
+    """Per target: labelled rows, rows with a fill later than `threshold_s`, the largest delay.
+
+    A diagnostic of how often the allowed fill delay is used (ADR 0026); it does not change any
+    value.
+    """
+    report: dict[str, dict[str, Any]] = {}
+    for name, one in targets.groupby("target", sort=True):
+        delays = one.loc[one["value"].notna(), "fill_delay_s"]
+        report[str(name)] = {
+            "labelled": len(delays),
+            "delayed": int((delays > threshold_s).sum()),
+            "max_delay_s": round(float(delays.max()), 3) if len(delays) else None,
+        }
+    return report
 
 
 def check_feature_matrix(features: pd.DataFrame, target_names: Collection[str]) -> None:
