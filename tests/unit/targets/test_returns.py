@@ -100,14 +100,34 @@ def test_a_decision_before_the_close_holds_over_the_daily_break() -> None:
     assert out["fill_delay_s"].iloc[0] == pytest.approx(2.0)
 
 
-def test_a_decision_at_the_close_is_entered_at_the_reopen() -> None:
-    # 17:00 EDT is the close itself: the latency and the horizon start counting at 18:00.
+@pytest.mark.parametrize(
+    "decision",
+    [
+        "2024-03-12 21:00",  # 17:00 EDT, the close itself (the last bar of the day is available)
+        "2024-03-12 21:30",  # inside the daily break
+        "2024-03-16 12:00",  # Saturday
+        "2024-03-17 21:59:59",  # one second before the Sunday reopen
+    ],
+)
+def test_a_decision_while_the_market_is_closed_gets_no_label(decision: str) -> None:
+    # ADR 0032: no entry at the reopen; the row keeps no value, fills or delay.
+    quotes = quotes_at("2024-03-17 22:00:05", "2024-03-17 23:00:02", "2024-03-12 22:00:05")
+    quotes = quotes.sort_values("ts_utc", ignore_index=True)
+    out = run(spec("mid"), quotes, sigma(*at(decision)))
+    assert np.isnan(out["value"].iloc[0])
+    assert pd.isna(out["label_start"].iloc[0])
+    assert pd.isna(out["label_end"].iloc[0])
+    assert not out["crosses_close"].iloc[0]
+    assert np.isnan(out["fill_delay_s"].iloc[0])
+
+
+def test_a_decision_at_the_reopen_is_labelled() -> None:
+    # 18:00 EDT exactly is open again: the same quotes give a label from that decision.
     quotes = quotes_at("2024-03-12 22:00:05", "2024-03-12 23:00:02")
-    out = run(spec("mid"), quotes, sigma(*at("2024-03-12 21:00")))
+    out = run(spec("mid"), quotes, sigma(*at("2024-03-12 22:00")))
     assert out["label_start"].iloc[0] == pd.Timestamp("2024-03-12 22:00:05", tz="UTC")
     assert out["label_end"].iloc[0] == pd.Timestamp("2024-03-12 23:00:02", tz="UTC")
     assert not out["crosses_close"].iloc[0]
-    assert out["fill_delay_s"].iloc[0] == pytest.approx(4.0)
 
 
 def test_a_friday_decision_is_labelled_over_the_weekend() -> None:

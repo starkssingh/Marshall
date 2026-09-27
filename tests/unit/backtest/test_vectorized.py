@@ -113,16 +113,46 @@ def test_a_fill_later_than_the_allowed_delay_is_missed_and_retried() -> None:
     assert result.fills["decision_time"].tolist() == [at("2024-03-12 14:15")]
 
 
-def test_a_decision_at_the_friday_close_fills_after_the_sunday_reopen() -> None:
+def test_a_decision_at_the_friday_close_places_no_order() -> None:
+    # ADR 0032: 17:00 New York is the close itself; the decision is not entered at the reopen.
     q = quotes(
         ("2024-03-15 20:59:59", 1999.9, 2000.1),  # the signal bar's last quote
         ("2024-03-17 22:00:03", 2004.9, 2005.1),  # Sunday reopen
+        ("2024-03-17 22:15:02", 2005.9, 2006.1),
     )
-    result = screen(positions(("2024-03-15 21:00", 1.0)), q)
-    assert result.fills["fill_time"].tolist() == [at("2024-03-17 22:00:03")]
-    assert result.fills["price"].iloc[0] == pytest.approx(2005.1 * 1.00005)
+    result = screen(positions(("2024-03-15 21:00", 1.0), ("2024-03-17 22:15", 1.0)), q)
+    assert result.closed.tolist() == [at("2024-03-15 21:00")]
+    assert result.missed.empty
+    # the first decision taken while open enters, after its own latency
+    assert result.fills["decision_time"].tolist() == [at("2024-03-17 22:15")]
+    assert result.fills["fill_time"].tolist() == [at("2024-03-17 22:15:02")]
+    assert result.fills["price"].iloc[0] == pytest.approx(2006.1 * 1.00005)
     assert (result.fills["fill_time"] >= result.fills["decision_time"] + S).all()
     assert bool(result.trades["open"].iloc[0])
+
+
+def test_an_exit_decided_while_closed_is_not_executed() -> None:
+    q = quotes(
+        ("2024-03-12 14:00:02", 1999.9, 2000.1),  # Tuesday: buy
+        ("2024-03-12 21:40:00", 1999.9, 2000.1),  # a stray quote inside the daily break
+        ("2024-03-12 22:00:05", 2001.9, 2002.1),  # reopen
+        ("2024-03-12 22:15:02", 2002.9, 2003.1),
+    )
+    result = screen(
+        positions(
+            ("2024-03-12 14:00", 1.0),
+            ("2024-03-12 21:30", 0.0),  # in the break: no order
+            ("2024-03-12 22:15", 0.0),  # open: the exit happens here
+        ),
+        q,
+    )
+    assert result.closed.tolist() == [at("2024-03-12 21:30")]
+    assert result.fills["decision_time"].tolist() == [
+        at("2024-03-12 14:00"),
+        at("2024-03-12 22:15"),
+    ]
+    assert result.fills["fill_time"].iloc[1] == at("2024-03-12 22:15:02")
+    assert result.fills["position_lots"].iloc[1] == 0.0
 
 
 def test_a_side_flip_closes_one_trade_and_opens_another() -> None:

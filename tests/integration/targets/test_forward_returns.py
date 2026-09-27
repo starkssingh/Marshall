@@ -136,9 +136,9 @@ def test_friday_decisions_are_labelled_over_the_weekend(tmp_path: Path) -> None:
 
     at_close = target_values(targets, "fwd_ret_mid_15m").loc[
         pd.Timestamp("2024-03-15 21:00", tz="UTC")
-    ]  # decided at the Friday close: entered at the Sunday reopen, no close in the holding period
-    assert np.isfinite(at_close["value"])
-    assert at_close["label_start"] >= pd.Timestamp("2024-03-17 22:00:01", tz="UTC")
+    ]  # decided at the Friday close, while the market is closed: no label (ADR 0032)
+    assert np.isnan(at_close["value"])
+    assert pd.isna(at_close["label_start"])
     assert not at_close["crosses_close"]
 
 

@@ -99,6 +99,10 @@ def test_forward_return_exit_is_the_first_quote_after_the_market_time_horizon(
     times = pd.DatetimeIndex(quotes["ts_utc"])
     assert ends.equals(times[times.searchsorted(intended, side="left")])
     assert ((ends - intended) <= kind.lookahead(definition, TRADING_DAY).wall).all()
+    # ADR 0032: only decisions taken while the market is open are labelled
+    assert CLOCK.is_open(decisions).all()
+    all_decisions = ns(pd.DatetimeIndex(out.index))
+    assert out.loc[~CLOCK.is_open(all_decisions), "value"].isna().all()
     crosses = CLOCK.crosses_close(ns(pd.DatetimeIndex(labelled["label_start"])), ns(ends))
     assert (labelled["crosses_close"].to_numpy() == crosses).all()
     assert labelled["crosses_close"].any()  # decisions near the close hold over the break

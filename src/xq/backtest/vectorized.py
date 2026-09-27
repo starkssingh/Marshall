@@ -8,11 +8,15 @@ into fills, daily P&L and trades:
   mid price of its fill; while the target is unchanged, the lots are unchanged (no rebalancing).
   This is a research screener: the event-driven tier (BT-004+) routes orders through the risk
   engine, which sizes them.
-- **Fills** happen at the first quote at or after ``latency`` of *market time* after the decision
-  (a decision taken while the market is closed fills after the reopen), on the correct side —
-  buy at the ask, sell at the bid — plus slippage. Never at the signal bar's close, never at mid.
-  If that quote comes more than ``max_fill_delay`` after the intended time, the trade is missed and
-  the position stays; the next decision tries again from the position actually held.
+- **Fills** happen at the first quote at or after ``latency`` of *market time* after the decision,
+  on the correct side — buy at the ask, sell at the bid — plus slippage. Never at the signal bar's
+  close, never at mid. If that quote comes more than ``max_fill_delay`` after the intended time,
+  the trade is missed and the position stays; the next decision tries again from the position
+  actually held.
+- **Decisions taken while the market is closed** (the 17:00 close itself, the daily break,
+  weekends, holidays) place no order at all — no entry, no exit, no change (ADR 0032). The
+  position held stays until the next decision taken while the market is open; the skipped
+  decisions that would have traded are reported in ``closed``.
 - **Costs**: the half-spread against mid is paid by each fill; slippage and commission come from
   the cost model; financing is charged at every rollover on the lots held over it.
 - **Days** are trading days (17:00 New York roll) with quotes. Positions are marked at the mid of
@@ -57,10 +61,15 @@ DAILY_COLUMNS = (
 
 @dataclass(frozen=True)
 class BacktestResult:
-    """Fills, missed decisions, daily P&L and trades of one screened position series."""
+    """Fills, skipped decisions, daily P&L and trades of one screened position series.
+
+    `missed`: decisions whose fill would have come too late; `closed`: decisions taken while the
+    market was closed, which place no order.
+    """
 
     fills: pd.DataFrame
     missed: pd.DatetimeIndex
+    closed: pd.DatetimeIndex
     daily: pd.DataFrame
     trades: pd.DataFrame
     financing: pd.Series
@@ -103,6 +112,7 @@ def run_vectorized(
     )
     contract = float(costs.instrument.contract_size)
 
+    market_open = clock.is_open(t) if len(t) else np.array([], dtype=bool)
     intended = clock.advance(t, costs.latency.value) if len(t) else np.array([], np.int64)
     quote = np.searchsorted(ts, intended, side="left")
     found = (quote < len(ts)) & (intended != NAT_NS)
@@ -111,9 +121,13 @@ def run_vectorized(
 
     rows: list[tuple[int, int, float, float]] = []  # decision, quote, trade lots, lots after
     missed: list[int] = []
+    closed: list[int] = []
     held_exposure, lots = 0.0, 0.0
     for i in range(len(t)):
         if target[i] == held_exposure:
+            continue
+        if not market_open[i]:
+            closed.append(i)
             continue
         if not timely[i]:
             missed.append(i)
@@ -128,7 +142,9 @@ def run_vectorized(
     financing = _financing(fills, ts, bid, ask, costs)
     daily = _daily(fills, financing, ts, bid, ask, capital, contract)
     trades = _trades(fills, financing, bid, ask, contract)
-    return BacktestResult(fills, decisions[missed], daily, trades, financing, capital, contract)
+    return BacktestResult(
+        fills, decisions[missed], decisions[closed], daily, trades, financing, capital, contract
+    )
 
 
 def _fills(

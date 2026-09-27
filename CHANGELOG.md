@@ -299,6 +299,13 @@ IDs from `docs/specs/development-plan.md`.
 
 ### Changed
 
+- TGT-002 and BT-002: decisions taken while the market is closed (the 17:00 close itself, the
+  daily break, weekends, holidays) get no target label and place no order (ADR 0032), instead of
+  being entered at the reopen; decisions taken while open keep their label across a close with
+  `crosses_close = true`. `MarketClock.is_open`; `BacktestResult.closed` lists the skipped
+  decisions that would have traded (no entry, exit or change: the held position stays until the
+  next decision taken while open); `forward_return` code version 4. The leakage suite checks that
+  only open-market decisions are labelled.
 - TGT-002 `1d` is one trading day (ADR 0032): a horizon label `<n>d` is n regular trading days of
   market time — 23 market hours for the 18:00–17:00 New York session
   (`xq.data.calendar.regular_trading_day`), so a `1d` label ends at the same session clock time one

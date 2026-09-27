@@ -4,9 +4,10 @@ For a decision at time t (a base bar's ``available_at``) and horizon h, times ar
 `MarketClock` — only market-open time passes, so the daily break, weekends and holidays are
 skipped. ``1d`` is one regular trading day, 23 market hours (ADR 0032); ``4h`` is 4 market hours:
 
+- a decision taken while the market is closed (at the 17:00 close itself, in the daily break, on a
+  weekend or holiday) gets no label (ADR 0032);
 - the intended entry is ``latency`` of market time after t, and the intended exit ``h + latency``
-  after t; a decision taken while the market is closed (at the 17:00 close, say) starts counting
-  at the reopen;
+  after t;
 - the entry fill is the first usable quote at or after the intended entry, the exit fill the first
   at or after the intended exit;
 - ``long`` buys at the entry ask and sells at the exit bid: ``log(bid_exit / ask_entry)``;
@@ -113,7 +114,7 @@ def compute(
 
     entry, entry_ok, entry_late = _fill(ts, clock.advance(t, latency), delay)
     exit_, exit_ok, exit_late = _fill(ts, clock.advance(t, spec.horizon.value + latency), delay)
-    ok = entry_ok & exit_ok
+    ok = entry_ok & exit_ok & clock.is_open(t)  # no label for decisions while closed
     fill_delay = np.where(ok, np.maximum(entry_late, exit_late) / 1e9, np.nan)
     value = np.full(len(t), np.nan)
     if ok.any():
@@ -177,7 +178,7 @@ def _ns(index: pd.DatetimeIndex) -> npt.NDArray[np.int64]:
 
 FORWARD_RETURN = TargetKind(
     name="forward_return",
-    code_version=3,
+    code_version=4,
     expand=expand,
     sigma=sigma_rate,
     compute=compute,

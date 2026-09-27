@@ -214,6 +214,15 @@ class MarketClock:
         out[known] = self.opens[kk] + target[known] - self._elapsed_at_open[kk]
         return out
 
+    def is_open(self, t: npt.NDArray[np.int64]) -> npt.NDArray[np.bool_]:
+        """Whether each instant lies inside a market-open interval ``[open, close)``."""
+        self._check_covered(t)
+        k = np.searchsorted(self.opens, t, side="right") - 1
+        inside: npt.NDArray[np.bool_] = np.zeros(len(t), dtype=bool)
+        known = k >= 0
+        inside[known] = t[known] < self.closes[k[known]]
+        return inside
+
     def crosses_close(
         self, start: npt.NDArray[np.int64], end: npt.NDArray[np.int64]
     ) -> npt.NDArray[np.bool_]:
