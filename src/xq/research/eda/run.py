@@ -5,7 +5,8 @@ window (`xq.research.eda.data`), computes the sections below and writes one repo
 `xq.research.reports.ReportBuilder` under ``reports/eda/<dataset_id>/<run_id>/``:
 
 - ``overview`` — the discovery window, the bars and returns per timeframe, the excluded days;
-- ``distributions`` (EDA-002) and ``horizons`` (EDA-006), each with its tables and figures;
+- ``distributions`` (EDA-002), ``dependence`` (EDA-003) and ``horizons`` (EDA-006), each with its
+  tables and figures;
 - ``admission.yaml`` — the horizon admission list (copied to ``config/horizons.yaml`` only by
   ``xq research admit-horizons``);
 - ``run.json`` — the run id, experiment, confirmatory flag, git sha and seed (outside the
@@ -35,7 +36,7 @@ from xq.core.config import config_hash
 from xq.core.seeds import derive_seed
 from xq.core.time import TimestampLike
 from xq.core.types import Timeframe
-from xq.research.eda import distributions, horizons
+from xq.research.eda import dependence, distributions, horizons
 from xq.research.eda.bootstrap import eda_block_length
 from xq.research.eda.data import EdaInputs, bars_per_trading_day, load_eda_inputs
 from xq.research.reports import (
@@ -51,6 +52,8 @@ if TYPE_CHECKING:
 
 REPORT_DIR = "eda"
 TITLE = "Exploratory research on the discovery window"
+#: Longest table rendered in a Markdown section; longer ones are in their CSV files.
+_MAX_ROWS = 60
 
 
 @dataclass(frozen=True)
@@ -108,6 +111,7 @@ def run_eda(run: RunContext, dataset_id: str, *, end: TimestampLike | None = Non
     builder = ReportBuilder(TITLE, metadata=metadata)
     _overview(builder.section("overview", "Data and discovery window"), inputs, returns)
     _distributions(builder.section("distributions", "Return distributions (EDA-002)"), run, returns)
+    _dependence(builder.section("dependence", "Serial dependence (EDA-003)"), run, returns)
     admission = _horizons(
         builder.section("horizons", "Cost to volatility and horizon admission (EDA-006)"),
         run,
@@ -226,6 +230,51 @@ def _distributions(
     if yearly:
         section.table(
             "by-year", pd.concat(yearly, ignore_index=True), caption="Moments per year (bps)"
+        )
+
+
+def _dependence(section: Section, run: RunContext, returns: dict[Timeframe, pd.DataFrame]) -> None:
+    eda = run.cfg.eda_config()
+    sessions = run.cfg.sessions_config()
+    level = eda.dependence.ci_level
+    section.text(
+        f"Autocorrelations up to one trading day of lags (at least {eda.dependence.min_lags}), "
+        f"with pointwise {level:.0%} bands: i.i.d. (z / sqrt(n)) and heteroskedasticity-robust. "
+        "Only lags outside the robust band are flagged. Ljung-Box and ARCH-LM tests are STAT-002."
+    )
+    summaries = []
+    for tf in eda.timeframes:
+        r = returns[tf]["ret"].to_numpy(dtype=np.float64)
+        nlags = dependence.lags_for(
+            bars_per_trading_day(tf, sessions), eda.dependence.min_lags, len(r)
+        )
+        if nlags < 1:
+            continue
+        table = dependence.dependence_table(r, nlags, level)
+        summary = dependence.dependence_summary(table)
+        summary.insert(0, "timeframe", tf.value)
+        summaries.append(summary)
+        section.table(
+            f"acf-{tf.value}",
+            table,
+            caption=f"ACF and PACF of {tf.value} returns, |returns| and squared returns",
+            max_rows=0,
+        )
+        flagged = table.loc[table["significant"]]
+        section.table(
+            f"significant-{tf.value}",
+            flagged,
+            caption=f"{tf.value}: lags outside the robust band",
+            max_rows=_MAX_ROWS,
+        )
+        section.figure(
+            f"acf-{tf.value}",
+            dependence.dependence_figure(table, f"{tf.value} returns"),
+            caption=f"ACF of {tf.value} returns, |returns| and squared returns; PACF of returns",
+        )
+    if summaries:
+        section.table(
+            "summary", pd.concat(summaries, ignore_index=True), caption="Dependence summary"
         )
 
 

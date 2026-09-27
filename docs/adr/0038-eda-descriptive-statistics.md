@@ -2,7 +2,7 @@
 
 - **Status:** accepted
 - **Date:** 2026-09-27
-- **Tasks:** EDA-002 (on EDA-001)
+- **Tasks:** EDA-002, EDA-003 (on EDA-001)
 
 ## Context
 
@@ -26,6 +26,20 @@ processes with known properties. Exact formulas are in the module docstrings.
 - Tests: moments and Jarque–Bera equal scipy; Hill recovers a Pareto index; the t fit recovers its
   degrees of freedom; the block bootstrap widens the interval of an AR(1) mean by about
   sqrt((1 + phi) / (1 - phi)).
+
+## Decision — EDA-003 dependence
+
+- ACF (biased estimator, by FFT) and PACF (Durbin–Levinson) of returns, |returns| and squared
+  returns, up to one trading day of lags (at least 20).
+- Bands: the i.i.d. band z/sqrt(n) and the heteroskedasticity-robust band from
+  `se_k = sqrt(sum e_t^2 e_{t-k}^2) / sum e_t^2` (Taylor 1984; Lo–MacKinlay's delta_k); lags are
+  flagged only outside the robust band. The PACF uses the same band. Formal tests (Ljung–Box,
+  ARCH-LM) stay in STAT-002.
+- `statsmodels` becomes a **development** dependency, used only as the reference in tests (ACF
+  and PACF match it to 1e-10); the library does not import it.
+- Tests: an AR(1) is recovered; the robust band equals the i.i.d. band for i.i.d. data and is
+  about 1.5 times wider at lag 1 for GARCH(1,1) (alpha 0.15, beta 0.8), where it flags no more
+  return lags than the i.i.d. band while still flagging volatility clustering.
 
 ## Consequences
 

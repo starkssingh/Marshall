@@ -349,6 +349,11 @@ IDs from `docs/specs/development-plan.md`.
   least five trading days of bars, at most a tenth of the series), Jarque–Bera, Student-t fit with
   QQ plots against the normal and the t, Hill tail indices and moments by year. Tested against
   scipy, a Pareto tail, a t sample and an AR(1). ADR 0038.
+- EDA-003: dependence (`xq.research.eda.dependence`) — ACF by FFT and PACF by Durbin–Levinson of
+  returns, absolute and squared returns up to one trading day of lags, with i.i.d. and
+  heteroskedasticity-robust bands; lags are flagged against the robust band. Matches statsmodels;
+  the robust band is wider than the i.i.d. one on a GARCH(1,1) simulation and equal on i.i.d.
+  data. Adds `statsmodels` as a development dependency (the reference in tests only). ADR 0038.
 
 ### Changed
 
