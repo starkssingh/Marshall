@@ -233,5 +233,6 @@ def test_buy_and_hold_is_one_open_trade_paying_financing() -> None:
     result = run_vectorized(positions, quotes, costs, clock, capital=100_000.0)
     assert len(result.fills) == 1
     assert bool(result.trades["open"].iloc[0])
-    assert len(result.financing) == 2  # two rollovers held
+    # Tuesday's, Wednesday's (x3) and Thursday's rollover, which ends the last quote's day
+    assert len(result.financing) == 3
     assert (result.financing > 0).all()
