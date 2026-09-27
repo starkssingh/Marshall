@@ -236,6 +236,14 @@ IDs from `docs/specs/development-plan.md`.
   selection ends before `test_start - embargo`, test windows never overlap, purging removes exactly
   the labels that would reach the next window (no over-purging), and purged k-fold / CPCV never
   train on a test group's span plus embargo.
+- WF-002: walk-forward runner (`xq.validation.walkforward`) and model interface (`xq.models.base`:
+  `ModelSpec`, `ModelConfig`, `Estimator`) — per fold, grid candidates are fitted on training rows
+  and selected on validation rows, then the selection predicts the test rows; per-fold seeds make
+  serial and `spawn`-parallel runs identical; fold outputs are cached under a key that includes a
+  digest of the rows read; `run_walk_forward` applies the target schema guard, records
+  `fold_results` (migration 0007), logs stitched metrics and records the evaluation as a trial.
+  Tests include an AR(1) hit rate matching 1/2 + arcsin(φ)/π and the purging demonstration.
+  ADR 0028.
 
 ### Changed
 

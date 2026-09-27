@@ -13,10 +13,12 @@ correction built on it — dishonest.
 from __future__ import annotations
 
 import hashlib
+import math
+from collections.abc import Sequence
 from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
-from typing import Any
+from typing import Any, Protocol
 
 import pandas as pd
 from sqlalchemy import Engine, func, select
@@ -26,7 +28,14 @@ from xq.core.ids import new_ulid
 from xq.core.time import utc_now
 from xq.data.raw_store import sha256_file
 from xq.tracking.db import session_factory
-from xq.tracking.models import Artifact, Experiment, Hypothesis, Metric, Run
+from xq.tracking.models import (
+    Artifact,
+    Experiment,
+    FoldResultRecord,
+    Hypothesis,
+    Metric,
+    Run,
+)
 
 
 class RegistryError(XQError):
@@ -320,6 +329,109 @@ def log_metric(
         _running(session.get(Run, run_id), run_id)
         session.add(Metric(run_id=run_id, fold_id=fold_id, name=name, value=float(value)))
         session.commit()
+
+
+class FoldSummary(Protocol):
+    """A walk-forward fold as the registry stores it (see `xq.validation.walkforward`)."""
+
+    @property
+    def fold_id(self) -> str: ...
+    @property
+    def train_start(self) -> pd.Timestamp: ...
+    @property
+    def train_end(self) -> pd.Timestamp: ...
+    @property
+    def test_start(self) -> pd.Timestamp: ...
+    @property
+    def test_end(self) -> pd.Timestamp: ...
+    @property
+    def n_train(self) -> int: ...
+    @property
+    def n_val(self) -> int: ...
+    @property
+    def n_test(self) -> int: ...
+    @property
+    def selected(self) -> dict[str, Any]: ...
+    @property
+    def metrics(self) -> dict[str, float]: ...
+
+
+@dataclass(frozen=True)
+class FoldResultRow:
+    """A stored ``fold_results`` row."""
+
+    run_id: str
+    evaluation: str
+    fold_id: str
+    train_start: pd.Timestamp
+    train_end: pd.Timestamp
+    test_start: pd.Timestamp
+    test_end: pd.Timestamp
+    params: dict[str, Any]
+    metrics: dict[str, Any]
+
+
+def record_fold_results(
+    engine: Engine, run_id: str, evaluation: str, folds: Sequence[FoldSummary]
+) -> None:
+    """Record every fold of one walk-forward evaluation of a running run (WF-002).
+
+    Row counts go into the metrics; missing metric values are stored as null.
+    """
+    with session_factory(engine)() as session:
+        _running(session.get(Run, run_id), run_id)
+        for fold in folds:
+            metrics = {
+                "n_train": fold.n_train,
+                "n_val": fold.n_val,
+                "n_test": fold.n_test,
+                **{k: _json_number(v) for k, v in fold.metrics.items()},
+            }
+            session.add(
+                FoldResultRecord(
+                    run_id=run_id,
+                    evaluation=evaluation,
+                    fold_id=fold.fold_id,
+                    train_start=fold.train_start,
+                    train_end=fold.train_end,
+                    test_start=fold.test_start,
+                    test_end=fold.test_end,
+                    params_json=dict(fold.selected),
+                    metrics_json=metrics,
+                )
+            )
+        session.commit()
+
+
+def get_fold_results(
+    engine: Engine, run_id: str, evaluation: str | None = None
+) -> list[FoldResultRow]:
+    """Fold results of a run (optionally of one evaluation), by evaluation then fold."""
+    with session_factory(engine)() as session:
+        query = select(FoldResultRecord).where(FoldResultRecord.run_id == run_id)
+        if evaluation is not None:
+            query = query.where(FoldResultRecord.evaluation == evaluation)
+        rows = session.scalars(
+            query.order_by(FoldResultRecord.evaluation, FoldResultRecord.fold_id)
+        ).all()
+        return [
+            FoldResultRow(
+                r.run_id,
+                r.evaluation,
+                r.fold_id,
+                r.train_start,
+                r.train_end,
+                r.test_start,
+                r.test_end,
+                r.params_json,
+                r.metrics_json,
+            )
+            for r in rows
+        ]
+
+
+def _json_number(value: float) -> float | None:
+    return None if math.isnan(value) else float(value)
 
 
 def get_metrics(engine: Engine, run_id: str) -> list[MetricRecord]:
