@@ -60,3 +60,23 @@
 3. **Floating point.** Sizes are rounded to the lot step from their value at 12 decimals, as in
    RISK-002, so a cap can be exceeded by at most 5e-13 lots through representation error; the
    property test allows a relative 1e-9.
+
+## RISK-004 — stop policy
+
+1. **Every long or short intent carries a price stop**, including one that only reduces a
+   position on the same side: a new order cancels the earlier intent's bracket when it reaches
+   the broker, and its own stop and target become the bracket on the whole resulting position, so
+   an order without a stop would leave the rest of the position unprotected. A `flat` intent needs
+   none. Time stops are allowed *in addition*, never instead: fixed-fractional sizing
+   needs the distance to a price stop.
+2. **Bounds** (the plan's `[k_min·spread, k_max·σ̂]`), measured from the entry reference — the
+   side's quote for a market entry, the order's price for a limit or stop entry: a stop closer
+   than `min_spread_multiple` × the current spread, and at least one tick, is **widened** outward
+   to the tick (it becomes the decision's `adjusted_stop`, and sizing uses the widened distance,
+   so the risk budget still holds); a stop farther than `max_sigma_multiple` × daily σ̂ × price is
+   **refused**, not tightened — tightening would change the strategy's exit, and the plan's
+   refusal is the conservative reading. Without a σ̂ at the decision no stop can be bounded and
+   the entry is refused.
+3. **Sanity of the bracket.** A target must be on the winning side of the entry reference (a
+   target already through the market would close the position at once), and a time stop must be
+   after the decision time.

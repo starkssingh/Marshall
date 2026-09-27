@@ -557,6 +557,12 @@ IDs from `docs/specs/development-plan.md`.
   target (lots, notional with a correlated-exposure hook, margin use, per-session exposure),
   rounded down to the lot step; a hypothesis property shows a capped target never exceeds any
   limit or the requested size and keeps its side. ADR 0052.
+- RISK-004: stop policy (`xq.risk.stops.check_stops`) — every long or short intent needs a stop
+  on the losing side of its entry reference (the side's quote, or the order's price); a stop
+  closer than 3 spreads (at least a tick) is widened outward to the tick and becomes the adjusted
+  stop; one farther than 5 daily sigmas, or any stop without a sigma-hat, is refused; targets must
+  be on the winning side and time stops after the decision (allowed in addition to the price
+  stop). Tested on hand-computed bounds, inclusive at the sigma bound. ADR 0052.
 
 ### Changed
 
