@@ -5,15 +5,17 @@ sprint and whenever a decision or carry-over item changes; anything decided in c
 recorded in an ADR and here in the same session. If a memory of an earlier conversation conflicts
 with the repository, the repository wins.
 
-- **Last updated:** 2026-09-27, at the end of Sprint 11 (event-driven backtester, run ahead of
-  Sprints 7–10 while real data is pending, ADR 0048)
-- **Merged to `main`:** Sprints 1–6 with the revised H-0001 draft and the Sprint 5 and Sprint 6
-  review fixes (PRs #2, #3, #6, #7, #8, #9, #10, #11). Sprint 11 is on branch
-  `claude/nice-keller-dc5zeb` in a pull request to `main`.
+- **Last updated:** 2026-09-27, at the start of Sprint 12 A (after the owner's review of Sprint 11,
+  ADR 0050, ADR 0051)
+- **Merged to `main`:** Sprints 1–6 and 11 with the revised H-0001 draft and the Sprint 5 and
+  Sprint 6 review fixes (PRs #2, #3, #6, #7, #8, #9, #10, #11, #12). Sprint 12 A is on branch
+  `claude/nice-keller-dc5zeb`.
 
 ## Current sprint
 
-- **Sprint:** 11 — event-driven backtester — **complete, synthetic data only** (owner's
+- **Sprint:** 12 A — risk and signal engines, data-independent part (ADR 0051) — **in
+  progress**. The previous sprint, 11 — event-driven backtester — is **complete, merged in PR #12,
+  synthetic data only** (owner's
   instruction, ADR 0048): BT-004, BT-005, BT-006, BT-007, BT-008, BT-009 and BT-010 are
   implemented and tested on hand-computed cases and simulated quotes (ADR 0049). Before them, the
   reserved-family guard landed (ADR 0047): no hypothesis can be registered in `linear_forecasts`
@@ -38,11 +40,15 @@ with the repository, the repository wins.
   cost-fragility flag, monthly returns, trade distribution, exposure by session, ambiguous-bar
   share, the new `backtests` table). There is no CLI for event backtests yet: they wait for real
   data and a candidate.
-- **Next:** the owner reviews Sprint 11 (PR), including the open points of ADR 0049 (C-20) and
-  Sprint 12's scope under the re-ordered plan (ADR 0048). Then Sprint 12 (risk and signal
-  engines), which replaces the placeholder approver. Still open from earlier sprints: Claude
-  implements the revised H-0001 in the board runner (C-15); with real data (C-8): the research
-  halves of Sprint 5 (C-16) and Sprint 6 (C-18); then Sprints 7–10.
+- **Next:** first the Sprint 11 review decisions (ADR 0050): the reconciliation tolerance after
+  the sizing effect, limit orders filling only on a trade through the limit by at least one tick,
+  and the TGT-002 closed-market fill fix. Then Sprint 12 A, the data-independent part of Sprint 12
+  (ADR 0051): RISK-001 … RISK-006, SIGNAL-001 … SIGNAL-005 (the regime filter an interface with a
+  pass-through only), with the real `RiskEngine` replacing the placeholder approver everywhere;
+  it ends with a PR and the owner's review. After that review: Sprint 9 (VAL-003, VAL-004,
+  VAL-006, ROB-001, ROB-002, ROB-003, ROB-006, ROB-007, EXP-006). Still open from earlier sprints:
+  Claude implements the revised H-0001 in the board runner (C-15); with real data (C-8): the
+  research halves of Sprint 5 (C-16) and Sprint 6 (C-18); then Sprints 7, 8 and 10.
 - **Not allowed yet:** running H-0001 (or any board) on real data before the owner has approved
   and registered it; generating an EDA report, a statistical verdict report or a volatility board
   on real or pseudo-real data, or writing values to `config/horizons.yaml`, before the owner
@@ -50,7 +56,7 @@ with the repository, the repository wins.
   interim sigma-hat (ADR 0044); registering H-0000 before real data fixes its windows (ADR 0041);
   running event backtests, reconciliations or reports on real or pseudo-real data (ADR 0048);
   treating any event-tier result as evidence while the risk approver is the placeholder; starting
-  Sprint 12 before the owner's review; pushing to `main`.
+  Sprint 9 before the owner's review of Sprint 12 A; pushing to `main`.
 - **Previous sprint (6, merged in PR #11):** statistical and volatility research, build-only —
   STAT-001, STAT-002, STAT-003, STAT-006, STAT-008 (framework), VOL-001 … VOL-006 and BASE-003,
   each passing a recovery test on simulated processes (`xq.research.recovery.RECOVERY_TESTS`,
@@ -81,8 +87,8 @@ with the repository, the repository wins.
 | C-17 | DATA-013 secondary long-history adapter: build only if the owner decides a secondary feed is needed (depends on the broker's history depth) | Sprint 5 start | Owner (decision) | open |
 | C-18 | Research half of Sprint 6, after real data (C-8) and the owner's go-ahead: pre-register the statistical and volatility studies (families and trial budgets); run STAT-001/002/003 on the discovery window and STAT-006 in walk-forward at the admitted horizons (needs `config/horizons.yaml`, C-16) and write the verdict report; run the volatility board on real 1m/5m bars (daily and hourly periods) on identical folds; apply `select_forecaster`; the owner decides whether the selected forecaster replaces the interim sigma-hat (an ADR and a configuration change); add a CLI for these reports; measure their speed on real data. Trial rules approved (ADR 0046): STAT-001 … STAT-003 record none (descriptive, under H-0000); STAT-006 and the volatility board record one per (model, horizon) in the `linear_forecasts` and `volatility_models` families. If STAT-002 or STAT-003 finds dependence in returns, write and pre-register H-0002 (linear predictability, with `ar1`) | Sprint 6 (build-only) | Owner (data, go-ahead, promotion), then Claude | open — blocked on C-8 and C-16 |
 | C-19 | Whether the `ar1` forecast baseline (BASE-003) joins H-0001's board, which raises its approved trial budget from 36 to 40, or is evaluated under its own pre-registered hypothesis | Sprint 6 (ADR 0045) | Owner (decision) | decided (ADR 0046): `ar1` stays off H-0001 (budget 36), stays on benchmark boards, and gets H-0002 only if STAT-002/003 find dependence on real data (C-18) |
-| C-20 | Owner review of Sprint 11's open points (ADR 0049): the weekly-close blackout length (60 min) and weekend-exit lead (30 min), provisional; the reconciliation tolerance applied to the raw equity difference, sizing included (at 100,000 USD, lot-step rounding alone can exceed 5 % of costs; reported separately); limit orders never filling better than their price; the provisional margin rate 0.05; Sprint 12's scope under ADR 0048 | Sprint 11 | Owner | open |
-| C-21 | TGT-002 forward-return labels take the first quote at or after the intended fill time even when the market is closed (a stray quote in the daily break within the fill delay), the rule the screener no longer follows (`aa88b2a`). Fixing it bumps the target code version and changes dataset hashes, so it waits for the owner's go-ahead | Sprint 11 | Owner (go-ahead), then Claude | open |
+| C-20 | Owner review of Sprint 11's open points (ADR 0049): the weekly-close blackout length (60 min) and weekend-exit lead (30 min), provisional; the reconciliation tolerance applied to the raw equity difference, sizing included (at 100,000 USD, lot-step rounding alone can exceed 5 % of costs; reported separately); limit orders never filling better than their price; the provisional margin rate 0.05; Sprint 12's scope under ADR 0048 | Sprint 11 | Owner, then Claude | decided (ADR 0050, ADR 0051): tolerance after the sizing effect; 60-min blackout, optional weekend exit (off) and 5 % margin approved; limit orders fill only on a trade through by ≥ 1 tick, never better; Sprint 12's data-independent part now, then Sprint 9. Implementation: open |
+| C-21 | TGT-002 forward-return labels take the first quote at or after the intended fill time even when the market is closed (a stray quote in the daily break within the fill delay), the rule the screener no longer follows (`aa88b2a`). Fixing it bumps the target code version and changes dataset hashes, so it waits for the owner's go-ahead | Sprint 11 | Owner (go-ahead), then Claude | go-ahead given (ADR 0050): fix now, no real datasets exist. Implementation: open |
 
 ## Open owner decisions
 
@@ -98,7 +104,6 @@ with the repository, the repository wins.
 | Research horizon focus | 15m–1d, other | 15m–1d; four horizons kept until EDA-006 (ADR 0026) |
 | Risk budget | per-trade risk, drawdown halt | 0.5 % per trade, halt at 15 % drawdown (plan default; the gates' 0.15 drawdown limits match it) |
 | Vault | holdout start | `2025-09-25T21:00:00Z`, the last 12 months at project start (fixed) |
-| Sprint 12 scope under the re-ordered plan (ADR 0048) | Sprint 12 as planned with stand-ins for REG-007 and Sprint 9's ROB tasks; RISK-001 … RISK-006 and SIGNAL-001/002/004/005 only, the rest after Sprints 8–9; other | none: decided at the owner's review of Sprint 11 |
 | Replacing the interim sigma-hat (C-18) | the forecaster `select_forecaster` picks on real data; keep the interim EWMA | interim EWMA, span 96 base bars (`fwd_returns.v1`); nothing promoted (ADR 0044) |
 
 Decided at the Sprint 4 hold point (ADR 0032): the evidence gates, the meaning of `1d`, decisions
@@ -122,6 +127,13 @@ if STAT-002 or STAT-003 finds dependence on real data. Decided at the start of S
 ADR 0048): no hypothesis may be registered in a reserved model family; while real data is pending
 the data-independent engineering sprints run next — Sprint 11 on synthetic data only, with a
 pass-through placeholder risk approver until Sprint 12, then Sprint 12 after the owner's review.
+Decided at the Sprint 11 review (ADR 0050, ADR 0051): the reconciliation tolerance applies after
+the separately reported sizing effect; the 60-minute pre-weekly-close blackout, the optional
+weekend exit (off) and 5 % margin are approved provisional defaults; limit orders fill only when
+the price trades through the limit by at least one tick, never better; TGT-002 closed-market
+fills are fixed now; Sprint 12's data-independent part runs next (the regime filter an interface
+with a pass-through), then Sprint 9; ROB-004, ROB-005, ROB-008 and the real regime filter wait for
+their dependencies.
 
 ## Provisional assumptions not yet confirmed
 
@@ -133,7 +145,7 @@ pass-through placeholder risk approver until Sprint 12, then Sprint 12 after the
 | Trading calendar | 18:00–17:00 New York, NYSE holidays, 13:30 early closes | ADR 0002, `config/sessions.yaml` | broker schedule |
 | Costs (commission, slippage, financing) | placeholder model, PROVISIONAL: commission 3.5 USD/lot/side; slippage 0.5 bp + 0.1·σ̂₁ₘ, ×3 rollover window, ×2 US release; financing 6 %/yr long, 2 %/yr short (both a cost, required while provisional), act/360, triple Wednesday; spread fallback p90 | `config/costs/placeholder.yaml`, ADR 0029, ADR 0032 | broker terms, paper trading |
 | Execution latency | 1 s (market time from ADR 0026) | `config/targets.yaml` `fwd_returns.v1`, cost model | BT-001, paper trading |
-| Event-tier execution rules | margin 5 % of notional (1:20); limit orders fill at their price, never better; bar mode (no ticks) resolves a bar touching both bracket legs to the stop; entry blackouts: rollover window, US release window, last 60 min before a weekly close; optional weekend exit 30 min before it (off) | `config/base.yaml` `backtest.event`, ADR 0049 | broker terms, paper trading, owner review (C-20) |
+| Event-tier execution rules | margin 5 % of notional (1:20); limit orders fill at their price, never better, and only when the price trades through them by at least one tick; bar mode (no ticks) resolves a bar touching both bracket legs to the stop; entry blackouts: rollover window, US release window, last 60 min before a weekly close; optional weekend exit 30 min before it (off) | `config/base.yaml` `backtest.event`, ADR 0049, ADR 0050 (defaults approved by the owner) | broker terms, paper trading |
 | Risk approver of the event tier | PLACEHOLDER pass-through: no risk checks; sizes the requested exposure of the initial capital at the decision's mid, rounded down to the lot step | `xq.risk.placeholder`, ADR 0048, ADR 0049 | RISK-005 (Sprint 12) |
 | Maximum fill delay | 300 s | `fwd_returns.v1`, cost model | ADR 0026: kept, provisional |
 | Bar publication latency | 0 ms | `config/base.yaml` `bars` | live feed measurement |
