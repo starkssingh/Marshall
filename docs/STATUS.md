@@ -5,16 +5,15 @@ sprint and whenever a decision or carry-over item changes; anything decided in c
 recorded in an ADR and here in the same session. If a memory of an earlier conversation conflicts
 with the repository, the repository wins.
 
-- **Last updated:** 2026-09-27, at the end of Sprint 9 (in review; C-22 decided and implemented
+- **Last updated:** 2026-09-27, after Sprint 9 was merged (PR #14; C-22 decided and implemented
   at its start, ADR 0053)
-- **Merged to `main`:** Sprints 1–6, 11 and 12 A with the revised H-0001 draft and the Sprint 5 and
-  Sprint 6 review fixes (PRs #2, #3, #6, #7, #8, #9, #10, #11, #12, #13). Sprint 9 is on branch
-  `claude/nice-keller-dc5zeb`.
+- **Merged to `main`:** Sprints 1–6, 9, 11 and 12 A with the revised H-0001 draft and the Sprint 5
+  and Sprint 6 review fixes (PRs #2, #3, #6, #7, #8, #9, #10, #11, #12, #13, #14).
 
 ## Current sprint
 
-- **Sprint:** 9 — statistical validation and robustness (ADR 0051, ADR 0054) — **complete, in
-  review, synthetic data only**. First the owner's Sprint 12 A decision C-22: sizing on the edge
+- **Sprint:** 9 — statistical validation and robustness (ADR 0051, ADR 0054) — **complete, merged
+  in PR #14, synthetic data only**; its open points (C-24) wait for the owner's review. First the owner's Sprint 12 A decision C-22: sizing on the edge
   per unit of risk (`5ab2678`, ADR 0053). Then, one commit each: VAL-003 PBO by CSCV (`b516a07`),
   VAL-004 Reality Check, SPA and Romano–Wolf (`1dc1fbc`), VAL-006 Holm and Benjamini–Hochberg per
   family (`2a95486`), ROB-001 parameter perturbation (`6403286`), ROB-002 cost and latency stress
