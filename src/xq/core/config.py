@@ -878,6 +878,17 @@ class SpaSizeCheckConfig(FrozenModel):
     warn_ratio: float = Field(gt=1)
 
 
+class PerturbationConfig(FrozenModel):
+    """Parameter perturbation (ROB-001; the neighbourhood design of C-24, ADR 0055)."""
+
+    #: Perturbation levels, shares of each parameter's scale; the gate reads its own
+    #: ``parameter_neighbourhood.perturbation``, which must be one of them.
+    levels: list[Annotated[float, Field(gt=0, lt=1)]] = Field(min_length=1)
+    #: The largest joint neighbourhood evaluated in full (3^5 - 1 = 242 points for five
+    #: parameters); a larger one is a seeded sample of this many points.
+    max_joint_points: int = Field(ge=1)
+
+
 class ValidationConfig(FrozenModel):
     """Validation and robustness procedures (``config/validation.yaml``, Phases 16 and 17).
 
@@ -885,6 +896,7 @@ class ValidationConfig(FrozenModel):
     """
 
     spa_size_check: SpaSizeCheckConfig
+    perturbation: PerturbationConfig
 
 
 class SpreadCostConfig(FrozenModel):
@@ -1671,6 +1683,17 @@ class AppConfig(BaseSettings):
         if conventions.trial_count == "effective" and self.experiments is None:
             raise ValueError(
                 "gates count effective trials, but experiments.trial_clustering is not configured"
+            )
+        return self
+
+    @model_validator(mode="after")
+    def _check_validation(self) -> AppConfig:
+        if self.gates is None or self.validation is None:
+            return self
+        gate_level = self.gates.r2_validated.parameter_neighbourhood.perturbation
+        if not any(math.isclose(gate_level, x) for x in self.validation.perturbation.levels):
+            raise ValueError(
+                f"validation.perturbation.levels must include the gate's perturbation {gate_level}"
             )
         return self
 

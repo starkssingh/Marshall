@@ -111,3 +111,37 @@ The only expectation that changed is the independent pandas check in `test_metri
 reference peak is now floored at the capital. The number was never wrong by the old definition;
 the definition changed. The R2 gate `oos_max_drawdown_max` reads this metric, so a strategy that
 loses from its first day can now fail it where it passed before. No gate result exists yet.
+
+## 3. The neighbourhood gate reads the full combinatorial grid
+
+**Decision.** R2's `parameter_neighbourhood` is judged on the full combinatorial grid: each
+parameter at −20 %, 0 and +20 %. When 3^k exceeds 243, a deterministic seeded sample of the grid
+is used. The report adds a one-at-a-time sensitivity table. A ridge-shaped optimum, good only
+along the diagonal, must fail.
+
+**Implementation.**
+
+- The joint design at every level is the grid of {nominal, down, up} per parameter, without the
+  nominal point: 3^k − 1 neighbours, fewer where a side is invalid (a minimum or the end of a list
+  of choices).
+- Up to five parameters the grid is evaluated in full (242 neighbours at five). Above that, 243
+  neighbours are drawn without replacement: they are grid indices other than the nominal's, drawn
+  by a generator seeded from the run's seed and the level (`derive_seed`). The same seed always
+  gives the same points.
+- `neighbourhood_design(level)` says which design was used, for the report.
+- `sensitivity()` is the one-at-a-time table: per parameter, the net Sharpe at each level down
+  and up, the nominal Sharpe, the worst change from it and the profitable share. It is reported,
+  not gated.
+- The levels (10, 20 and 30 %) and the 243 are in `config/validation.yaml` (`perturbation`). A
+  configuration whose levels leave out the gate's `perturbation` is refused.
+- `perturb` now requires `max_points` and `seed`.
+
+**Known truth.**
+
+- A ridge with two or three parameters (profitable only when every parameter moves by the same
+  relative step) has a profitable share of 2/8 or 2/26, and fails. Every one-at-a-time move loses,
+  which the sensitivity table shows.
+- Six parameters give 728 neighbours, of which 243 are sampled. Every sampled point is on the
+  grid and distinct, the nominal point is left out, and the same seed gives the same sample while
+  another seed gives another. Five parameters are evaluated in full.
+- The single-point optimum on noise and the genuine trend edge keep their ADR 0054 results.

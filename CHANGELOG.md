@@ -702,6 +702,15 @@ IDs from `docs/specs/development-plan.md`.
   (`running_peak`, `path_max_drawdowns`) is shared by `performance_metrics`, the board's drawdown
   and its bootstrap interval, ROB-003 and the report's drawdown panel. This closes the known issue
   of ADR 0054. It feeds R2's `oos_max_drawdown_max`.
+- C-24 (3) (owner's decision, ADR 0055), ROB-001: the R2 neighbourhood gate reads the full
+  combinatorial grid (each parameter at −20 %/0/+20 %, the nominal point left out). Above 243
+  neighbours (more than five parameters), 243 are drawn without replacement by a generator seeded
+  from the run's seed, so the draw is repeatable. `neighbourhood_design` names the design, and
+  `sensitivity()` is the one-at-a-time sensitivity table for the report. `perturb` requires
+  `max_points` and `seed`. The levels and the 243 are in `config/validation.yaml`
+  (`perturbation`), which must include the gate's level. Tested: a ridge optimum (good only along
+  the diagonal, two or three parameters) fails, and a six-parameter grid is sampled
+  deterministically.
 - C-22 (owner's decision, ADR 0053): position sizing scales on the edge per unit of risk instead
   of the raw calibrated probability — `ev_r = p_lcb x TP/SL - (1 - p_lcb) - round_trip_cost/SL`
   with `p_lcb` the probability's lower confidence bound, and the multiplier

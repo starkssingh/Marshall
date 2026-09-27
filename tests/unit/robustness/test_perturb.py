@@ -1,10 +1,13 @@
 """ROB-001: parameter perturbation and plateau metrics — a single-point optimum on noise fails
-the R2 neighbourhood gate, a genuine trend edge chosen the same way passes, and the designs
-(one at a time, jointly, heat maps) evaluate the points they state."""
+the R2 neighbourhood gate, a genuine trend edge chosen the same way passes, a ridge (good only
+along the diagonal) fails the full-grid gate, the joint grid is sampled deterministically above
+243 points, and the designs (one at a time with its sensitivity table, jointly, heat maps)
+evaluate the points they state (C-24, ADR 0055)."""
 
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 
 import numpy as np
+import pandas as pd
 import pytest
 
 from helpers.quality import repo_config
@@ -12,14 +15,17 @@ from helpers.strategies import (
     drift_returns,
     overfit_grid,
     overfit_returns,
+    point_seed,
     sharpe,
     strategy_returns,
     trend_positions,
 )
 from xq.robustness.perturb import Parameter, perturb
 
-GATES = repo_config().gates_config()
+CFG = repo_config()
+GATES = CFG.gates_config()
 HOOD = GATES.r2_validated.parameter_neighbourhood
+MAX_POINTS = CFG.validation_config().perturbation.max_joint_points
 A_GRID = [float(a) for a in range(5, 15)]
 B_GRID = [1.0, 2.0, 3.0, 4.0, 5.0]
 
@@ -32,6 +38,8 @@ def overfit_case(salt: int) -> tuple[float, float, float, bool]:
         lambda v: overfit_returns(v["a"], v["b"], 1000, salt=salt),
         [Parameter("a", a), Parameter("b", b)],
         periods_per_year=252,
+        max_points=MAX_POINTS,
+        seed=0,
         heatmaps=False,
     )
     check = result.gate_check(GATES)
@@ -59,6 +67,8 @@ def genuine_case(seed: int) -> tuple[float, float, float, bool]:
         evaluate,
         [Parameter("lookback", lookback, integer=True, minimum=2), Parameter("deadband", deadband)],
         periods_per_year=252,
+        max_points=MAX_POINTS,
+        seed=0,
         heatmaps=False,
     )
     check = result.gate_check(GATES)
@@ -103,6 +113,8 @@ def test_the_designs_evaluate_the_points_they_state() -> None:
         evaluate,
         [Parameter("lookback", 40, integer=True, minimum=2), Parameter("deadband", 0.5)],
         periods_per_year=252,
+        max_points=MAX_POINTS,
+        seed=0,
     )
     assert len(calls) == len(result.points) == len({tuple(c.items()) for c in calls})  # once each
     assert all(isinstance(c["lookback"], int) for c in calls)
@@ -151,12 +163,117 @@ def test_points_without_variance_are_not_profitable_and_inputs_are_checked() -> 
             return np.zeros(100)  # never trades
         return np.random.default_rng(1).normal(0.001, 0.01, 100)
 
-    result = perturb(evaluate, [Parameter("x", 1.0)], periods_per_year=252)
+    result = perturb(
+        evaluate, [Parameter("x", 1.0)], periods_per_year=252, max_points=MAX_POINTS, seed=0
+    )
     assert result.profitable_share(0.2) == 0.0
     assert not result.gate_check(GATES).passed
     with pytest.raises(ValueError, match=r"\(0, 1\)"):
-        perturb(evaluate, [Parameter("x", 1.0)], periods_per_year=252, levels=[1.5])
+        perturb(
+            evaluate,
+            [Parameter("x", 1.0)],
+            periods_per_year=252,
+            max_points=9,
+            seed=0,
+            levels=[1.5],
+        )
     with pytest.raises(ValueError, match="distinct"):
-        perturb(evaluate, [Parameter("x", 1.0), Parameter("x", 2.0)], periods_per_year=252)
+        perturb(
+            evaluate,
+            [Parameter("x", 1.0), Parameter("x", 2.0)],
+            periods_per_year=252,
+            max_points=9,
+            seed=0,
+        )
     with pytest.raises(ValueError, match="not evaluated"):
         result.neighbourhood(0.25)
+
+
+def ridge_evaluate(
+    names: tuple[str, ...], periods: int = 2000
+) -> Callable[[Mapping[str, float]], np.ndarray]:
+    """A ridge-shaped optimum: profitable only where every parameter moved by the same relative
+    step as the others (the diagonal through the nominal point), losing elsewhere."""
+
+    def evaluate(values: Mapping[str, float]) -> np.ndarray:
+        logs = [np.log(values[name] / 10.0) for name in names]
+        on_ridge = max(logs) - min(logs) < 1e-9
+        edge = 0.001 if on_ridge else -0.001
+        noise = np.random.default_rng(point_seed(*(values[n] for n in names)))
+        return edge + noise.normal(0.0, 0.01, periods)
+
+    return evaluate
+
+
+@pytest.mark.parametrize("k", [2, 3])
+def test_a_ridge_optimum_fails_the_full_grid_gate(k: int) -> None:
+    # C-24 (3): good only along the diagonal. Of the 3^k - 1 neighbours, two lie on the ridge
+    # (every parameter down, every parameter up), so the profitable share is 2 / (3^k - 1).
+    names = tuple(f"p{i}" for i in range(k))
+    result = perturb(
+        ridge_evaluate(names),
+        [Parameter(name, 10.0) for name in names],
+        periods_per_year=252,
+        max_points=MAX_POINTS,
+        seed=0,
+        heatmaps=False,
+    )
+    assert result.nominal_sharpe > 1.0  # the chosen point looks good ...
+    hood = result.neighbourhood(HOOD.perturbation)
+    assert len(hood) == 3**k - 1
+    assert result.profitable_share(HOOD.perturbation) == pytest.approx(2 / (3**k - 1))
+    check = result.gate_check(GATES)
+    assert not check.passed  # ... but the plateau is a knife edge
+    # the one-at-a-time table shows every single move losing: the report names the fragility
+    table = result.sensitivity()
+    assert list(table.index) == list(names)
+    assert (table["profitable_share"] == 0.0).all()
+    assert (table["worst_change"] < -1.0).all()
+    assert list(table.columns[1:7]) == ["-10%", "+10%", "-20%", "+20%", "-30%", "+30%"]
+
+
+def test_a_large_grid_is_sampled_deterministically() -> None:
+    # six parameters: 3^6 - 1 = 728 neighbours, more than 243, so 243 are drawn from the seed
+    names = tuple(f"p{i}" for i in range(6))
+    calls: list[tuple[float, ...]] = []
+
+    def evaluate(values: Mapping[str, float]) -> np.ndarray:
+        calls.append(tuple(values.get(n, 10.0) for n in names))
+        return 0.0005 + np.random.default_rng(len(calls)).normal(0.0, 0.01, 200)
+
+    params = [Parameter(name, 10.0) for name in names]
+
+    def run(seed: int) -> pd.DataFrame:
+        result = perturb(
+            evaluate,
+            params,
+            periods_per_year=252,
+            max_points=MAX_POINTS,
+            seed=seed,
+            levels=[HOOD.perturbation],
+            heatmaps=False,
+        )
+        assert result.neighbourhood_design(HOOD.perturbation) == (
+            "seeded sample of 243 of the grid's 728 points around the nominal"
+        )
+        return result.neighbourhood(HOOD.perturbation)
+
+    first = run(1)
+    assert len(first) == MAX_POINTS
+    grid = first[list(names)].to_numpy()
+    assert set(np.round(grid.ravel(), 9)) <= {8.0, 10.0, 12.0}  # every point is on the grid
+    assert len({tuple(row) for row in grid}) == MAX_POINTS  # drawn without replacement
+    assert not any(np.all(grid == 10.0, axis=1))  # the nominal point is not a neighbour
+    np.testing.assert_array_equal(run(1)[list(names)].to_numpy(), grid)  # the same seed ...
+    assert not np.array_equal(run(2)[list(names)].to_numpy(), grid)  # ... and another one
+    five = perturb(
+        evaluate,
+        params[:5],
+        periods_per_year=252,
+        max_points=MAX_POINTS,
+        seed=1,
+        levels=[HOOD.perturbation],
+        heatmaps=False,
+    )
+    assert len(five.neighbourhood(HOOD.perturbation)) == 3**5 - 1  # five parameters: in full
+    assert five.neighbourhood_design(HOOD.perturbation).startswith("full grid: 242 points")

@@ -160,6 +160,8 @@ RECOVERY_TESTS: Mapping[str, tuple[str, ...]] = {
         f"{_PERTURB}::test_a_single_point_optimum_on_noise_fails_the_neighbourhood_gate",
         f"{_PERTURB}::test_a_genuine_trend_edge_passes_the_neighbourhood_gate",
         f"{_PERTURB}::test_the_designs_evaluate_the_points_they_state",
+        f"{_PERTURB}::test_a_ridge_optimum_fails_the_full_grid_gate",
+        f"{_PERTURB}::test_a_large_grid_is_sampled_deterministically",
     ),
     "cost_stress": (
         f"{_COST_STRESS}::test_the_r2_scenario_passes_exactly_when_the_gross_edge_covers_the_stressed_costs",

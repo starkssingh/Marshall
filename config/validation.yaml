@@ -8,3 +8,7 @@ spa_size_check:          # C-24 (1): does SPA / the Reality Check over-reject on
   n_boot: 199            # bootstrap resamples per simulated family
   max_ar_order: 5        # AR sieve per strategy, order by AIC (Yule-Walker, always stationary)
   warn_ratio: 1.5        # warn when the simulated size exceeds 1.5x the gate's level (owner)
+
+perturbation:            # ROB-001; the gate's neighbourhood is the full grid (C-24 (3))
+  levels: [0.10, 0.20, 0.30]   # the gate reads parameter_neighbourhood.perturbation (0.20)
+  max_joint_points: 243  # full grid up to 3^5 points; above that a seeded sample of 243 points
