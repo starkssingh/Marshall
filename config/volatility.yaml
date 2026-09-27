@@ -1,0 +1,44 @@
+# Volatility research (Phase 6: VOL-001 ... VOL-006; ADR 0044). Every parameter is fixed before
+# any result on real data exists; changing one afterwards needs an ADR. Sprint 6 is build-only:
+# nothing here has run on real data and no forecaster is promoted; sigma-hat stays the interim
+# EWMA of `fwd_returns.v1` until VOL-006 selects a forecaster on real data.
+
+estimators:                    # VOL-001: trailing range estimators on bars of one price basis
+  window: 20                   # bars in each estimator's trailing window
+  atr_window: 14               # Wilder's ATR smoothing (1 / 14)
+
+realized:                      # VOL-002: realized measures from intraday returns
+  intraday_timeframes: [1m, 5m]
+  periods: [1h, 1d]            # RV per UTC hour and per trading day (17:00 New York roll)
+  diurnal:
+    day_standardized: true     # divide each squared return by its trading day's mean first
+    min_count: 20              # buckets with fewer training returns keep a factor of 1
+
+benchmarks:                    # VOL-003: fixed in advance, never tuned
+  rolling_windows: [22]        # rolling mean of RV over the last 22 periods
+  ewma_lambdas: [0.94, 0.97]   # RiskMetrics EWMA of squared period returns
+  har_components: [1, 5, 22]           # HAR-RV on daily periods: day, week, month
+  har_intraday_components: [1, 23, 115]  # on hourly periods: hour, trading day, trading week
+  variance_floor_share: 0.01   # HAR forecasts are floored at this share of the mean training RV
+
+garch:                         # VOL-004: refitted per fold on returns scaled to unit variance
+  mean: zero
+  models:                      # name -> volatility process with its asymmetry term
+    garch: {vol: GARCH, o: 0}
+    gjr: {vol: GARCH, o: 1}
+    egarch: {vol: EGARCH, o: 1}
+  distributions: [normal, t, skewt]
+  simulations: 1000            # EGARCH multi-step forecasts are simulated (seeded)
+
+evaluation:                    # VOL-005: identical folds and targets for every model
+  target: rv                   # realized variance summed over the forecast horizon
+  mcs_alpha: 0.10              # 90 % Model Confidence Set
+  mcs_n_boot: 1000
+  mcs_mean_block: 5.0
+  dm_alpha: 0.05
+  dm_reference: har            # DM tests against HAR (plan); also against the default below
+  regime_window: 22            # periods of trailing mean RV behind the volatility-regime slices
+  regime_quantiles: [0.3333333333, 0.6666666667]   # cut-offs from each fold's training rows
+
+selection:                     # VOL-006: promote only a model in the MCS that beats the default
+  default: ewma_0.94           # kept when nothing beats it (plan: EWMA/HAR stays)

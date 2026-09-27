@@ -7,6 +7,15 @@
   hours Monday to Friday, with effects injected into chosen hour-of-week buckets.
 - `minute_bars`: complete 1m mid bars on every market-open minute of the configured calendar,
   with a given log-mid path and a spread proportional to the mid.
+
+Sprint 6 recovery tests (STAT-001 ... VOL-006) add:
+
+- `random_walk`: a Gaussian random walk (a unit root);
+- `ornstein_uhlenbeck`: an OU process sampled exactly at unit steps (an AR(1) level, mean
+  reverting), whose increments have variance ratios below 1;
+- `level_shift`: stationary noise around a level that shifts once;
+- `garch_path`: GARCH(1,1) or GJR-GARCH(1,1) returns with any omega, and the true conditional
+  variances behind them.
 """
 
 from __future__ import annotations
@@ -144,3 +153,60 @@ def minute_bars(
             "is_complete": True,
         }
     )
+
+
+def random_walk(n: int, *, seed: int, sigma: float = 1.0) -> FloatArray:
+    """A Gaussian random walk ``x_t = x_{t-1} + sigma e_t`` starting at 0."""
+    rng = np.random.default_rng(seed)
+    return np.cumsum(sigma * rng.standard_normal(n))
+
+
+def ornstein_uhlenbeck(n: int, *, theta: float, sigma: float = 1.0, seed: int) -> FloatArray:
+    """An OU process ``dx = -theta x dt + sigma dW`` sampled exactly at unit time steps.
+
+    The samples are an AR(1) with ``phi = exp(-theta)`` and innovation variance
+    ``sigma^2 (1 - phi^2) / (2 theta)``, started from the stationary distribution.
+    """
+    phi = float(np.exp(-theta))
+    stationary_sd = sigma / np.sqrt(2 * theta)
+    rng = np.random.default_rng(seed)
+    e = rng.standard_normal(n) * stationary_sd * np.sqrt(1 - phi**2)
+    x = np.empty(n)
+    x[0] = rng.standard_normal() * stationary_sd
+    for t in range(1, n):
+        x[t] = phi * x[t - 1] + e[t]
+    return x
+
+
+def level_shift(n: int, *, at: int, shift: float, phi: float = 0.5, seed: int) -> FloatArray:
+    """A stationary AR(1) around 0 before position `at` and around `shift` from it on."""
+    return ar1(n, phi, seed=seed) + np.where(np.arange(n) >= at, shift, 0.0)
+
+
+def garch_path(
+    n: int,
+    *,
+    omega: float,
+    alpha: float,
+    beta: float,
+    gamma: float = 0.0,
+    seed: int,
+    burn: int = 1000,
+) -> tuple[FloatArray, FloatArray]:
+    """GJR-GARCH(1,1) returns and their true conditional variances (GARCH(1,1) when gamma = 0).
+
+    ``h_t = omega + (alpha + gamma 1[r_{t-1} < 0]) r_{t-1}^2 + beta h_{t-1}`` and
+    ``r_t = sqrt(h_t) z_t`` with standard normal z; started at the unconditional variance and
+    burnt in.
+    """
+    rng = np.random.default_rng(seed)
+    z = rng.standard_normal(n + burn)
+    r = np.empty(n + burn)
+    h = np.empty(n + burn)
+    h[0] = omega / (1 - alpha - gamma / 2 - beta)
+    for t in range(n + burn):
+        if t:
+            shock = r[t - 1] ** 2
+            h[t] = omega + (alpha + gamma * (r[t - 1] < 0)) * shock + beta * h[t - 1]
+        r[t] = np.sqrt(h[t]) * z[t]
+    return r[burn:], h[burn:]

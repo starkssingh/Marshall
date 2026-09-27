@@ -372,6 +372,15 @@ IDs from `docs/specs/development-plan.md`.
   running, and "supported" needs a finished confirmatory run; the entry is appended to the
   research log before the database commit; `xq exp audit` lists experiments still without a
   conclusion and exits 1 if any. ADR 0039.
+- STAT-001: stationarity battery (`xq.research.stats.stationarity`, `config/stats.yaml`) — ADF
+  with AIC lags, Phillips-Perron, KPSS around a level and a trend, and Zivot-Andrews with one
+  level break (its date reported), each as a typed `StatResult` (statistic, p-value, lags,
+  null and alternative, assumptions, decision, recorded warnings), with a joint verdict
+  (stationary, unit root, conflicting, inconclusive, mixed). Recovery: a random walk is not
+  rejected by ADF (size near 5 % over 200 draws) and reads as a unit root; a stationary AR(1)
+  reads as stationary; a level shift is found near its date. Adds `arch` and `statsmodels` as
+  runtime dependencies (unit-root tests, GARCH, ARMA; statsmodels was a development dependency)
+  and the recovery registry `xq.research.recovery`. Simulated data only. ADR 0043.
 
 ### Changed
 
