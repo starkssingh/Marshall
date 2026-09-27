@@ -124,3 +124,25 @@ on synthetic data only (ADR 0048).
    the broker's count of bars touching both legs (resolved to the stop); in tick mode the
    one-minute bars in which a bracket ended and whose range reached both levels (resolved by the
    ticks), over the one-minute bars during which a bracket was active.
+
+## BT-008 — session constraints
+
+1. **What is blocked.** Orders that open, increase or flip exposure never fill inside a blackout;
+   orders that only reduce exposure are never blocked. The engine refuses an intent that clearly
+   opens or flips a position at a decision time inside a blackout (before the risk decision); the
+   broker rejects a market entry arriving inside one, cancels a market entry whose first quote
+   falls inside one, and lets a resting stop or limit entry wait until the blackout ends.
+2. **Which blackouts** (`backtest.event.blackouts`): the `rollover` event window, 16:45–18:15
+   New York on every day including the Sunday reopen — the owner's C-3 window (ADR 0026), not the
+   plan's older 16:55–18:05 default; the `us_data_release` window (−5/+30 min), the only
+   configured news window; and the last 60 minutes before a weekly close, a close followed by at
+   least 24 hours without trading (weekends and full-day holidays such as Good Friday). The 60
+   minutes are a provisional default of this ADR (the plan names the rule, not the length).
+3. **Exact intervals.** Windows are computed once as UTC intervals over the market clock's range
+   (clock windows per calendar day in their own zone, anchor windows around the session table's
+   anchors); a test shows they agree with the dataset columns `in_<name>_window` (DS-007) at
+   20,000 random instants and every minute across the March 2024 DST changes.
+4. **Flat before the weekend** is optional (default off) and exits 30 minutes before the weekly
+   close (16:30 New York, before the rollover window's slippage multiplier), as an intent through
+   the risk approver.
+5. **Margin** is `backtest.event.margin_rate`, PROVISIONAL at 0.05 (1:20) until broker terms.

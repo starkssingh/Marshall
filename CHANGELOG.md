@@ -509,6 +509,15 @@ IDs from `docs/specs/development-plan.md`.
   runs, planted broken links detected, the placeholder named on every decision, Parquet round
   trip, determinism. The broker now records fills as they happen, and a limit fill's reference
   quote is its limit on its side (half-spread, no slippage). ADR 0049.
+- BT-008: session constraints (`xq.backtest.constraints.SessionConstraints`, `backtest.event` in
+  `config/base.yaml`) — entry blackouts in the 16:45-18:15 New York rollover window (C-3), the US
+  data release window and the last 60 minutes before a weekly close (weekends and full-day
+  holidays); intents opening or flipping a position there are refused before the risk decision,
+  market entries arriving or meeting their first quote there are rejected or cancelled, resting
+  entries wait; exits are never blocked. Optional flat-before-weekend exit 30 minutes before the
+  weekly close. Windows are exact UTC intervals, shown to agree with the dataset calendar columns
+  across DST changes. `backtest.event` also holds the PROVISIONAL margin rate (0.05) and the
+  reconciliation tolerance (0.05 of total costs). ADR 0049.
 
 ### Changed
 
