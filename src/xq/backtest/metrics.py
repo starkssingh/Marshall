@@ -10,7 +10,9 @@ zero: financing is already charged in the P&L.
   sqrt(mean(min(r, 0)^2));
 - ``max_drawdown``: the largest fall of equity from a running peak, as a fraction of that peak
   (and ``max_drawdown_usd``); ``max_drawdown_days``: the longest time, in trading days, from a
-  peak until equity is back at it (or the end); ``calmar`` = annual_return / max_drawdown;
+  peak until equity is back at it (or the end). The starting capital is the first peak (C-24,
+  ADR 0055): a loss on the first day is already a drawdown. ``calmar`` = annual_return /
+  max_drawdown;
   ``recovery_factor`` = net profit / max_drawdown_usd;
 - ``cvar_95`` / ``cvar_99``: the mean loss of the worst 5 % / 1 % of days (the worst
   ceil(N * (1 - q)) returns), as a positive fraction; ``worst_day`` = min(r);
@@ -65,8 +67,16 @@ def expected_shortfall(returns: npt.ArrayLike, level: float) -> float:
     return float(-np.mean(r[:tail]))
 
 
-def drawdown_metrics(equity: pd.Series) -> dict[str, float]:
-    """Maximum drawdown (fraction of the running peak and USD) and its longest duration in days."""
+def drawdown_metrics(equity: pd.Series, capital: float) -> dict[str, float]:
+    """Maximum drawdown (fraction of the running peak and USD) and its longest duration in days.
+
+    `capital` is the equity before the first day and the first peak.
+
+    Raises:
+        ValueError: for a capital that is not positive.
+    """
+    if not capital > 0:
+        raise ValueError("capital must be positive")
     values = equity.to_numpy(dtype=np.float64)
     if len(values) == 0:
         return {
@@ -74,7 +84,7 @@ def drawdown_metrics(equity: pd.Series) -> dict[str, float]:
             "max_drawdown_usd": math.nan,
             "max_drawdown_days": math.nan,
         }
-    peak = np.maximum.accumulate(values)
+    peak = running_peak(values, capital)
     fall = peak - values
     longest = run = 0
     for below in fall > 0:
@@ -85,6 +95,22 @@ def drawdown_metrics(equity: pd.Series) -> dict[str, float]:
         "max_drawdown_usd": float(np.max(fall)),
         "max_drawdown_days": float(longest),
     }
+
+
+def running_peak(equity: npt.ArrayLike, capital: float) -> FloatArray:
+    """The running peak of equity paths (along the last axis) that start from `capital`."""
+    values = np.asarray(equity, dtype=np.float64)
+    peak: FloatArray = np.maximum(np.maximum.accumulate(values, axis=-1), capital)
+    return peak
+
+
+def path_max_drawdowns(equity: npt.ArrayLike, capital: float = 1.0) -> FloatArray:
+    """Maximum drawdown of each row of equity paths starting from `capital` (fractions of the
+    running peak), the same definition as `drawdown_metrics`."""
+    values = np.atleast_2d(np.asarray(equity, dtype=np.float64))
+    peak = running_peak(values, capital)
+    result: FloatArray = np.max((peak - values) / peak, axis=1)
+    return result
 
 
 def trade_metrics(trades: pd.DataFrame) -> dict[str, float]:
@@ -107,7 +133,7 @@ def performance_metrics(result: BacktestResult, periods_per_year: int) -> dict[s
     """Every BT-003 metric of one screened backtest (see the module docstring)."""
     daily = result.daily
     metrics = return_metrics(daily["return"], periods_per_year)
-    metrics.update(drawdown_metrics(daily["equity"]))
+    metrics.update(drawdown_metrics(daily["equity"], result.capital))
     metrics.update(trade_metrics(result.trades))
     n = len(daily)
     capital = result.capital

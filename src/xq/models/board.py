@@ -59,7 +59,12 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_valida
 from scipy.stats import t as student_t
 
 from xq.backtest.costs import CostModel
-from xq.backtest.metrics import drawdown_metrics, return_metrics, trade_metrics
+from xq.backtest.metrics import (
+    drawdown_metrics,
+    path_max_drawdowns,
+    return_metrics,
+    trade_metrics,
+)
 from xq.backtest.vectorized import BacktestResult, required_quotes, run_vectorized
 from xq.core.config import AppConfig, GateConventions, gates_hash
 from xq.core.errors import ConfigError, XQError
@@ -545,7 +550,7 @@ def _strategy_metrics(
     r = returns.to_numpy(np.float64)
     root = math.sqrt(periods)
     metrics = return_metrics(returns, periods)
-    metrics.update(drawdown_metrics(pd.Series(result.capital * (1 + np.cumsum(r)))))
+    metrics.update(drawdown_metrics(pd.Series(result.capital * (1 + np.cumsum(r))), result.capital))
     metrics.update(trade_metrics(result.trades))
     block = gate_block_length(
         r, conventions.bootstrap.block_length, conventions.bootstrap.min_block_days
@@ -607,10 +612,7 @@ def _row_sortino(draws: FloatArray) -> FloatArray:
 
 
 def _row_max_drawdown(draws: FloatArray) -> FloatArray:
-    equity = 1 + np.cumsum(draws, axis=1)
-    peak = np.maximum.accumulate(equity, axis=1)
-    result: FloatArray = np.max((peak - equity) / peak, axis=1)
-    return result
+    return path_max_drawdowns(1 + np.cumsum(draws, axis=1))
 
 
 def _mean_ci(

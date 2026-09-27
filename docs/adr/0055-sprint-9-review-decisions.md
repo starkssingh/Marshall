@@ -87,3 +87,27 @@ whatever its data. On iid-like samples the tests are close to nominal (the table
 - On an iid sample of the same shape neither test is flagged.
 
 **Cost.** One check on 36 strategies over 1,000 days takes about 20 s.
+
+## 2. BT-003 drawdowns start from the capital
+
+**Decision.** In BT-003's metrics the starting capital is the first equity peak, as ROB-003's
+bootstrap already did. This was the queued task from ADR 0054 (ROB-003, item 2).
+
+**Implementation.**
+
+- `drawdown_metrics(equity, capital)` takes the capital as a required argument, so no caller can
+  forget it. The running peak is `max(capital, running maximum of equity)`, so a loss on the first
+  day is already a drawdown, and its days count towards `max_drawdown_days`.
+- `running_peak` and `path_max_drawdowns` in `xq.backtest.metrics` are the one definition. They
+  are shared by `performance_metrics` (both backtest tiers), the board's `max_drawdown` and its
+  bootstrap interval, ROB-003's resampled and permuted paths, and the drawdown panel of the
+  backtest report.
+
+**Affected results.** Equity 99, 98, 97 on a capital of 100 now reports 3/100 over three days,
+where it reported 2/99 over two before. A path that first gains is unchanged: the capital is a
+floor on the peak, not a ceiling.
+
+The only expectation that changed is the independent pandas check in `test_metrics.py`: its
+reference peak is now floored at the capital. The number was never wrong by the old definition;
+the definition changed. The R2 gate `oos_max_drawdown_max` reads this metric, so a strategy that
+loses from its first day can now fail it where it passed before. No gate result exists yet.

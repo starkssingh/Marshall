@@ -42,7 +42,7 @@ import pandas as pd
 from xq.backtest.costs import CostModel
 from xq.backtest.engine import EventBacktestResult
 from xq.backtest.ledger import Ledger
-from xq.backtest.metrics import performance_metrics
+from xq.backtest.metrics import performance_metrics, running_peak
 from xq.backtest.vectorized import BacktestResult
 from xq.core.config import SessionsConfig
 from xq.data.calendar import MarketClock
@@ -359,7 +359,7 @@ def _equity_figure(result: BacktestResult) -> Any:
     daily = result.daily
     x = pd.to_datetime(pd.Series(daily.index, dtype=object).astype(str))
     equity = daily["equity"].to_numpy(np.float64)
-    peak = np.maximum.accumulate(equity) if len(equity) else equity
+    peak = running_peak(equity, result.capital) if len(equity) else equity
     top.plot(x, equity, color="#2a6f97", linewidth=1.2)
     top.set_ylabel("equity (USD)")
     top.set_title(f"Equity ({result.cost_basis})", fontsize=10)

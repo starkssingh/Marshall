@@ -696,6 +696,12 @@ IDs from `docs/specs/development-plan.md`.
   `GateCheck` gains `warnings`, shown by `describe()`. The settings are in the new
   `config/validation.yaml` (`ValidationConfig`). Tested: the over-rejection under the convention,
   the warning on a dependent sample, and no warning on an iid one.
+- C-24 (2) (owner's decision, ADR 0055), BT-003: the starting capital is the first equity peak.
+  `drawdown_metrics(equity, capital)` requires the capital, so a drawdown that starts on the first
+  day counts: equity 99, 98, 97 on 100 now reports 3/100, not 2/99. One definition
+  (`running_peak`, `path_max_drawdowns`) is shared by `performance_metrics`, the board's drawdown
+  and its bootstrap interval, ROB-003 and the report's drawdown panel. This closes the known issue
+  of ADR 0054. It feeds R2's `oos_max_drawdown_max`.
 - C-22 (owner's decision, ADR 0053): position sizing scales on the edge per unit of risk instead
   of the raw calibrated probability — `ev_r = p_lcb x TP/SL - (1 - p_lcb) - round_trip_cost/SL`
   with `p_lcb` the probability's lower confidence bound, and the multiplier
