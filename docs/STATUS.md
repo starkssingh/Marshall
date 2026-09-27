@@ -5,10 +5,10 @@ sprint and whenever a decision or carry-over item changes; anything decided in c
 recorded in an ADR and here in the same session. If a memory of an earlier conversation conflicts
 with the repository, the repository wins.
 
-- **Last updated:** 2026-09-27, after the owner's review of Sprint 6 (PR #11)
-- **Merged to `main`:** Sprints 1–5 with the revised H-0001 draft and the Sprint 5 review fixes
-  (PRs #2, #3, #6, #7, #8, #9, #10). Sprint 6 is on branch `claude/hopeful-einstein-co4sfq` in a
-  pull request to `main`.
+- **Last updated:** 2026-09-27, at the start of Sprint 11 (re-ordered, ADR 0048)
+- **Merged to `main`:** Sprints 1–6 with the revised H-0001 draft and the Sprint 5 and Sprint 6
+  review fixes (PRs #2, #3, #6, #7, #8, #9, #10, #11). Sprint 11 is on branch
+  `claude/nice-keller-dc5zeb`.
 
 ## Current sprint
 
@@ -40,10 +40,11 @@ with the repository, the repository wins.
   the challengers) and per-fold `serve_sigma`. The baseline board accepts the `ar1` forecast
   baseline, which stays off H-0001's board (ADR 0045, ADR 0046). There is no CLI for statistical
   or volatility reports yet: they wait for real data.
-- **Next:** the owner merges PR #11. While real data is pending, the data-independent
-  engineering sprints come next, starting with Sprint 11 (the event-driven backtester: BT-004 …
-  BT-010, synthetic data only), then Sprint 12 (risk and signal engines) after the owner's review;
-  the re-ordering is recorded in an ADR at the start of Sprint 11. Claude implements the revised
+- **Next:** while real data is pending, the data-independent engineering sprints come next (ADR
+  0048): Sprint 11 (the event-driven backtester: BT-004 … BT-010, synthetic data only) is in
+  progress; Sprint 12 (risk and signal engines) follows after the owner's review of Sprint 11,
+  with its scope under this order to be confirmed then (some of its tasks depend on Sprints 8
+  and 9, ADR 0048). Claude implements the revised
   H-0001 in the board runner (C-15). With real data (C-8): the research half of Sprint 5 (C-16,
   including H-0000's pre-registration) and of Sprint 6 (C-18: the verdict report on the discovery
   window, the volatility board on real folds, the sigma-hat selection and, if the owner approves,
@@ -93,6 +94,7 @@ with the repository, the repository wins.
 | Research horizon focus | 15m–1d, other | 15m–1d; four horizons kept until EDA-006 (ADR 0026) |
 | Risk budget | per-trade risk, drawdown halt | 0.5 % per trade, halt at 15 % drawdown (plan default; the gates' 0.15 drawdown limits match it) |
 | Vault | holdout start | `2025-09-25T21:00:00Z`, the last 12 months at project start (fixed) |
+| Sprint 12 scope under the re-ordered plan (ADR 0048) | Sprint 12 as planned with stand-ins for REG-007 and Sprint 9's ROB tasks; RISK-001 … RISK-006 and SIGNAL-001/002/004/005 only, the rest after Sprints 8–9; other | none: decided at the owner's review of Sprint 11 |
 | Replacing the interim sigma-hat (C-18) | the forecaster `select_forecaster` picks on real data; keep the interim EWMA | interim EWMA, span 96 base bars (`fwd_returns.v1`); nothing promoted (ADR 0044) |
 
 Decided at the Sprint 4 hold point (ADR 0032): the evidence gates, the meaning of `1d`, decisions
@@ -112,7 +114,10 @@ model promoted. Decided at the Sprint 6 review (ADR 0046): Holm across the chall
 VOL-006 selection; forecasting-model trials in their own families (`linear_forecasts`,
 `volatility_models`), never a trading-strategy family, and the trial rules approved with them;
 `ar1` stays off H-0001 (budget 36) and gets its own hypothesis H-0002 (linear predictability) only
-if STAT-002 or STAT-003 finds dependence on real data.
+if STAT-002 or STAT-003 finds dependence on real data. Decided at the start of Sprint 11 (ADR 0047,
+ADR 0048): no hypothesis may be registered in a reserved model family; while real data is pending
+the data-independent engineering sprints run next — Sprint 11 on synthetic data only, with a
+pass-through placeholder risk approver until Sprint 12, then Sprint 12 after the owner's review.
 
 ## Provisional assumptions not yet confirmed
 
