@@ -889,6 +889,19 @@ class PerturbationConfig(FrozenModel):
     max_joint_points: int = Field(ge=1)
 
 
+class MonteCarloConfig(FrozenModel):
+    """Monte Carlo equity with the risk rules applied (ROB-004)."""
+
+    #: Resampled paths replayed through the risk engine.
+    n_paths: int = Field(ge=100)
+    #: One R: a stop at this many daily sigma-hats (the event tier's default stop).
+    stop_sigmas: float = Field(gt=0)
+    #: A path is ruined when its equity falls to this share of the capital.
+    ruin_level: float = Field(gt=0, lt=1)
+    #: Lower bound on the Politis-White mean block of the resampled trade outcomes (trades).
+    min_block_trades: int = Field(ge=1)
+
+
 class ValidationConfig(FrozenModel):
     """Validation and robustness procedures (``config/validation.yaml``, Phases 16 and 17).
 
@@ -897,6 +910,7 @@ class ValidationConfig(FrozenModel):
 
     spa_size_check: SpaSizeCheckConfig
     perturbation: PerturbationConfig
+    monte_carlo: MonteCarloConfig
 
 
 class SpreadCostConfig(FrozenModel):

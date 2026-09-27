@@ -2,9 +2,10 @@
 ADR 0054).
 
 The plan requires every statistical and volatility method to recover a known answer on a simulated
-process before it runs on gold; Sprint 9's validation and robustness methods (VAL-003, VAL-004,
-VAL-006, ROB-001 ... ROB-007) are held to the same rule on simulated strategies with known truth —
-noise-only families, a single-point optimum on noise, a genuine edge. `RECOVERY_TESTS` names, per
+process before it runs on gold. Sprint 9's validation and robustness methods (VAL-003, VAL-004,
+VAL-006, ROB-001, ROB-002, ROB-003, ROB-006, ROB-007) and Sprint 12's (ROB-004, ROB-005, ADR 0056)
+are held to the same rule on simulated strategies with known truth: noise-only families, a
+single-point optimum on noise, a genuine edge. `RECOVERY_TESTS` names, per
 method, the tests (pytest node ids, relative to the repository root) that prove it; a unit test
 checks that every named test exists, and the verdict report (STAT-008) cites them in each method's
 evidence. A method without an entry here must not be used by a report, a board, the sigma-hat
@@ -33,6 +34,7 @@ _COST_STRESS = "tests/unit/robustness/test_costs_stress.py"
 _BOOTSTRAP = "tests/unit/robustness/test_bootstrap.py"
 _SLICING = "tests/integration/robustness/test_slicing.py"
 _DELAY = "tests/unit/robustness/test_delay.py"
+_MONTE_CARLO = "tests/unit/robustness/test_montecarlo.py"
 
 RECOVERY_TESTS: Mapping[str, tuple[str, ...]] = {
     "ADF": (
@@ -188,6 +190,11 @@ RECOVERY_TESTS: Mapping[str, tuple[str, ...]] = {
         f"{_DELAY}::test_a_genuine_trend_edge_decays_smoothly_and_passes_the_gate",
         f"{_DELAY}::test_a_bid_ask_bounce_edge_flips_at_the_first_delay",
         f"{_DELAY}::test_a_look_ahead_leak_collapses_at_the_first_delay",
+    ),
+    "monte_carlo_risk_rules": (
+        f"{_MONTE_CARLO}::test_with_only_sizing_binding_every_path_is_the_fixed_fractional_recursion",
+        f"{_MONTE_CARLO}::test_the_default_profile_keeps_a_losing_strategy_inside_the_halt",
+        f"{_MONTE_CARLO}::test_a_reckless_profile_hits_the_halt_and_breaks_the_budget",
     ),
 }
 

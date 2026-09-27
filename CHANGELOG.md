@@ -682,6 +682,20 @@ IDs from `docs/specs/development-plan.md`.
   configurations as trials again (`RunContext.reproduces`). Reproducible kinds: `baseline_board`.
   A fixture board run reproduces; a changed metric, altered dataset bytes and kinds without a
   reproducer are refused. ADR 0054.
+- ROB-004: Monte Carlo equity with the risk rules applied (`xq.robustness.montecarlo`). Closed
+  trades become R-multiples (net return over a stop at 3 daily sigma-hats), which are resampled
+  with a stationary bootstrap on the trades' own calendar. Every path is replayed through the real
+  `RiskEngine.evaluate` and `RiskStateTracker`. Reported: the drawdown distribution (capital as
+  the first peak), the halt probability, the ruin probability (equity at half the capital,
+  provisional) and entries taken and refused, plus the R2 `monte_carlo_drawdown` check. Settings
+  are in `config/validation.yaml` (`monte_carlo`). Proven on known truth:
+  - with only sizing binding, every path equals the fixed-fractional recursion;
+  - the default profile keeps a losing strategy's 95th-percentile drawdown below the halt, where
+    the same outcomes without the rules do not;
+  - a reckless profile hits and overshoots the halt, and without it ruins;
+  - the calendar makes the cooldown bind.
+
+  ADR 0056.
 
 ### Changed
 

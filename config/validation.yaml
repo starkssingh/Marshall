@@ -12,3 +12,9 @@ spa_size_check:          # C-24 (1): does SPA / the Reality Check over-reject on
 perturbation:            # ROB-001; the gate's neighbourhood is the full grid (C-24 (3))
   levels: [0.10, 0.20, 0.30]   # the gate reads parameter_neighbourhood.perturbation (0.20)
   max_joint_points: 243  # full grid up to 3^5 points; above that a seeded sample of 243 points
+
+monte_carlo:             # ROB-004: resampled trade outcomes replayed through the RiskEngine
+  n_paths: 1000
+  stop_sigmas: 3.0       # one R = a stop at 3 daily sigma-hats (the event tier's default stop)
+  ruin_level: 0.50       # PROVISIONAL: a path is ruined when equity falls to half the capital
+  min_block_trades: 1    # Politis-White block of the R-multiples, at least one trade
