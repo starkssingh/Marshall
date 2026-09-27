@@ -464,6 +464,79 @@ IDs from `docs/specs/development-plan.md`.
   moves to `xq.models.arma` (re-exported by `xq.research.stats.arima`). H-0001's `board.yaml` is
   unchanged: adding `ar1` would raise its approved trial budget from 36 to 40 (owner decision).
   ADR 0045.
+- BT-004: event core of the event-driven backtester (`xq.backtest.events`, `xq.backtest.engine`) —
+  `TickEvent`, `BarEvent`, `SignalEvent`, `OrderEvent`, `FillEvent`, `TimerEvent` and, for
+  execution without ticks, `ExecutionBarEvent`; an `EventQueue` ordered by (timestamp, rank,
+  sequence), where the rank puts timers before order arrivals before quotes before fills before
+  signal bars before intents at one instant; a `SimulationClock` that never goes back;
+  `MarketData` in tick mode (quotes, with signal bars built by DATA-008 `build_bars`) or bar
+  mode (one-minute execution bars, open then range); the `Strategy.on_bar(bar, ctx)` interface;
+  and the `EventEngine` loop, which stamps each intent's id and decision time, refuses decisions
+  taken while the market is closed (ADR 0032), and schedules rollover financing, day ends, order
+  expiries, time stops and weekend exits as timers. The decision-chain schemas `TradeIntent`,
+  `RiskDecision` and `OrderIntent` (`xq.signals.schema`; an order can only be built from an
+  approved decision) and the PLACEHOLDER pass-through risk approver (`xq.risk.placeholder`, no
+  risk checks until RISK-005) come with it. Tested: queue order at equal instants, the clock,
+  the data stream, schema validation, the placeholder's sizing, and a deterministic engine trace
+  with stub components. ADR 0049.
+- BT-005: broker simulator (`xq.backtest.broker_sim.SimulatedBroker`) — market, limit and stop
+  orders with latency in market time; fills at the first quote at or after arrival on the correct
+  side plus slippage (never at mid), expiry after the maximum fill delay; stops fill at the first
+  quote beyond the stop (gap fills at the gapped price), limits at their price without
+  improvement; SL/TP as an OCO bracket on the whole position; no fills while the market is
+  closed; in bar mode (one-minute bars) market orders fill at the next open, and a bar touching
+  both legs of a bracket resolves to the stop loss and is counted as ambiguous; orders rejected
+  for insufficient margin or when the position changed since their decision; newer orders
+  replace working orders of earlier intents. Every fill carries its spread, slippage and
+  commission decomposition. Golden hand-computed tests cover each rule. ADR 0049.
+- BT-006: portfolio accounting of the event tier (`xq.backtest.portfolio.Portfolio`) — a USD CFD
+  account for one instrument: cash moved by realized P&L, commissions and financing; FIFO lots
+  with per-trade price P&L, commission and financing shares; unrealized P&L at the latest mid;
+  margin used; financing at each rollover on the position held over it (both sides a cost while
+  costs are provisional, triple on Wednesday). Equity = cash + unrealized is checked against an
+  independent mark-to-market equity after every event of an engine run and in a hypothesis
+  property test; `daily_frame` gives the screener's daily layout for the BT-003 metrics. Tested:
+  a hand-computed FIFO case, a flip, financing over the triple rollover on longs and shorts.
+  ADR 0049.
+- BT-007: decision ledger (`xq.backtest.ledger.Ledger`) — every intent, refusal, risk decision
+  (with rejections and reasons), order, bracket leg, fill, rejection, cancel and expiry in order,
+  linked by intent, decision, order and fill ids; `check_links` lists every broken link (above
+  all an order without an approved decision); Parquet ledger plus a summary by kind and reason.
+  `run_event_backtest` wires strategy, placeholder risk approver, broker, portfolio and ledger
+  and returns an `EventBacktestResult` (the screener's result layout plus the ledger, equity per
+  signal bar, brackets and the ambiguous-bar share). Tested: a golden hand-computed run
+  (`tests/fixtures/golden_trades/`), every order linked to an approved decision across random
+  runs, planted broken links detected, the placeholder named on every decision, Parquet round
+  trip, determinism. The broker now records fills as they happen, and a limit fill's reference
+  quote is its limit on its side (half-spread, no slippage). ADR 0049.
+- BT-008: session constraints (`xq.backtest.constraints.SessionConstraints`, `backtest.event` in
+  `config/base.yaml`) — entry blackouts in the 16:45-18:15 New York rollover window (C-3), the US
+  data release window and the last 60 minutes before a weekly close (weekends and full-day
+  holidays); intents opening or flipping a position there are refused before the risk decision,
+  market entries arriving or meeting their first quote there are rejected or cancelled, resting
+  entries wait; exits are never blocked. Optional flat-before-weekend exit 30 minutes before the
+  weekly close. Windows are exact UTC intervals, shown to agree with the dataset calendar columns
+  across DST changes. `backtest.event` also holds the PROVISIONAL margin rate (0.05) and the
+  reconciliation tolerance (0.05 of total costs). ADR 0049.
+- BT-009: reconciliation of the two tiers (`xq.backtest.reconcile.reconcile`) with shared
+  market-order strategies (`xq.backtest.strategies.ExposureStrategy`, `RuleStrategy`, which runs
+  a BASE-002 rule bar by bar) — the daily equity difference against 5 % of total costs
+  (`backtest.event.reconcile_tolerance`), and every difference explained: the event tier's
+  executed positions replayed through the screener split it into an itemized execution effect
+  (sizing, event-only rules, follow-ons) and a mechanical residual that must stay below one
+  cent. Tested on three rule baselines at 100,000 and 10,000,000 USD with sigma-scaled slippage
+  and window multipliers, missed and closed decisions, blackouts as explained differences, and
+  planted disagreements (commission, latency) caught as unexplained. `CostModel.slippage_bps_at`
+  prices one fill from a per-minute multiplier table built once per trading day. ADR 0049.
+- BT-010: backtest report for both tiers (`xq.backtest.report.build_backtest_report`) — the cost
+  basis on every net figure and the risk approver's label (PLACEHOLDER in Sprint 11), the BT-003
+  metrics, the cost decomposition (gross, spread, slippage, commission, financing, net) with the
+  cost-fragility flag (gross below 1.5x costs), equity and drawdown, compounded monthly returns,
+  the trade distribution, exposure by session, the ambiguous-bar share with its resolution, and
+  the ledger summary of the event tier. `write_backtest` stores the report and the ledger as run
+  artifacts and records the backtest in the new `backtests` table (migration 0009). Tested on a
+  baseline rule through both tiers, bar-mode ambiguity, determinism and an experiment run.
+  ADR 0049.
 
 ### Changed
 
@@ -500,6 +573,12 @@ IDs from `docs/specs/development-plan.md`.
   in a trading-strategy family (owner review of PR #11); `arma_study` and `evaluate_forecasters`
   lose their `family_id` argument. A test records both under a `baselines` hypothesis and finds
   the `baselines` family's trial count, effective N and Sharpe variance unchanged. ADR 0046.
+- EXP-002 refuses to register a hypothesis in a reserved family (ADR 0047): the model families
+  `linear_forecasts` and `volatility_models` are listed once, in
+  `xq.tracking.registry.RESERVED_FAMILIES`; both the hypothesis schema (`xq exp register`) and
+  `registry.add_hypothesis_version` refuse them, so a trading-strategy hypothesis can no longer
+  share a family with forecasting-model trials. The family constants move from
+  `xq.tracking.trials` to `xq.tracking.registry`.
 - BASE-005 H-0001 draft revised at the owner's request (ADR 0035, C-15), still unregistered: rule
   baselines are evaluated over the full pre-vault history after each rule's warm-up, with the
   fold-aligned version stored for comparison; they run on 1d and 1h signal bars (not 15m), so the
@@ -580,6 +659,16 @@ IDs from `docs/specs/development-plan.md`.
 
 ### Fixed
 
+- BT-002 screener: a quote while the market is closed (a stray quote in the daily break, for
+  example) is never a fill quote; the fill is the first quote at or after the intended time that
+  lies in market hours, or the trade is missed. Before, a closed-market quote within the fill
+  delay could fill a decision taken just before the close. Found while reconciling the screener
+  with the event tier, which never fills while closed (BT-005, BT-009).
+- BT-002 screener: a position still open when the quotes end is charged the rollover that ends
+  the last quote's trading day (marked at the last quote), as the event tier does; before,
+  financing stopped at the last quote, understating the last day's costs of an open position.
+  The financing series now lists every rollover from the first fill through that day's end.
+  Found by the BT-009 reconciliation (the only mechanical residual between the tiers).
 - ARCH-008 Docker test stage: the image now copies `docs/`, so the EXP-005 test that reads the
   committed research log (`docs/research/log.md`) passes inside it; the CI `docker` job had failed
   on `main` since Sprint 5 (PR #9) with `FileNotFoundError` for that file.

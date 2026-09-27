@@ -25,7 +25,7 @@ charges financing on both sides (ADR 0032), and every net result computed with i
 
 from __future__ import annotations
 
-from datetime import date, timedelta
+from datetime import date, time, timedelta
 
 import numpy as np
 import numpy.typing as npt
@@ -34,13 +34,14 @@ from sqlalchemy import Engine
 
 from xq.core.config import WEEKDAYS, AppConfig, CostModelConfig, InstrumentSpec, SessionsConfig
 from xq.core.errors import ConfigError
-from xq.core.time import local_time_to_utc, trading_day
+from xq.core.time import local_time_to_utc, trading_day, trading_day_bounds
 from xq.data.calendar import MarketCalendar
 from xq.data.spreads import NoSpreadDataError, hour_of_week, latest_spread_stats
 from xq.datasets.calendar_columns import calendar_columns
 
 FloatArray = npt.NDArray[np.float64]
 _BPS = 1e-4
+_MINUTE_NS = 60_000_000_000
 #: The mark of every net result computed with a provisional cost model (ADR 0032).
 SCREENING_LABEL = "screening, placeholder costs"
 
@@ -62,6 +63,11 @@ class CostModel:
         self._multiplier_columns = {
             key: _window_column(key, sessions) for key in config.slippage.multipliers
         }
+        # every calendar boundary on a whole minute: the multiplier is constant within a minute
+        self._minute_exact = all(
+            t.second == 0 and t.microsecond == 0 for t in _times(sessions.model_dump())
+        )
+        self._day_multipliers: dict[int, FloatArray] = {}
 
     @classmethod
     def from_config(
@@ -122,16 +128,43 @@ class CostModel:
         if np.any(sigma < 0):
             raise ValueError("sigma must not be negative")
         base = slippage.fixed_bps + slippage.sigma_multiple * sigma
-        multiplier = np.ones(len(fill_times))
+        result: FloatArray = base * self._multipliers(pd.DatetimeIndex(fill_times))
+        return result
+
+    def _multipliers(self, fill_times: pd.DatetimeIndex) -> FloatArray:
+        """The largest slippage multiplier applying at each time (1 where none does)."""
+        multiplier: FloatArray = np.ones(len(fill_times))
         if self._multiplier_columns and len(fill_times):
-            columns = calendar_columns(pd.DatetimeIndex(fill_times), self.sessions)
+            columns = calendar_columns(fill_times, self.sessions)
             for key, column in self._multiplier_columns.items():
                 inside = columns[column].to_numpy(dtype=bool)
-                multiplier = np.where(
-                    inside, np.maximum(multiplier, slippage.multipliers[key]), multiplier
-                )
-        result: FloatArray = base * multiplier
-        return result
+                value = self.config.slippage.multipliers[key]
+                multiplier = np.where(inside, np.maximum(multiplier, value), multiplier)
+        return multiplier
+
+    def slippage_bps_at(self, ts: int, sigma_1m_bps: float) -> float:
+        """`slippage_bps` of one fill at `ts` (UTC nanoseconds), for the event tier.
+
+        The same formula; the multiplier is looked up in a per-minute table built once per
+        trading day, which is exact because every configured session, anchor and window boundary
+        falls on a whole minute (otherwise every call computes it directly).
+        """
+        if sigma_1m_bps < 0:
+            raise ValueError("sigma must not be negative")
+        slippage = self.config.slippage
+        base = slippage.fixed_bps + slippage.sigma_multiple * sigma_1m_bps
+        if not self._multiplier_columns:
+            return float(base)
+        if not self._minute_exact:
+            times = pd.DatetimeIndex([pd.Timestamp(ts, tz="UTC")])
+            return float(self.slippage_bps(times, [sigma_1m_bps])[0])
+        start, end = trading_day_bounds(trading_day(pd.Timestamp(ts, tz="UTC")))
+        table = self._day_multipliers.get(start.value)
+        if table is None:  # 23, 24 or 25 hours of minutes (DST changes)
+            grid = pd.date_range(start, end, freq="1min", inclusive="left")
+            table = self._multipliers(grid)
+            self._day_multipliers[start.value] = table
+        return float(base * table[(ts - start.value) // _MINUTE_NS])
 
     def fallback_spread(self, times: pd.DatetimeIndex) -> FloatArray:
         """Hour-of-week spread percentile (price units) at `times`, for quotes without bid/ask.
@@ -202,3 +235,14 @@ def _window_column(key: str, sessions: SessionsConfig) -> str:
         *(f"{w}_window" for w in sessions.event_windows),
     ]
     raise ConfigError(f"slippage multiplier {key!r} is not a session or event window: {known}")
+
+
+def _times(value: object) -> list[time]:
+    """Every clock time inside a dumped configuration (nested dicts and lists)."""
+    if isinstance(value, time):
+        return [value]
+    if isinstance(value, dict):
+        return [t for v in value.values() for t in _times(v)]
+    if isinstance(value, list | tuple):
+        return [t for v in value for t in _times(v)]
+    return []

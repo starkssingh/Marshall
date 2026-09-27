@@ -458,6 +458,28 @@ class FoldResultRecord(Base):
     metrics_json: Mapped[dict[str, Any]]
 
 
+class BacktestRecord(Base):
+    """One backtest of a strategy in a run (BT-010): its tier, versions, span, metrics and files.
+
+    `tier` is ``vectorized`` (the screener) or ``event``; `ledger_path` is the decision ledger
+    (event tier only) and `report_path` the report directory.
+    """
+
+    __tablename__ = "backtests"
+
+    backtest_id: Mapped[str] = mapped_column(String(26), primary_key=True)
+    run_id: Mapped[str] = mapped_column(ForeignKey("runs.run_id"))
+    tier: Mapped[str] = mapped_column(String(16))
+    strategy_id: Mapped[str] = mapped_column(String(128))
+    strategy_version: Mapped[str] = mapped_column(String(64))
+    cost_model_version: Mapped[str] = mapped_column(String(128))
+    start: Mapped[pd.Timestamp]
+    end: Mapped[pd.Timestamp]
+    metrics_json: Mapped[dict[str, Any]]
+    ledger_path: Mapped[str | None] = mapped_column(Text)
+    report_path: Mapped[str] = mapped_column(Text)
+
+
 class TargetSetRecord(Base):
     """The locked definition of a target set version (TGT-001).
 

@@ -30,6 +30,7 @@ from xq.data.raw_store import sha256_file
 from xq.tracking.db import session_factory
 from xq.tracking.models import (
     Artifact,
+    BacktestRecord,
     Experiment,
     FoldResultRecord,
     Hypothesis,
@@ -37,9 +38,29 @@ from xq.tracking.models import (
     Run,
 )
 
+#: Trial family of linear forecasting models evaluated on test folds (STAT-006, ADR 0046).
+LINEAR_FORECAST_FAMILY = "linear_forecasts"
+#: Trial family of volatility models evaluated on test folds (VOL-005, ADR 0046).
+VOLATILITY_MODEL_FAMILY = "volatility_models"
+#: Families of forecasting-model evaluations. They are never trading-strategy families, so their
+#: trials never enter the trial count or effective N that deflates a strategy's Sharpe ratio.
+MODEL_FAMILIES = frozenset({LINEAR_FORECAST_FAMILY, VOLATILITY_MODEL_FAMILY})
+#: Family ids the platform records its own trials under. No hypothesis may be registered in one
+#: (ADR 0047). This is the one list of reserved ids: add any future reserved family here.
+RESERVED_FAMILIES: frozenset[str] = MODEL_FAMILIES
+
 
 class RegistryError(XQError):
     """A registry record is missing, or an operation violates its lifecycle."""
+
+
+def check_family_not_reserved(family_id: str) -> None:
+    """Raise RegistryError if `family_id` is reserved for the platform's own trials (ADR 0047)."""
+    if family_id in RESERVED_FAMILIES:
+        raise RegistryError(
+            f"family {family_id!r} is reserved for the platform's own trial records and cannot be "
+            f"a hypothesis family (reserved: {', '.join(sorted(RESERVED_FAMILIES))}; ADR 0047)"
+        )
 
 
 class HypothesisStatus(StrEnum):
@@ -135,7 +156,11 @@ def add_hypothesis_version(
 
     If the latest version has the same text hash, it is returned unchanged. Otherwise a new version
     (latest + 1) is added and the previous one is marked superseded, so an edit is always visible.
+
+    Raises:
+        RegistryError: if `family_id` is reserved (`RESERVED_FAMILIES`, ADR 0047).
     """
+    check_family_not_reserved(family_id)
     digest = text_hash(yaml_text)
     with session_factory(engine)() as session:
         latest = session.scalars(
@@ -468,6 +493,99 @@ def list_artifacts(engine: Engine, run_id: str) -> list[ArtifactRecord]:
             select(Artifact).where(Artifact.run_id == run_id).order_by(Artifact.artifact_id)
         ).all()
         return [ArtifactRecord(a.run_id, a.kind, a.path, a.sha256) for a in rows]
+
+
+@dataclass(frozen=True)
+class BacktestRef:
+    """A recorded backtest (BT-010)."""
+
+    backtest_id: str
+    run_id: str
+    tier: str
+    strategy_id: str
+    strategy_version: str
+    cost_model_version: str
+    start: pd.Timestamp
+    end: pd.Timestamp
+    metrics: dict[str, Any]
+    ledger_path: str | None
+    report_path: str
+
+
+def add_backtest(
+    engine: Engine,
+    run_id: str,
+    *,
+    tier: str,
+    strategy_id: str,
+    strategy_version: str,
+    cost_model_version: str,
+    start: pd.Timestamp,
+    end: pd.Timestamp,
+    metrics: dict[str, Any],
+    ledger_path: str | None,
+    report_path: str,
+) -> BacktestRef:
+    """Record a backtest of a running run; non-finite metrics are stored as null."""
+    clean = {k: (float(v) if math.isfinite(float(v)) else None) for k, v in metrics.items()}
+    backtest_id = new_ulid()
+    with session_factory(engine)() as session:
+        _running(session.get(Run, run_id), run_id)
+        session.add(
+            BacktestRecord(
+                backtest_id=backtest_id,
+                run_id=run_id,
+                tier=tier,
+                strategy_id=strategy_id,
+                strategy_version=strategy_version,
+                cost_model_version=cost_model_version,
+                start=start,
+                end=end,
+                metrics_json=clean,
+                ledger_path=ledger_path,
+                report_path=report_path,
+            )
+        )
+        session.commit()
+    return BacktestRef(
+        backtest_id,
+        run_id,
+        tier,
+        strategy_id,
+        strategy_version,
+        cost_model_version,
+        start,
+        end,
+        clean,
+        ledger_path,
+        report_path,
+    )
+
+
+def list_backtests(engine: Engine, run_id: str) -> list[BacktestRef]:
+    """The backtests recorded by a run, in the order they were recorded."""
+    with session_factory(engine)() as session:
+        rows = session.scalars(
+            select(BacktestRecord)
+            .where(BacktestRecord.run_id == run_id)
+            .order_by(BacktestRecord.backtest_id)
+        ).all()
+        return [
+            BacktestRef(
+                r.backtest_id,
+                r.run_id,
+                r.tier,
+                r.strategy_id,
+                r.strategy_version,
+                r.cost_model_version,
+                r.start,
+                r.end,
+                dict(r.metrics_json),
+                r.ledger_path,
+                r.report_path,
+            )
+            for r in rows
+        ]
 
 
 def count_runs(engine: Engine, *, experiment_id: str | None = None) -> int:

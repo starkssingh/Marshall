@@ -8,17 +8,18 @@ into fills, daily P&L and trades:
   mid price of its fill; while the target is unchanged, the lots are unchanged (no rebalancing).
   This is a research screener: the event-driven tier (BT-004+) routes orders through the risk
   engine, which sizes them.
-- **Fills** happen at the first quote at or after ``latency`` of *market time* after the decision,
-  on the correct side — buy at the ask, sell at the bid — plus slippage. Never at the signal bar's
-  close, never at mid. If that quote comes more than ``max_fill_delay`` after the intended time,
-  the trade is missed and the position stays; the next decision tries again from the position
-  actually held.
+- **Fills** happen at the first quote at or after ``latency`` of *market time* after the decision
+  that lies in market hours, on the correct side — buy at the ask, sell at the bid — plus
+  slippage. Never at the signal bar's close, never at mid, never on a quote while the market is
+  closed. If that quote comes more than ``max_fill_delay`` after the intended time, the trade is
+  missed and the position stays; the next decision tries again from the position actually held.
 - **Decisions taken while the market is closed** (the 17:00 close itself, the daily break,
   weekends, holidays) place no order at all — no entry, no exit, no change (ADR 0032). The
   position held stays until the next decision taken while the market is open; the skipped
   decisions that would have traded are reported in ``closed``.
 - **Costs**: the half-spread against mid is paid by each fill; slippage and commission come from
-  the cost model; financing is charged at every rollover on the lots held over it.
+  the cost model; financing is charged at every rollover on the lots held over it, up to and
+  including the rollover that ends the last quote's trading day.
 - **Days** are trading days (17:00 New York roll) with quotes. Positions are marked at the mid of
   the last quote before each day's end. ``net_pnl`` is the change in equity; ``gross_pnl`` is
   what it would have been with fills at mid and no costs, so ``net = gross - spread - slippage -
@@ -44,7 +45,7 @@ import pandas as pd
 
 from xq.backtest.costs import CostModel
 from xq.core.errors import NaiveTimestampError
-from xq.core.time import trading_day_bounds, trading_days
+from xq.core.time import trading_day, trading_day_bounds, trading_days
 from xq.data.calendar import NAT_NS, MarketClock
 
 FloatArray = npt.NDArray[np.float64]
@@ -121,8 +122,7 @@ def run_vectorized(
 
     market_open = clock.is_open(t) if len(t) else np.array([], dtype=bool)
     intended = clock.advance(t, costs.latency.value) if len(t) else np.array([], np.int64)
-    quote = np.searchsorted(ts, intended, side="left")
-    found = (quote < len(ts)) & (intended != NAT_NS)
+    quote, found = _first_open_quote(ts, intended, clock)
     timely = np.zeros(len(t), dtype=bool)
     timely[found] = ts[quote[found]] - intended[found] <= costs.max_fill_delay.value
 
@@ -180,15 +180,13 @@ def required_quotes(
     keep = [np.array([len(ts) - 1], dtype=np.int64)]
     t = _ns(pd.DatetimeIndex(decisions))
     if len(t):
-        intended = clock.advance(t, costs.latency.value)
-        intended = intended[intended != NAT_NS]
-        first = np.searchsorted(ts, intended, side="left")
-        keep.append(first[first < len(ts)])
+        first, found = _first_open_quote(ts, clock.advance(t, costs.latency.value), clock)
+        keep.append(first[found])
     days = np.unique(trading_days(pd.DatetimeIndex(quotes["ts_utc"])))
     ends = np.array([trading_day_bounds(d.item())[1].value for d in days], dtype=np.int64)
     first_quote = pd.Timestamp(int(ts[0]), tz="UTC")
-    last_quote = pd.Timestamp(int(ts[-1]), tz="UTC") + pd.Timedelta(1, "ns")
-    rolls = _ns(pd.DatetimeIndex(costs.rollovers(first_quote, last_quote).index))
+    last_end = _last_day_end(ts) + pd.Timedelta(1, "ns")
+    rolls = _ns(pd.DatetimeIndex(costs.rollovers(first_quote, last_end).index))
     before = np.searchsorted(ts, np.concatenate([ends, rolls]), side="left") - 1
     keep.append(before[before >= 0])
     return np.unique(np.concatenate(keep)).astype(np.int64)
@@ -238,17 +236,25 @@ def _fills(
 def _financing(
     fills: pd.DataFrame, ts: IntArray, bid: FloatArray, ask: FloatArray, costs: CostModel
 ) -> pd.Series:
-    """Charges at rollovers from the first fill to the last quote, on the lots held over each."""
+    """Charges at rollovers from the first fill to the end of the last quote's trading day.
+
+    A position still open when the quotes end is held over that day's closing rollover too, and
+    is charged for it (marked at the last quote), as in the event tier.
+    """
     if fills.empty or len(ts) == 0:
         return pd.Series(dtype="float64", index=pd.DatetimeIndex([], tz="UTC", name="rollover"))
     start = pd.Timestamp(fills["fill_time"].iloc[0])
-    end = pd.Timestamp(int(ts[-1]), tz="UTC") + pd.Timedelta(1, "ns")
-    rolls = costs.rollovers(start, end)
+    rolls = costs.rollovers(start, _last_day_end(ts) + pd.Timedelta(1, "ns"))
     r = _ns(pd.DatetimeIndex(rolls.index))
     held = _held_at(fills, r)
     last = np.maximum(np.searchsorted(ts, r, side="left") - 1, 0)
     charge = costs.financing_usd(held, (bid[last] + ask[last]) / 2, rolls.to_numpy())
     return pd.Series(charge, index=rolls.index, name="financing")
+
+
+def _last_day_end(ts: IntArray) -> pd.Timestamp:
+    """The end (17:00 New York) of the trading day of the last quote."""
+    return trading_day_bounds(trading_day(pd.Timestamp(int(ts[-1]), tz="UTC")))[1]
 
 
 def _held_at(fills: pd.DataFrame, instants: IntArray) -> FloatArray:
@@ -395,6 +401,27 @@ def _trades(
         )
     columns = ["entry_time", "exit_time", "side", "max_lots", "pnl", "open"]
     return pd.DataFrame(records, columns=columns)
+
+
+def _first_open_quote(
+    ts: IntArray, intended: IntArray, clock: MarketClock
+) -> tuple[IntArray, npt.NDArray[np.bool_]]:
+    """Row of the first quote at or after each intended time that lies in market hours.
+
+    A quote while the market is closed (a stray quote in the daily break, say) is never a fill
+    quote; quotes outside the clock's range cannot be judged and are not used either. Returns the
+    rows (0 where there is none) and whether one was found.
+    """
+    usable = np.zeros(len(ts), dtype=bool)
+    inside = (ts >= clock.covered_from) & (ts < clock.covered_to)
+    if inside.any():
+        usable[inside] = clock.is_open(ts[inside])
+    rows = np.flatnonzero(usable)
+    k = np.searchsorted(ts[rows], intended, side="left")
+    found = (k < len(rows)) & (intended != NAT_NS)
+    quote = np.zeros(len(intended), dtype=np.int64)
+    quote[found] = rows[k[found]]
+    return quote, found
 
 
 def _checked_positions(positions: pd.Series) -> pd.DatetimeIndex:

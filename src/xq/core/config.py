@@ -939,12 +939,48 @@ class CostModelConfig(FrozenModel):
         return self
 
 
+class EntryBlackoutConfig(FrozenModel):
+    """Entry blackouts of the event backtester (BT-008).
+
+    No order that opens, increases or flips exposure fills inside a blackout: inside any of the
+    `event_windows` (names of ``event_windows`` in ``config/sessions.yaml``) or within
+    `before_weekly_close_min` minutes before a close followed by at least a day without trading.
+    Orders that only reduce exposure are never blocked.
+    """
+
+    event_windows: list[str] = []
+    before_weekly_close_min: int = Field(default=0, ge=0)
+
+
+class EventBacktestConfig(FrozenModel):
+    """Event-driven backtester settings (``backtest.event``, BT-005 ... BT-009, ADR 0049).
+
+    `margin_rate` is margin per unit of notional (PROVISIONAL until the broker is named).
+    `flat_before_weekend` closes every position `flat_before_weekend_min` minutes before the
+    weekly close. `reconcile_tolerance` is the largest equity difference between the tiers on a
+    shared market-order strategy, as a share of its total costs (BT-009).
+    """
+
+    margin_rate: float = Field(gt=0, le=1)
+    blackouts: EntryBlackoutConfig = EntryBlackoutConfig()
+    flat_before_weekend: bool = False
+    flat_before_weekend_min: int = Field(default=30, ge=1)
+    reconcile_tolerance: float = Field(default=0.05, gt=0)
+
+
 class BacktestConfig(FrozenModel):
     """Backtest settings (``backtest:`` in ``config/base.yaml``)."""
 
     cost_model: str
     capital_usd: float = Field(gt=0)
     periods_per_year: int = Field(gt=0)
+    event: EventBacktestConfig | None = None
+
+    def event_config(self) -> EventBacktestConfig:
+        """The event-backtester settings; raise if they are not configured."""
+        if self.event is None:
+            raise ConfigError("no event-backtester configuration (backtest.event in base.yaml)")
+        return self.event
 
 
 # Evidence gates (VAL-007, ``config/gates.yaml``, ADR 0032). Thresholds are fixed before any
@@ -1412,6 +1448,14 @@ class AppConfig(BaseSettings):
                 f"backtest.cost_model {self.backtest.cost_model!r} is not in config/costs "
                 f"(available: {known})"
             )
+        event = self.backtest.event if self.backtest is not None else None
+        if event is not None and self.sessions is not None:
+            unknown = sorted(set(event.blackouts.event_windows) - set(self.sessions.event_windows))
+            if unknown:
+                raise ValueError(
+                    f"backtest.event.blackouts.event_windows {unknown} are not event windows of "
+                    f"config/sessions.yaml ({', '.join(sorted(self.sessions.event_windows))})"
+                )
         return self
 
     def backtest_config(self) -> BacktestConfig:

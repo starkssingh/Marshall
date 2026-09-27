@@ -85,6 +85,18 @@ backtest:
   cost_model: placeholder      # config/costs/placeholder.yaml
   capital_usd: 100000
   periods_per_year: 252        # annualization of daily (trading-day) statistics
+  event:
+    # Event-driven backtester (BT-004 ... BT-010, ADR 0049), tested on synthetic data only until
+    # real data exists (ADR 0048). Its risk approver is a PLACEHOLDER until RISK-005 (Sprint 12).
+    margin_rate: 0.05            # PROVISIONAL: used margin = notional x rate (1:20, retail gold CFD)
+    blackouts:                   # BT-008: no order opening or increasing exposure fills inside these
+      event_windows:             # windows of config/sessions.yaml
+        - rollover               # 16:45-18:15 New York, the Sunday reopen included (C-3, ADR 0026)
+        - us_data_release        # US releases -5/+30 min
+      before_weekly_close_min: 60   # the last hour before a close followed by a day or more without trading
+    flat_before_weekend: false   # optional: close every position before the weekly close ...
+    flat_before_weekend_min: 30  # ... this many minutes before it (16:30 New York, before the rollover window)
+    reconcile_tolerance: 0.05    # BT-009: equity difference between the tiers below 5 % of total costs
 
 experiments:
   # Effective number of independent trials (EXP-004, ADR 0023, ADR 0026): trial returns are summed
