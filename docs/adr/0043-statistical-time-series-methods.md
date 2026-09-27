@@ -54,7 +54,13 @@ model promoted.
    in-sample coefficients (first training fold) are recorded, never promoted. Inside a run each
    (model, horizon) is one trial on test folds; benchmarks are references, not trials. SARIMA is
    not built (EDA-004 has found no stable daily cycle on real data yet).
-8. **Recovery before use.** `xq.research.recovery.RECOVERY_TESTS` names, per method, the tests
+8. **STAT-008.** A verdict per method and series, with every field of Observed / Evidence /
+   Interpretation / Limitations / Action required and the recovery tests of its method cited;
+   statuses are `useful evidence` (out of sample, after Holm, STAT-006 only), `evidence`,
+   `no evidence` and `inconclusive`. The report is the deterministic `ReportBuilder` output
+   (`verdict.md`, a summary table, the raw result tables). It is a framework only in Sprint 6: it
+   has run on simulated results, never on real data.
+9. **Recovery before use.** `xq.research.recovery.RECOVERY_TESTS` names, per method, the tests
    that recover a known answer on a simulated process (random walk, AR(1), level shift,
    GARCH(1,1), Ornstein-Uhlenbeck); a test checks that each named test exists. A method without
    an entry must not be used by a report, a board or the sigma-hat selection.

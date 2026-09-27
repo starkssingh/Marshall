@@ -404,6 +404,14 @@ IDs from `docs/specs/development-plan.md`.
   inside a run. Recovery: AR(1) with phi = 0.5 and ARMA(1, 1) recovered, AIC finds an AR(2),
   forecasts match the closed form and statsmodels and are causal, an AR(1) beats both benchmarks
   after Holm and i.i.d. returns do not. ADR 0043.
+- STAT-008: statistical verdict report framework (`xq.research.stats.verdict`) — builders turn
+  STAT-001, STAT-002, STAT-003 and STAT-006 results into verdicts in the Observed / Evidence /
+  Interpretation / Limitations / Action format (every field required, each citing the recovery
+  tests its method passed) with the plan's reading rules (non-rejection is not a unit root, ARCH
+  effects are not return predictability, a variance ratio counts only through the joint test,
+  only out-of-sample DM evidence after Holm is "useful evidence"), and `build_verdict_report`
+  writes them as a deterministic report. Exercised on simulated results only; no report on real
+  data exists. ADR 0043.
 
 ### Changed
 
