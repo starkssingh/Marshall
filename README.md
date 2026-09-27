@@ -11,8 +11,9 @@ follow are in [`CLAUDE.md`](CLAUDE.md), and decisions are recorded in [`docs/adr
 
 ## Status
 
-Sprints 1 to 6 are merged; Sprint 11 is in review (run ahead of Sprints 7-10 while real data is
-pending, ADR 0048). Sprint 2 (clean ticks, bars and data quality) is implemented and tested
+Sprints 1 to 6 and 11 are merged; Sprint 12 A (the risk and signal engines, data-independent
+part, ADR 0051) is in review. Sprint 11 ran ahead of Sprints 7-10 while real data is pending
+(ADR 0048). Sprint 2 (clean ticks, bars and data quality) is implemented and tested
 on synthetic data but **not validated**: its quality report must first run on at least one year of
 real broker ticks, followed by the human review (DQ-008); the owner's decisions on its open
 questions are in ADR 0013. Sprint 3 (datasets, leakage harness, experiment registry, forward-return
@@ -31,9 +32,13 @@ is promoted. Sprint 11 (the event-driven backtester) is implemented and tested o
 only: event queue and clock, a broker simulator (brackets, gaps, pessimistic intrabar resolution,
 no fills while closed), FIFO portfolio accounting, a decision ledger linking every order to its
 risk decision, entry blackouts, reconciliation with the screener and a backtest report. Sprint 12
-A (in progress, ADR 0051) replaces its placeholder risk approver with the real risk engine
-(RISK-005): every order now comes from a decision `RiskEngine.evaluate` issued, with a provisional
-risk profile (`config/risk/default.yaml`). See [`CHANGELOG.md`](CHANGELOG.md) for
+A adds the risk engine (risk state rebuilt from the ledger, sizing, limits and halts, stop policy,
+kill switch and data-health breakers; every order comes from a decision `RiskEngine.evaluate`
+issued, with a provisional risk profile in `config/risk/default.yaml`) and the signal engine
+(schemas exported to `docs/specs/interfaces/`, EV in sigma units, filters with a placeholder
+pass-through regime filter, YAML-defined strategies, a record for every candidate, forecast to
+fill in the event backtester), tested on synthetic data only. See
+[`CHANGELOG.md`](CHANGELOG.md) for
 completed backlog tasks and [`docs/STATUS.md`](docs/STATUS.md) for the current sprint, open
 decisions and carry-over items.
 
