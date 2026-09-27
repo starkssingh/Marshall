@@ -42,7 +42,7 @@ from xq.models.arma import (
 from xq.models.base import ModelConfig, ModelSpec
 from xq.models.baselines import forecast_baseline
 from xq.research.stats.results import holm_adjust
-from xq.tracking.trials import LINEAR_FORECAST_FAMILY
+from xq.tracking.registry import LINEAR_FORECAST_FAMILY
 from xq.validation.forecast_eval import diebold_mariano, diebold_mariano_less, loss_series
 from xq.validation.splitters import WalkForwardConfig, WalkForwardSplitter
 from xq.validation.walkforward import walk_forward

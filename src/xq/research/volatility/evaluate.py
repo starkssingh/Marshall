@@ -49,7 +49,7 @@ from xq.core.types import Timeframe
 from xq.models.volatility import VolForecaster, check_periods, realized_target
 from xq.research.volatility.benchmarks import Deseasonalized, benchmark_forecasters
 from xq.research.volatility.garch import garch_forecasters
-from xq.tracking.trials import VOLATILITY_MODEL_FAMILY
+from xq.tracking.registry import VOLATILITY_MODEL_FAMILY
 from xq.validation.forecast_eval import (
     ModelConfidenceSet,
     diebold_mariano,

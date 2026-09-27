@@ -37,9 +37,29 @@ from xq.tracking.models import (
     Run,
 )
 
+#: Trial family of linear forecasting models evaluated on test folds (STAT-006, ADR 0046).
+LINEAR_FORECAST_FAMILY = "linear_forecasts"
+#: Trial family of volatility models evaluated on test folds (VOL-005, ADR 0046).
+VOLATILITY_MODEL_FAMILY = "volatility_models"
+#: Families of forecasting-model evaluations. They are never trading-strategy families, so their
+#: trials never enter the trial count or effective N that deflates a strategy's Sharpe ratio.
+MODEL_FAMILIES = frozenset({LINEAR_FORECAST_FAMILY, VOLATILITY_MODEL_FAMILY})
+#: Family ids the platform records its own trials under. No hypothesis may be registered in one
+#: (ADR 0047). This is the one list of reserved ids: add any future reserved family here.
+RESERVED_FAMILIES: frozenset[str] = MODEL_FAMILIES
+
 
 class RegistryError(XQError):
     """A registry record is missing, or an operation violates its lifecycle."""
+
+
+def check_family_not_reserved(family_id: str) -> None:
+    """Raise RegistryError if `family_id` is reserved for the platform's own trials (ADR 0047)."""
+    if family_id in RESERVED_FAMILIES:
+        raise RegistryError(
+            f"family {family_id!r} is reserved for the platform's own trial records and cannot be "
+            f"a hypothesis family (reserved: {', '.join(sorted(RESERVED_FAMILIES))}; ADR 0047)"
+        )
 
 
 class HypothesisStatus(StrEnum):
@@ -135,7 +155,11 @@ def add_hypothesis_version(
 
     If the latest version has the same text hash, it is returned unchanged. Otherwise a new version
     (latest + 1) is added and the previous one is marked superseded, so an edit is always visible.
+
+    Raises:
+        RegistryError: if `family_id` is reserved (`RESERVED_FAMILIES`, ADR 0047).
     """
+    check_family_not_reserved(family_id)
     digest = text_hash(yaml_text)
     with session_factory(engine)() as session:
         latest = session.scalars(

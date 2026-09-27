@@ -15,7 +15,15 @@ from xq.core.config import AppConfig
 from xq.core.errors import ConfigError
 from xq.tracking.db import create_db_engine, upgrade_to_head
 from xq.tracking.hypotheses import is_registered, load_hypothesis, register_hypothesis
-from xq.tracking.registry import HypothesisStatus, get_hypothesis, hypothesis_text
+from xq.tracking.registry import (
+    MODEL_FAMILIES,
+    RESERVED_FAMILIES,
+    HypothesisStatus,
+    RegistryError,
+    add_hypothesis_version,
+    get_hypothesis,
+    hypothesis_text,
+)
 
 TEMPLATE = REPO / "experiments" / "hypotheses" / "TEMPLATE.yaml"
 
@@ -119,6 +127,37 @@ def test_a_descriptive_hypothesis_may_have_a_zero_trial_budget(
         load_hypothesis(write(tmp_path, family="descriptive", trial_budget=-1), cfg)
 
 
+def test_the_reserved_families_are_the_model_families() -> None:
+    assert frozenset({"linear_forecasts", "volatility_models"}) == RESERVED_FAMILIES
+    assert MODEL_FAMILIES <= RESERVED_FAMILIES
+
+
+@pytest.mark.parametrize("family", sorted(RESERVED_FAMILIES))
+def test_a_reserved_family_cannot_be_registered(
+    cfg: AppConfig, engine: Engine, tmp_path: Path, family: str
+) -> None:
+    path = write(tmp_path, family=family)
+    with pytest.raises(ConfigError, match=f"family '{family}' is reserved"):
+        load_hypothesis(path, cfg)
+    with pytest.raises(ConfigError, match="is reserved"):
+        register_hypothesis(cfg, engine, path)
+    # The registry itself refuses the family, whoever calls it.
+    with pytest.raises(RegistryError, match="ADR 0047"):
+        add_hypothesis_version(
+            engine, "H-0001", title="t", family_id=family, yaml_text=path.read_text()
+        )
+    with pytest.raises(RegistryError, match="not registered"):
+        get_hypothesis(engine, "H-0001")
+
+
+@pytest.mark.parametrize("family", ["linear_forecast", "volatility_model", "volatility_models_x"])
+def test_families_resembling_a_reserved_id_are_accepted(
+    cfg: AppConfig, tmp_path: Path, family: str
+) -> None:
+    doc, _ = load_hypothesis(write(tmp_path, family=family), cfg)
+    assert doc.family == family
+
+
 def test_file_name_must_match_the_id(cfg: AppConfig, tmp_path: Path) -> None:
     path = write(tmp_path)
     renamed = path.rename(tmp_path / "H-0002.yaml")
@@ -148,3 +187,9 @@ def test_cli_register_and_list(tmp_path: Path) -> None:
     assert "H-0001\tv1\tactive\tmomentum" in listed.stdout
     bad = runner.invoke(app, [*common, "exp", "register", str(TEMPLATE)])
     assert bad.exit_code == 2
+    reserved = runner.invoke(
+        app,
+        [*common, "exp", "register", str(write(tmp_path, id="H-0002", family="volatility_models"))],
+    )
+    assert reserved.exit_code == 2
+    assert "reserved" in reserved.output

@@ -21,13 +21,9 @@ from xq.research.volatility.benchmarks import benchmark_forecasters
 from xq.research.volatility.evaluate import evaluate_forecasters
 from xq.tracking import registry
 from xq.tracking.db import create_db_engine, upgrade_to_head
+from xq.tracking.registry import LINEAR_FORECAST_FAMILY, MODEL_FAMILIES, VOLATILITY_MODEL_FAMILY
 from xq.tracking.runs import RunContext, experiment_run
-from xq.tracking.trials import (
-    LINEAR_FORECAST_FAMILY,
-    MODEL_FAMILIES,
-    VOLATILITY_MODEL_FAMILY,
-    trial_count,
-)
+from xq.tracking.trials import trial_count
 from xq.validation.splitters import WalkForwardConfig
 
 STRATEGY_FAMILY = "baselines"

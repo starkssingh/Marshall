@@ -500,6 +500,12 @@ IDs from `docs/specs/development-plan.md`.
   in a trading-strategy family (owner review of PR #11); `arma_study` and `evaluate_forecasters`
   lose their `family_id` argument. A test records both under a `baselines` hypothesis and finds
   the `baselines` family's trial count, effective N and Sharpe variance unchanged. ADR 0046.
+- EXP-002 refuses to register a hypothesis in a reserved family (ADR 0047): the model families
+  `linear_forecasts` and `volatility_models` are listed once, in
+  `xq.tracking.registry.RESERVED_FAMILIES`; both the hypothesis schema (`xq exp register`) and
+  `registry.add_hypothesis_version` refuse them, so a trading-strategy hypothesis can no longer
+  share a family with forecasting-model trials. The family constants move from
+  `xq.tracking.trials` to `xq.tracking.registry`.
 - BASE-005 H-0001 draft revised at the owner's request (ADR 0035, C-15), still unregistered: rule
   baselines are evaluated over the full pre-vault history after each rule's warm-up, with the
   fold-aligned version stored for comparison; they run on 1d and 1h signal bars (not 15m), so the

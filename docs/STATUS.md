@@ -166,9 +166,9 @@ if STAT-002 or STAT-003 finds dependence on real data.
   Ljung-Box on returns is reported next to the robust Q* but over-rejects under volatility
   clustering; only Q* may support a claim of return autocorrelation (ADR 0043).
 - The trial counter does not compare recorded trials with a hypothesis's trial budget for any
-  family (ADR 0042). Nothing stops a trading-strategy hypothesis from being registered with a
-  model family's name (`linear_forecasts`, `volatility_models`); the studies' own trials can never
-  land in a strategy family (ADR 0046).
+  family (ADR 0042). A hypothesis can no longer be registered in a reserved model family
+  (`linear_forecasts`, `volatility_models`; `xq.tracking.registry.RESERVED_FAMILIES`, ADR 0047),
+  and the studies' own trials can never land in a strategy family (ADR 0046).
 - Vault gate tokens can be verified but not issued until GATE-002 (Sprint 13);
   `xq validate --include-vault` uses an explicit confirmation flag until then.
 - Parquet bytes depend on the pyarrow version, so a lockfile change can change dataset hashes

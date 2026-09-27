@@ -14,6 +14,10 @@ looking at data are tested on later data), and an evaluation window that ends at
 The trial budget is at least one, except in the ``descriptive`` family: a descriptive hypothesis
 (the standing hypothesis H-0000 that EDA runs belong to, ADR 0041) evaluates no trading
 configuration, so its budget may be zero (ADR 0042).
+
+The family ids the platform records forecasting-model trials under (``linear_forecasts``,
+``volatility_models``; ``xq.tracking.registry.RESERVED_FAMILIES``) are reserved: a hypothesis
+registered in one would mix its trials with model evaluations (ADR 0046, ADR 0047).
 """
 
 from __future__ import annotations
@@ -42,6 +46,7 @@ from xq.tracking.registry import (
     HypothesisRef,
     RegistryError,
     add_hypothesis_version,
+    check_family_not_reserved,
     get_hypothesis,
     text_hash,
 )
@@ -87,6 +92,15 @@ class HypothesisDoc(BaseModel):
     trial_budget: int = Field(ge=0)
     planned_tests: list[str] = Field(min_length=1)
     slices: list[str] = []
+
+    @field_validator("family")
+    @classmethod
+    def _not_reserved(cls, value: str) -> str:
+        try:
+            check_family_not_reserved(value)
+        except RegistryError as exc:
+            raise ValueError(str(exc)) from exc
+        return value
 
     @model_validator(mode="after")
     def _budget(self) -> HypothesisDoc:
