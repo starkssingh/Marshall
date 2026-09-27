@@ -15,7 +15,7 @@ import pytest
 from helpers.pipeline import REPO
 from xq.core.config import TargetSetConfig, load_config
 from xq.core.types import Timeframe
-from xq.data.calendar import MarketClock
+from xq.data.calendar import MarketClock, regular_trading_day
 from xq.datasets.leakage import FeatureFn, Inputs, check_target_bounds
 from xq.targets.base import TargetSpec
 from xq.targets.kinds import target_kind
@@ -28,10 +28,11 @@ DEFINITIONS = [
     for version, definition in sorted(versions.items())
 ]
 CLOCK = MarketClock.for_range(CFG.sessions_config(), date(2024, 3, 10), date(2024, 3, 25))
+TRADING_DAY = regular_trading_day(CFG.sessions_config())
 SPECS = [
     (f"{name}.{version}:{spec.name}", definition, spec)
     for name, version, definition in DEFINITIONS
-    for spec in target_kind(definition.kind).expand(definition)
+    for spec in target_kind(definition.kind).expand(definition, TRADING_DAY)
 ]
 
 
@@ -97,7 +98,7 @@ def test_forward_return_exit_is_the_first_quote_after_the_market_time_horizon(
     ends = pd.DatetimeIndex(labelled["label_end"])
     times = pd.DatetimeIndex(quotes["ts_utc"])
     assert ends.equals(times[times.searchsorted(intended, side="left")])
-    assert ((ends - intended) <= kind.lookahead(definition).wall).all()
+    assert ((ends - intended) <= kind.lookahead(definition, TRADING_DAY).wall).all()
     crosses = CLOCK.crosses_close(ns(pd.DatetimeIndex(labelled["label_start"])), ns(ends))
     assert (labelled["crosses_close"].to_numpy() == crosses).all()
     assert labelled["crosses_close"].any()  # decisions near the close hold over the break

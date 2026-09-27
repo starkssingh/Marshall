@@ -17,6 +17,7 @@ from xq.targets.returns import compute, expand, lookahead, sigma_rate
 T0 = pd.Timestamp("2024-03-12 10:00", tz="UTC")
 S = pd.Timedelta(seconds=1)
 H = pd.Timedelta(hours=1)
+DAY = pd.Timedelta(hours=23)
 PARAMS: dict[str, Any] = {
     "execution_latency_ms": 1000,
     "max_fill_delay_s": 300,
@@ -163,20 +164,23 @@ def test_empty_quotes_give_no_labels() -> None:
 
 def test_configured_set_expands_to_named_targets() -> None:
     definition = load_config("research", config_dir=REPO / "config").target_set("fwd_returns", "v1")
-    names = [s.name for s in expand(definition)]
+    names = [s.name for s in expand(definition, DAY)]
     assert len(names) == 4 * 3 * 2
     assert "fwd_ret_long_1h" in names
     assert "fwd_ret_short_1d_vol" in names
-    assert lookahead(definition) == Lookahead(
-        market=pd.Timedelta("1d") + S, wall=pd.Timedelta(seconds=300)
+    assert lookahead(definition, DAY) == Lookahead(
+        market=pd.Timedelta(hours=23) + S, wall=pd.Timedelta(seconds=300)
     )
+    horizons = {s.name: s.horizon for s in expand(definition, DAY)}
+    assert horizons["fwd_ret_long_1d"] == pd.Timedelta(hours=23)  # one trading day (ADR 0032)
+    assert horizons["fwd_ret_long_4h"] == pd.Timedelta(hours=4)
     plain = TargetSetConfig(
         kind="forward_return",
         horizons=["1h"],
         price_refs=["mid"],
         params={**PARAMS, "vol_normalized": False},
     )
-    assert [s.name for s in expand(plain)] == ["fwd_ret_mid_1h"]
+    assert [s.name for s in expand(plain, DAY)] == ["fwd_ret_mid_1h"]
 
 
 @pytest.mark.parametrize(
@@ -192,7 +196,7 @@ def test_params_are_validated(params: dict[str, Any]) -> None:
         kind="forward_return", horizons=["1h"], price_refs=["long"], params=params
     )
     with pytest.raises(ConfigError, match="forward_return params"):
-        expand(definition)
+        expand(definition, DAY)
 
 
 def test_sigma_rate_is_per_square_root_minute() -> None:
@@ -205,3 +209,48 @@ def test_sigma_rate_is_per_square_root_minute() -> None:
     per_bar = sigma_rate(close, definition, pd.Timedelta(minutes=1))
     np.testing.assert_allclose(rate.to_numpy(), per_bar.to_numpy() / np.sqrt(15))
     assert np.isnan(rate.iloc[0])  # no return yet
+
+
+def test_one_day_is_one_trading_day_of_23_market_hours() -> None:
+    # Tuesday 10:00 EDT: 7 market hours to the 17:00 close, the 17:00-18:00 break is skipped, and
+    # 16 more hours end Wednesday 10:00 EDT, one trading day later on the session clock.
+    t = pd.Timestamp("2024-03-12 14:00", tz="UTC")
+    exit_time = pd.Timestamp("2024-03-13 14:00:01", tz="UTC")
+    quotes = pd.DataFrame(
+        {
+            "ts_utc": [t + S, exit_time],
+            "bid": [100.0, 101.0],
+            "ask": [100.2, 101.2],
+        }
+    )
+    one_day = TargetSpec("x", DAY, "mid", {**PARAMS, "normalized": False})
+    out = compute(one_day, quotes, pd.Series([1.0], index=pd.DatetimeIndex([t])), CLOCK)
+    assert out["label_end"].iloc[0] == exit_time
+    assert out["crosses_close"].iloc[0]
+    assert out["value"].iloc[0] == pytest.approx(np.log(101.1 / 100.1))
+    # Four hours are four market hours: Tuesday 15:00 EDT + 4 h ends at 20:00 EDT, after the break.
+    four = TargetSpec("x", 4 * H, "mid", {**PARAMS, "normalized": False})
+    late = pd.Timestamp("2024-03-12 19:00", tz="UTC")
+    quotes = pd.DataFrame(
+        {
+            "ts_utc": [late + S, pd.Timestamp("2024-03-13 00:00:01", tz="UTC")],
+            "bid": [100.0, 101.0],
+            "ask": [100.2, 101.2],
+        }
+    )
+    out = compute(four, quotes, pd.Series([1.0], index=pd.DatetimeIndex([late])), CLOCK)
+    assert out["label_end"].iloc[0] == pd.Timestamp("2024-03-13 00:00:01", tz="UTC")
+
+
+def test_vol_scale_uses_1380_minutes_for_one_day() -> None:
+    t = pd.Timestamp("2024-03-12 14:00", tz="UTC")
+    quotes = pd.DataFrame(
+        {
+            "ts_utc": [t + S, pd.Timestamp("2024-03-13 14:00:01", tz="UTC")],
+            "bid": [100.0, 101.0],
+            "ask": [100.2, 101.2],
+        }
+    )
+    spec_vol = TargetSpec("x_vol", DAY, "mid", {**PARAMS, "normalized": True})
+    out = compute(spec_vol, quotes, pd.Series([0.001], index=pd.DatetimeIndex([t])), CLOCK)
+    assert out["scale"].iloc[0] == pytest.approx(0.001 * np.sqrt(1380))

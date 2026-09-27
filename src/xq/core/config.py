@@ -465,11 +465,18 @@ class QualityConfig(FrozenModel):
 PriceRef = Literal["long", "short", "mid"]
 
 
+#: A horizon of whole trading days, e.g. ``1d`` (ADR 0032).
+TRADING_DAYS_HORIZON = re.compile(r"^(?P<days>[1-9]\d*)[dD]$")
+_DAY_UNIT = re.compile(r"\d\s*(days?|d)(?![a-z])", re.IGNORECASE)
+
+
 class TargetSetConfig(FrozenModel):
     """A versioned target set (``config/targets.yaml``, TGT-001).
 
     It expands to one target per horizon and price reference; `params` are validated by the
-    target kind (for example execution latency for forward returns).
+    target kind (for example execution latency for forward returns). Horizons are trading time
+    (ADR 0026): ``<n>d`` is n trading days, any other label (``15m``, ``4h``) is that much market
+    time; a label may not mix days with other units (ADR 0032).
     """
 
     kind: str
@@ -487,6 +494,11 @@ class TargetSetConfig(FrozenModel):
                 raise ValueError(f"invalid horizon {text!r}") from exc
             if horizon <= pd.Timedelta(0):
                 raise ValueError(f"horizon {text!r} must be positive")
+            if not TRADING_DAYS_HORIZON.match(text) and _DAY_UNIT.search(text):
+                raise ValueError(
+                    f"horizon {text!r} mixes days with other units; write whole trading days "
+                    "('1d') or market hours and minutes ('36h')"
+                )
         if len(set(value)) != len(value):
             raise ValueError("horizons must be unique")
         return value

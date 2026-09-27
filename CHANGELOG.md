@@ -299,6 +299,13 @@ IDs from `docs/specs/development-plan.md`.
 
 ### Changed
 
+- TGT-002 `1d` is one trading day (ADR 0032): a horizon label `<n>d` is n regular trading days of
+  market time — 23 market hours for the 18:00–17:00 New York session
+  (`xq.data.calendar.regular_trading_day`), so a `1d` label ends at the same session clock time one
+  trading day later instead of an hour into the next session; `4h` stays 4 market hours. Labels may
+  not mix days with other units (`1d6h` is refused). `TargetKind.expand` and `lookahead` take the
+  trading-day length (`xq.targets.base.market_horizon`); `forward_return` code version 3 (dataset
+  ids change); `_vol` targets scale `1d` by `sqrt(1380)` minutes.
 - `docs/STATUS.md` tracks the current sprint and next task, review carry-overs with owners and
   closing commits, open owner decisions, provisional assumptions, known issues and per-phase
   status; `CLAUDE.md` gains a session protocol (read it after `CLAUDE.md`, keep it current, record

@@ -50,7 +50,7 @@ from xq.core.ids import new_ulid
 from xq.core.logging import get_logger
 from xq.core.time import ensure_utc, trading_day, trading_days, utc_now
 from xq.data.bars import bar_set_id, build_version, exclude_mask
-from xq.data.calendar import NAT_NS, MarketClock
+from xq.data.calendar import NAT_NS, MarketClock, regular_trading_day
 from xq.data.catalog import Catalog
 from xq.data.clean import rules_version
 from xq.data.raw_store import sha256_file
@@ -213,8 +213,9 @@ def build_dataset(cfg: AppConfig, engine: Engine, spec: DatasetSpec, *, git_sha:
     if spec.target_set is not None:
         definition = cfg.target_set(spec.target_set.name, spec.target_set.version)
         kind = target_kind(definition.kind)
-        targets_def = (kind, kind.expand(definition))
-        reach = kind.lookahead(definition)
+        trading_day = regular_trading_day(cfg.sessions_config())
+        targets_def = (kind, kind.expand(definition, trading_day))
+        reach = kind.lookahead(definition, trading_day)
     resolved = resolve_spec(cfg, engine, spec)
     ds_id = dataset_id(resolved, code_versions_for(cfg, resolved))
 
@@ -452,7 +453,7 @@ def _targets(
     """
     close = pd.Series(base["close"].to_numpy(), index=decision_index(base))
     sigma = kind.sigma(close, definition, spec.base_timeframe.duration).reindex(decisions)
-    reach = kind.lookahead(definition)
+    reach = kind.lookahead(definition, regular_trading_day(cfg.sessions_config()))
     vault = vault_start(cfg)
     mask = exclude_mask(cfg.bars_config())
     catalog = Catalog(cfg)

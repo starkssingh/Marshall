@@ -2,7 +2,7 @@
 
 For a decision at time t (a base bar's ``available_at``) and horizon h, times are counted on the
 `MarketClock` — only market-open time passes, so the daily break, weekends and holidays are
-skipped:
+skipped. ``1d`` is one regular trading day, 23 market hours (ADR 0032); ``4h`` is 4 market hours:
 
 - the intended entry is ``latency`` of market time after t, and the intended exit ``h + latency``
   after t; a decision taken while the market is closed (at the 17:00 close, say) starts counting
@@ -41,7 +41,7 @@ from xq.core.config import TargetSetConfig
 from xq.core.errors import ConfigError
 from xq.data.calendar import NAT_NS, MarketClock
 from xq.datasets.primitives import ewma_volatility, log_returns
-from xq.targets.base import Lookahead, TargetKind, TargetSpec
+from xq.targets.base import Lookahead, TargetKind, TargetSpec, market_horizon
 
 _MINUTE = pd.Timedelta(minutes=1)
 
@@ -65,22 +65,19 @@ def forward_return_params(params: Mapping[str, Any]) -> ForwardReturnParams:
         raise ConfigError(f"invalid forward_return params:\n{exc}") from exc
 
 
-def expand(definition: TargetSetConfig) -> list[TargetSpec]:
+def expand(definition: TargetSetConfig, trading_day: pd.Timedelta) -> list[TargetSpec]:
     """``fwd_ret_<ref>_<horizon>`` (and ``..._vol``) for every horizon and price reference."""
     params = forward_return_params(definition.params)
     specs = []
-    for horizon in definition.horizons:
+    for label in definition.horizons:
+        horizon = market_horizon(label, trading_day)
         for ref in definition.price_refs:
-            base = f"fwd_ret_{ref}_{horizon}"
+            base = f"fwd_ret_{ref}_{label}"
             common = params.model_dump()
-            specs.append(
-                TargetSpec(base, pd.Timedelta(horizon), ref, {**common, "normalized": False})
-            )
+            specs.append(TargetSpec(base, horizon, ref, {**common, "normalized": False}))
             if params.vol_normalized:
                 specs.append(
-                    TargetSpec(
-                        f"{base}_vol", pd.Timedelta(horizon), ref, {**common, "normalized": True}
-                    )
+                    TargetSpec(f"{base}_vol", horizon, ref, {**common, "normalized": True})
                 )
     return specs
 
@@ -93,10 +90,10 @@ def sigma_rate(close: pd.Series, definition: TargetSetConfig, bar: pd.Timedelta)
     return rate
 
 
-def lookahead(definition: TargetSetConfig) -> Lookahead:
+def lookahead(definition: TargetSetConfig, trading_day: pd.Timedelta) -> Lookahead:
     """The longest horizon plus latency in market time, then the allowed fill delay."""
     params = forward_return_params(definition.params)
-    longest = max(pd.Timedelta(h) for h in definition.horizons)
+    longest = max(market_horizon(h, trading_day) for h in definition.horizons)
     return Lookahead(
         market=longest + pd.Timedelta(milliseconds=params.execution_latency_ms),
         wall=pd.Timedelta(seconds=params.max_fill_delay_s),
@@ -180,7 +177,7 @@ def _ns(index: pd.DatetimeIndex) -> npt.NDArray[np.int64]:
 
 FORWARD_RETURN = TargetKind(
     name="forward_return",
-    code_version=2,
+    code_version=3,
     expand=expand,
     sigma=sigma_rate,
     compute=compute,
