@@ -82,6 +82,8 @@ def test_run_lifecycle_metrics_and_artifacts(engine: Engine, tmp_path: Path) -> 
     assert run.config == {"lookback": 20}
     reg.log_metric(engine, run.run_id, "sharpe", 0.4, fold_id="f1")
     reg.log_metric(engine, run.run_id, "sharpe", 0.1, fold_id="f2")
+    with pytest.raises(ValueError, match="not finite"):
+        reg.log_metric(engine, run.run_id, "hit_rate", float("nan"))
     artifact_file = tmp_path / "report.md"
     artifact_file.write_text("results\n")
     artifact = reg.log_artifact(engine, run.run_id, artifact_file, kind="report")

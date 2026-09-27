@@ -324,7 +324,15 @@ def list_runs(engine: Engine, experiment_id: str | None = None) -> list[RunRef]:
 def log_metric(
     engine: Engine, run_id: str, name: str, value: float, *, fold_id: str | None = None
 ) -> None:
-    """Record a metric of a running run."""
+    """Record a metric of a running run.
+
+    Raises:
+        ValueError: if `value` is not finite (an undefined metric is not recorded at all).
+    """
+    if not math.isfinite(value):
+        raise ValueError(
+            f"metric {name!r} is not finite ({value}); undefined metrics are not logged"
+        )
     with session_factory(engine)() as session:
         _running(session.get(Run, run_id), run_id)
         session.add(Metric(run_id=run_id, fold_id=fold_id, name=name, value=float(value)))

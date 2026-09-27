@@ -388,6 +388,11 @@ IDs from `docs/specs/development-plan.md`.
 
 ### Fixed
 
+- WF-002: `run_walk_forward` no longer fails when a stitched metric is undefined (the hit rate of
+  an all-zero forecast is NaN, which the non-null `metrics.value` column rejected with an
+  `IntegrityError`); undefined metrics stay NaN in the result and are not logged, and
+  `registry.log_metric` now refuses a non-finite value with a clear `ValueError`. Found by the
+  BASE-005 board running the `zero_return` baseline.
 - Dataset targets: a month of decisions whose only decision time is exactly `vault.start` no longer
   asks the catalog for an empty tick window (which it rejects); those decisions get no label,
   since every fill would need vault quotes.

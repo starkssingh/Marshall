@@ -18,7 +18,8 @@ digest of the rows it reads, so a cache hit can only return what the same comput
 applies the target schema guard to the feature matrix, stores the predictions through the
 prediction store (WF-003, which refuses leaked rows), records one ``fold_results`` row per fold
 (fold-level results are always kept, never only the stitched aggregate), logs the stitched
-metrics, and records the evaluation as a trial on test folds (EXP-004).
+metrics (undefined ones, NaN, stay in the result but are not logged), and records the
+evaluation as a trial on test folds (EXP-004).
 """
 
 from __future__ import annotations
@@ -251,7 +252,8 @@ def run_walk_forward(
     metrics = forecast_metrics(output.predictions, spec.task)
     registry.record_fold_results(run.engine, run.run_id, label, output.folds)
     for name, value in metrics.items():
-        run.log_metric(f"{label}/{name}", value)
+        if math.isfinite(value):  # an undefined metric (e.g. no signed forecast) is not logged
+            run.log_metric(f"{label}/{name}", value)
     trial_id = None
     if record_trial:
         experiment = registry.get_experiment(run.engine, run.run.experiment_id)
