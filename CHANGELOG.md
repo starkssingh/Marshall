@@ -231,6 +231,11 @@ IDs from `docs/specs/development-plan.md`.
   `CombinatorialPurgedCV`; training and validation labels purged by `label_end` with the embargo as
   a gap before the next window; `Fold.train_end` is the information cutoff; unlabelled samples are
   predicted but never trained on. ADR 0027.
+- WF-006: splitter guard property tests (`tests/property/test_splitters.py`) — for random sample
+  spacing, label horizons (some missing) and splitter settings, every label used for fitting or
+  selection ends before `test_start - embargo`, test windows never overlap, purging removes exactly
+  the labels that would reach the next window (no over-purging), and purged k-fold / CPCV never
+  train on a test group's span plus embargo.
 
 ### Changed
 
