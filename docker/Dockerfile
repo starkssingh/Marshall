@@ -48,6 +48,8 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 
 COPY tests ./tests
 COPY experiments ./experiments
+# The research log (EXP-005) and the other committed documents some tests read.
+COPY docs ./docs
 # The suite writes caches (hypothesis examples) next to the project.
 RUN chown -R xq:xq /app
 USER xq

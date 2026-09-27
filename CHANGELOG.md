@@ -580,6 +580,9 @@ IDs from `docs/specs/development-plan.md`.
 
 ### Fixed
 
+- ARCH-008 Docker test stage: the image now copies `docs/`, so the EXP-005 test that reads the
+  committed research log (`docs/research/log.md`) passes inside it; the CI `docker` job had failed
+  on `main` since Sprint 5 (PR #9) with `FileNotFoundError` for that file.
 - WF-002: `run_walk_forward` no longer fails when a stitched metric is undefined (the hit rate of
   an all-zero forecast is NaN, which the non-null `metrics.value` column rejected with an
   `IntegrityError`); undefined metrics stay NaN in the result and are not logged, and
