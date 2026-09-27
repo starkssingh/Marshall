@@ -30,6 +30,7 @@ _SPA = "tests/unit/validation/test_spa.py"
 _MULTIPLE = "tests/unit/validation/test_multiple_testing.py"
 _PERTURB = "tests/unit/robustness/test_perturb.py"
 _COST_STRESS = "tests/unit/robustness/test_costs_stress.py"
+_BOOTSTRAP = "tests/unit/robustness/test_bootstrap.py"
 
 RECOVERY_TESTS: Mapping[str, tuple[str, ...]] = {
     "ADF": (
@@ -159,6 +160,15 @@ RECOVERY_TESTS: Mapping[str, tuple[str, ...]] = {
         f"{_COST_STRESS}::test_a_thin_edge_profitable_at_baseline_fails_and_a_thick_one_passes",
         f"{_COST_STRESS}::test_the_break_even_multiplier_leaves_no_net_pnl",
         f"{_COST_STRESS}::test_latency_eats_a_signal_priced_in_over_seconds_in_proportion_to_the_delay",
+    ),
+    "returns_bootstrap": (
+        f"{_BOOTSTRAP}::test_sharpe_and_cagr_intervals_cover_at_about_the_nominal_rate",
+        f"{_BOOTSTRAP}::test_blocks_keep_the_coverage_under_serial_correlation",
+        f"{_BOOTSTRAP}::test_the_drawdown_interval_brackets_the_true_drawdown_median",
+    ),
+    "trade_permutation": (
+        f"{_BOOTSTRAP}::test_unordered_trades_sit_anywhere_in_the_permutation_distribution",
+        f"{_BOOTSTRAP}::test_clustered_losses_are_at_the_top_of_the_permutation_distribution",
     ),
 }
 

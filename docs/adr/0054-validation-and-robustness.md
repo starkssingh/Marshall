@@ -122,3 +122,32 @@ simulations (`tests/helpers/strategies.py`) are:
    at baseline fails; a run at the break-even multiplier nets zero; a doubled spread doubles the
    spread cost exactly with unchanged fill times; and when a signal is priced in linearly over
    10 s, the gross P&L falls to (10 − latency)/(10 − 1) of the baseline's.
+
+## ROB-003 — block bootstrap and trade-order permutation
+
+1. **Return intervals.** Daily net returns are resampled with the stationary bootstrap. The
+   mean block is Politis–White, at least 5 days (the gates' convention, shared with VAL-001 and
+   VAL-004). The intervals are percentile intervals of the annualized Sharpe ratio, the CAGR and
+   the maximum drawdown. CAGR follows `performance_metrics`: the screener sizes on constant
+   capital, so equity is capital plus cumulative P&L. `n_boot` is passed in; the robustness
+   report (ROB-008) uses the gates' 10,000.
+2. **Drawdowns start from the capital.** A loss on the first day is already a drawdown. BT-003's
+   `drawdown_metrics` takes its first peak at the first day's equity, so it understates a
+   drawdown that begins on day 1 (equity 99, 98, 97 on 100 reports 2/99, not 3/100). That is
+   recorded as a known issue with a follow-up fix. Here the capital is the first peak.
+3. **Trade order.** Closed trades' net P&L is shuffled. The total is unchanged; the path is not.
+   The maximum drawdown and the longest run of trades below the running peak are reported over
+   the orders, with the observed order's percentile: near 1, the actual sequence clustered its
+   losses. It is counted in trades, not days, because shuffling has no calendar.
+4. **Known truth.** With 200 replications and 90 % intervals:
+   - Sharpe and CAGR coverage lies within 0.85–0.95 for iid and GARCH returns, and for AR(1)
+     returns (φ = 0.3) with Politis–White blocks. The iid bootstrap (block 1) on the same AR(1)
+     returns under-covers at about 0.79.
+   - The drawdown interval covers the true median drawdown (from 5,000 fresh paths) in
+     0.85–0.99 of replications, and the bootstrap median is within 15 % of it.
+   - Percentiles of unordered trades are uniform (5 % above 0.95, 5 % below 0.05); losses sorted
+     first sit at percentile 1.
+5. **Limitation.** The drawdown interval is an interval for the drawdown of this sample's return
+   process, not a prediction interval for the next path. A fresh path's drawdown falls outside
+   the 90 % interval about 22 % of the time, because it has its own mean. The distribution of
+   future drawdowns under the risk rules is ROB-004's Monte Carlo.

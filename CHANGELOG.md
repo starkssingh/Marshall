@@ -650,6 +650,14 @@ IDs from `docs/specs/development-plan.md`.
   stressed costs, a thin edge profitable at baseline fails, the break-even run nets zero, spreads
   scale exactly, and latency eats a signal priced in over 10 s in proportion to the delay.
   ADR 0054.
+- ROB-003: stationary block bootstrap of daily returns and trade-order permutation
+  (`xq.robustness.bootstrap`) — percentile intervals of the annualized Sharpe ratio, CAGR and
+  maximum drawdown (Politis–White block, at least 5 days; drawdowns from the starting capital),
+  and the maximum drawdown and longest time under water over shuffled trade orders with the
+  observed order's percentile. Proven on known truth: Sharpe and CAGR coverage at 90 % within
+  0.85–0.95 for iid, GARCH and AR(1) returns (an iid bootstrap under-covers the AR(1) case), the
+  drawdown interval brackets the true drawdown median, unordered trades have uniform
+  percentiles and clustered losses sit at the top. ADR 0054.
 
 ### Changed
 
