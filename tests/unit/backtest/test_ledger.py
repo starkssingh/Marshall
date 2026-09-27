@@ -77,6 +77,7 @@ def test_a_golden_run_matches_the_hand_computation() -> None:
     chain = [
         [kind, row[ID_COLUMN[kind]]]
         for kind, row in zip(rows["kind"], rows.to_dict("records"), strict=True)
+        if kind != "account"  # the risk state's equity observations (RISK-001)
     ]
     assert chain == expected["ledger"]
     assert result.link_problems == ()
@@ -136,10 +137,14 @@ def test_broken_links_are_reported() -> None:
     for row in ledger.rows:
         row["ts"] = pd.Timestamp(row["ts"]).value
     assert ledger.check_links() == []
-    orphan = dict(ledger.rows[2], seq=99, order_id="O-X", decision_id="D-X")  # no decision
-    rejected = {**ledger.rows[1], "seq": 100, "decision_id": "D-R", "approved": False}
-    backed = dict(ledger.rows[2], seq=101, order_id="O-R", decision_id="D-R")
-    stray = dict(ledger.rows[3], seq=102, order_id="O-missing")  # a fill without an order
+    first = {
+        kind: next(r for r in ledger.rows if r["kind"] == kind)
+        for kind in ("decision", "order", "fill")
+    }
+    orphan = dict(first["order"], seq=99, order_id="O-X", decision_id="D-X")  # no decision
+    rejected = {**first["decision"], "seq": 100, "decision_id": "D-R", "approved": False}
+    backed = dict(first["order"], seq=101, order_id="O-R", decision_id="D-R")
+    stray = dict(first["fill"], seq=102, order_id="O-missing")  # a fill without an order
     ledger.rows += [orphan, rejected, backed, stray]
     problems = ledger.check_links()
     assert "row 99 (order): order O-X has no risk decision" in problems

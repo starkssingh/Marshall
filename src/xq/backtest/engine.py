@@ -68,6 +68,7 @@ from xq.core.types import Side, Timeframe
 from xq.data.bars import build_bars
 from xq.data.calendar import NAT_NS, MarketClock
 from xq.risk.placeholder import PassThroughRiskApprover
+from xq.risk.state import RiskState, RiskStateTracker
 from xq.signals.schema import OrderIntent, RiskDecision, TradeIntent
 
 #: Execution bars in bar mode are one-minute bars (the plan keeps 1m data for execution).
@@ -429,6 +430,10 @@ class Recorder(Protocol):
         """An order was sent to the broker (the broker records what happens to it)."""
         ...
 
+    def account(self, account: AccountState, event: str) -> None:
+        """The account the risk state observed (at a decision or a trading day's end)."""
+        ...
+
 
 class Constraints(Protocol):
     """Session constraints on entries (BT-008)."""
@@ -479,6 +484,7 @@ class EngineOutput:
     day_states: list[DaySnapshot] = field(default_factory=list)
     financing: list[tuple[int, int, float]] = field(default_factory=list)
     refused: list[tuple[int, str, str]] = field(default_factory=list)
+    risk_states: list[RiskState] = field(default_factory=list)
     events: int = 0
 
 
@@ -520,6 +526,9 @@ class EventEngine:
         self._orders: dict[str, OrderIntent] = {}
         self._position_intent: str | None = None
         self._ran = False
+        self.risk_state = RiskStateTracker(
+            account.state(self.clock.now).capital, float(costs.instrument.contract_size)
+        )
 
     def run(self) -> EngineOutput:
         """Process every event once (an engine runs once)."""
@@ -605,6 +614,7 @@ class EventEngine:
 
     def _on_fill(self, fill: Fill) -> None:
         self.account.book(fill)
+        self.risk_state.on_fill(fill)
         self.output.fills.append(fill)
         order = self._orders.get(fill.order_id)
         if order is not None:  # an order the engine sent (not a bracket leg)
@@ -634,6 +644,10 @@ class EventEngine:
     def _on_intent(self, intent: TradeIntent) -> None:
         now = self.clock.now
         self.recorder.intent(intent)
+        account = self.account.state(now)
+        self.risk_state.observe(account)
+        self.recorder.account(account, "decision")
+        self.output.risk_states.append(self.risk_state.state())
         position = self.broker.position_lots
         if not bool(self.market_clock.is_open(np.array([now], dtype=np.int64))[0]):
             reason: str | None = "market closed at the decision time: no order (ADR 0032)"
@@ -663,7 +677,10 @@ class EventEngine:
             self.output.financing.append((event.ts, event.multiplier, charge))
         elif event.name == "day_end":
             day = date.fromisoformat(str(event.ref))
-            self.output.day_states.append(DaySnapshot(day, self.account.state(event.ts)))
+            account = self.account.state(event.ts)
+            self.risk_state.close_day(account)
+            self.recorder.account(account, "day_end")
+            self.output.day_states.append(DaySnapshot(day, account))
         elif event.name == "expire":
             self.broker.expire(str(event.ref), event.ts)
         elif event.name == "time_stop":

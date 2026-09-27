@@ -537,6 +537,14 @@ IDs from `docs/specs/development-plan.md`.
   artifacts and records the backtest in the new `backtests` table (migration 0009). Tested on a
   baseline rule through both tiers, bar-mode ambiguity, determinism and an experiment run.
   ADR 0049.
+- RISK-001: risk state (`xq.risk.state`) — `RiskState` (equity, peak, drawdown and its sticky
+  worst, the trading day's starting equity and P&L, position, notional, margin, consecutive losing
+  round trips, entries today) updated by `RiskStateTracker` from equity observations at every
+  decision and trading day's end and from fills; the event engine records each observation as an
+  `account` ledger row, and `rebuild_risk_state` replays the ledger into the same state, equal to
+  the live state at every decision (tested). `MarketState` carries the latest quote, its age, the
+  daily sigma-hat, a reference spread, the sessions and the kill switch for the risk engine.
+  ADR 0052.
 
 ### Changed
 

@@ -13,7 +13,9 @@ it to the rest of the chain:
   the parent's decision, which approved its stop and target);
 - ``order_rejected`` / ``order_cancelled`` / ``order_expired`` — what happened to an order that
   did not fill, with the reason;
-- ``fill`` — an execution, with its order, decision and intent.
+- ``fill`` — an execution, with its order, decision and intent;
+- ``account`` — the account the risk state observed, at every risk decision and at every trading
+  day's end, so the risk state can be rebuilt from the ledger (RISK-001).
 
 `Ledger.check_links` lists every row whose links are broken — above all, every order that is not
 backed by an approved risk decision — so a test (and any later audit) can require that list to be
@@ -24,12 +26,13 @@ reason) next to it.
 from __future__ import annotations
 
 import json
+import math
 from pathlib import Path
 from typing import Any
 
 import pandas as pd
 
-from xq.backtest.events import Fill
+from xq.backtest.events import AccountState, Fill
 from xq.core.time import from_ns, to_ns
 from xq.core.types import Side
 from xq.signals.schema import OrderIntent, RiskDecision, TradeIntent
@@ -64,6 +67,7 @@ KINDS = (
     "order_cancelled",
     "order_expired",
     "fill",
+    "account",
 )
 
 
@@ -174,6 +178,25 @@ class Ledger:
                 "slippage_cost": fill.slippage_cost,
                 "commission": fill.commission,
                 "position_after": fill.position_after,
+            },
+        )
+
+    def account(self, account: AccountState, event: str) -> None:
+        """The account the risk state observed (``event``: ``decision`` or ``day_end``)."""
+        self._add(
+            account.ts,
+            "account",
+            lots=account.position_lots,
+            reason=event,
+            detail={
+                "event": event,
+                "capital": account.capital,
+                "cash": account.cash,
+                "unrealized": account.unrealized,
+                "equity": account.equity,
+                "position_lots": account.position_lots,
+                "margin_used": account.margin_used,
+                "mark": account.mark if math.isfinite(account.mark) else None,
             },
         )
 

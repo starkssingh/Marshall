@@ -383,6 +383,9 @@ class StubRecorder:
     def fill(self, fill: Fill) -> None:
         self.rows.append(("fill", fill.fill_id))
 
+    def account(self, account: AccountState, event: str) -> None:
+        self.rows.append(("account", event))
+
 
 class LongEveryBar(Strategy):
     strategy_id = "long_every_bar"
