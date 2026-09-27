@@ -1,4 +1,4 @@
-"""WF-002 end to end: a model walks forward over a stored dataset inside an experiment run."""
+"""WF-002 and WF-003 end to end: a model walks forward over a stored dataset inside a run."""
 
 from collections.abc import Iterator
 from pathlib import Path
@@ -16,6 +16,12 @@ from xq.models.base import ModelConfig
 from xq.tracking import registry
 from xq.tracking.runs import experiment_run
 from xq.tracking.trials import trial_count
+from xq.validation.predictions import (
+    STORE_COLUMNS,
+    PredictionLeakError,
+    read_predictions,
+    write_predictions,
+)
 from xq.validation.splitters import WalkForwardConfig
 from xq.validation.walkforward import run_walk_forward
 
@@ -73,6 +79,50 @@ def test_walk_forward_over_a_dataset_is_recorded_fold_by_fold(
     stats = trial_count(cfg, engine, "baselines")
     assert (stats.n_trials, stats.n_test_evaluations) == (1, 1)
     assert result.trial_id is not None
+
+    stored = read_predictions(result.predictions_path)
+    assert result.predictions_path.parent.name == run.run_id
+    assert ["decision_time", *stored.columns] == list(STORE_COLUMNS)
+    pd.testing.assert_frame_equal(
+        stored.drop(columns=["model_version", "feature_set_version"]),
+        result.predictions,
+        check_freq=False,
+    )
+    assert stored["feature_set_version"].unique().tolist() == ["base.v1"]
+    assert stored["model_version"].iloc[0] == f"mean@1:{result.model_hash}"
+    artifacts = registry.list_artifacts(engine, run.run_id)
+    assert [a.kind for a in artifacts] == ["predictions"]
+
+
+def test_the_store_refuses_leaked_rows_and_writes_nothing(
+    cfg: AppConfig, engine: Engine, dataset: DatasetRef
+) -> None:
+    with experiment_run(
+        cfg, engine, "H-0001", {}, kind="baseline", seed=11, exploratory=True
+    ) as run:
+        result = run_walk_forward(
+            run,
+            dataset.dataset_id,
+            "fwd_ret_mid_4h",
+            MEAN,
+            ModelConfig(name="mean"),
+            SPLITS,
+            record_trial=False,
+        )
+        leaked = result.predictions.copy()
+        leaked.iloc[0, leaked.columns.get_loc("train_end")] = leaked.index[0]
+        with pytest.raises(PredictionLeakError):
+            write_predictions(
+                run,
+                "leaky",
+                leaked,
+                embargo=pd.Timedelta(0),
+                model_version="m",
+                feature_set_version="base.v1",
+            )
+    names = [p.name for p in result.predictions_path.parent.iterdir()]
+    assert names == [result.predictions_path.name]
+    assert len(registry.list_artifacts(engine, run.run_id)) == 1
 
 
 def test_a_rerun_reads_cached_folds_and_records_them_again(

@@ -244,6 +244,11 @@ IDs from `docs/specs/development-plan.md`.
   `fold_results` (migration 0007), logs stitched metrics and records the evaluation as a trial.
   Tests include an AR(1) hit rate matching 1/2 + arcsin(φ)/π and the purging demonstration.
   ADR 0028.
+- WF-003: out-of-sample prediction store (`xq.validation.predictions`) — Parquet under
+  `data/predictions/<experiment_id>/<run_id>/` with `decision_time, fold_id, model_version,
+  feature_set_version, y_true, y_pred, p_raw, p_cal, train_end`. The writer refuses the whole frame
+  if any decision time is not after `train_end + embargo` (or is naive, duplicated or unsorted),
+  and records every file as a run artifact. `run_walk_forward` stores its predictions through it.
 
 ### Changed
 

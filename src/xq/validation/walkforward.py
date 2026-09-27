@@ -15,7 +15,8 @@ key covering the model configuration and code version, the fold's boundaries, it
 digest of the rows it reads, so a cache hit can only return what the same computation would.
 
 `run_walk_forward` runs a model on one target of a stored dataset inside an experiment run: it
-applies the target schema guard to the feature matrix, records one ``fold_results`` row per fold
+applies the target schema guard to the feature matrix, stores the predictions through the
+prediction store (WF-003, which refuses leaked rows), records one ``fold_results`` row per fold
 (fold-level results are always kept, never only the stitched aggregate), logs the stitched
 metrics, and records the evaluation as a trial on test folds (EXP-004).
 """
@@ -86,6 +87,7 @@ class WalkForwardResult:
     predictions: pd.DataFrame
     folds: list[FoldResult]
     metrics: dict[str, float]
+    predictions_path: Path
     trial_id: str | None = None
 
 
@@ -208,9 +210,10 @@ def run_walk_forward(
     Raises:
         TargetLeakError: if a configured feature column is a target column.
     """
-    from xq.datasets.builder import load_dataset
+    from xq.datasets.builder import load_dataset, read_manifest
     from xq.targets.base import check_feature_matrix, target_values
     from xq.tracking import registry
+    from xq.validation.predictions import write_predictions
 
     cfg = run.cfg
     features = load_dataset(cfg, dataset_id, "features")
@@ -230,6 +233,15 @@ def run_walk_forward(
         seed=derive_seed(run.run.seed, "walk_forward", label),
         n_jobs=n_jobs,
         cache_dir=cache,
+    )
+    feature_set = read_manifest(cfg, dataset_id)["spec"]["feature_set"]
+    path = write_predictions(
+        run,
+        label,
+        output.predictions,
+        embargo=pd.Timedelta(splitter.embargo),
+        model_version=f"{spec.name}@{spec.code_version}:{model_hash}",
+        feature_set_version=f"{feature_set['name']}.{feature_set['version']}",
     )
     metrics = forecast_metrics(output.predictions, spec.task)
     registry.record_fold_results(run.engine, run.run_id, label, output.folds)
@@ -252,7 +264,9 @@ def run_walk_forward(
             },
             evaluated_on_test=True,
         )
-    return WalkForwardResult(label, model_hash, output.predictions, output.folds, metrics, trial_id)
+    return WalkForwardResult(
+        label, model_hash, output.predictions, output.folds, metrics, path, trial_id
+    )
 
 
 def forecast_metrics(predictions: pd.DataFrame, task: Task) -> dict[str, float]:

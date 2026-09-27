@@ -2,7 +2,7 @@
 
 - **Status:** accepted
 - **Date:** 2026-09-27
-- **Tasks:** WF-002 (on WF-001, EXP-003; used by BASE-005)
+- **Tasks:** WF-002, WF-003 (on WF-001, EXP-003; used by BASE-005)
 
 ## Context
 
@@ -41,7 +41,13 @@ rate; overlapping labels with no signal give chance-level results under purging.
    default the evaluation is also one trial on test folds (the whole selection procedure counts
    once, since candidates are compared on validation rows only). A caller that turns the
    forecasts into a strategy records that strategy as the trial instead.
-6. **Interim metrics.** Folds report `n`, MSE, MAE, sign hit rate and mean forecast (regression),
+6. **Prediction store (WF-003).** `run_walk_forward` writes the stitched predictions to
+   `data/predictions/<experiment_id>/<run_id>/<evaluation>-<hash>.parquet` through
+   `write_predictions`. That refuses the whole frame, writing nothing, if any decision time is not
+   strictly after its fold's `train_end + embargo`. The file is a run artifact with its SHA-256.
+   `model_version` is `<model>@<code_version>:<config hash>`; `feature_set_version` comes from the
+   dataset manifest.
+7. **Interim metrics.** Folds report `n`, MSE, MAE, sign hit rate and mean forecast (regression),
    or log loss, Brier score and accuracy (classification), until BASE-006 supplies the full
    forecast evaluation.
 
