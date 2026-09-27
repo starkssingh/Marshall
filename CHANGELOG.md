@@ -412,6 +412,12 @@ IDs from `docs/specs/development-plan.md`.
   only out-of-sample DM evidence after Holm is "useful evidence"), and `build_verdict_report`
   writes them as a deterministic report. Exercised on simulated results only; no report on real
   data exists. ADR 0043.
+- VOL-001: range estimators and ATR (`xq.research.volatility.estimators`, `config/volatility.yaml`)
+  — trailing close-to-close, Parkinson, Garman-Klass, Rogers-Satchell and Yang-Zhang per-bar
+  variances on any price basis, and Wilder's ATR in price units and relative to the close. Match
+  hand computations; on a simulated Brownian path with opening gaps the range estimators recover
+  the intraday variance and Yang-Zhang and close-to-close the total; trailing (later bars never
+  change earlier values). ADR 0044.
 
 ### Changed
 

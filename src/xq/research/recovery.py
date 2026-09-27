@@ -15,6 +15,7 @@ _STATIONARITY = "tests/unit/research/test_stats_stationarity.py"
 _DEPENDENCE = "tests/unit/research/test_stats_dependence.py"
 _VARIANCE_RATIO = "tests/unit/research/test_stats_variance_ratio.py"
 _ARIMA = "tests/unit/research/test_stats_arima.py"
+_ESTIMATORS = "tests/unit/research/test_vol_estimators.py"
 
 RECOVERY_TESTS: Mapping[str, tuple[str, ...]] = {
     "ADF": (
@@ -63,6 +64,12 @@ RECOVERY_TESTS: Mapping[str, tuple[str, ...]] = {
         f"{_ARIMA}::test_walk_forward_ar1_beats_the_benchmarks_on_identical_folds",
         f"{_ARIMA}::test_iid_returns_give_no_useful_evidence",
     ),
+    "range_estimators": (
+        f"{_ESTIMATORS}::test_estimators_match_hand_computations",
+        f"{_ESTIMATORS}::test_estimators_recover_the_variance_of_a_brownian_path",
+        f"{_ESTIMATORS}::test_estimators_are_trailing",
+    ),
+    "wilder_atr": (f"{_ESTIMATORS}::test_wilder_atr_by_hand",),
 }
 
 
