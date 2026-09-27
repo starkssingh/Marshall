@@ -973,23 +973,24 @@ class SizingConfig(FrozenModel):
 
     ``fixed_fractional`` risks `risk_per_trade` of equity to the stop; ``vol_target`` sizes the
     position to `vol_target_annual` of annualized volatility. Either is capped by the strategy's
-    requested exposure, scaled by the calibrated win probability (0 at or below
-    `probability_zero`, 1 at or above `probability_full`) and by the drawdown throttle (1 up to
-    `throttle_start`, falling linearly to 0 at `throttle_end`), then rounded down to the lot step.
+    requested exposure and, for an intent with a calibrated win probability, scaled by its edge
+    per unit of risk (ADR 0053): ``ev_r = p_lcb x TP/SL - (1 - p_lcb) - cost/SL`` with ``p_lcb``
+    the probability's lower confidence bound at `lcb_z` standard errors, and the multiplier
+    ``clip(ev_r / ev_r_full, 0, 1)``. The drawdown throttle scales it too (1 up to
+    `throttle_start`, falling linearly to 0 at `throttle_end`); then it is rounded down to the lot
+    step.
     """
 
     method: Literal["fixed_fractional", "vol_target"]
     risk_per_trade: float = Field(gt=0, le=0.05)
     vol_target_annual: float = Field(gt=0)
-    probability_zero: float = Field(ge=0, lt=1)
-    probability_full: float = Field(gt=0, le=1)
+    ev_r_full: float = Field(gt=0)
+    lcb_z: float = Field(ge=0)
     throttle_start: float = Field(ge=0, lt=1)
     throttle_end: float = Field(gt=0, le=1)
 
     @model_validator(mode="after")
     def _ordered(self) -> SizingConfig:
-        if self.probability_zero >= self.probability_full:
-            raise ValueError("probability_zero must be below probability_full")
         if self.throttle_start >= self.throttle_end:
             raise ValueError("throttle_start must be below throttle_end")
         return self

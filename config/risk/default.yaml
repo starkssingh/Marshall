@@ -1,14 +1,15 @@
-# Default risk profile of the RiskEngine (Phase 14, ADR 0052). PROVISIONAL: the owner's plan
-# defaults are the 0.5 % risk per trade and the halt at 15 % drawdown; every other value is a
-# provisional choice of ADR 0052, to be reviewed with paper trading. Changes need an ADR.
-version: risk-1
+# Default risk profile of the RiskEngine (Phase 14, ADR 0052, ADR 0053). PROVISIONAL: the owner's
+# plan defaults are the 0.5 % risk per trade and the halt at 15 % drawdown; the other values were
+# approved as provisional at the Sprint 12 A review (ADR 0053), to be reviewed with paper trading.
+# Changes need an ADR.
+version: risk-2               # risk-2: edge-per-unit-risk scaling replaces raw-p scaling (ADR 0053)
 provisional: true
 sizing:
   method: fixed_fractional     # risk `risk_per_trade` of equity to the stop; or vol_target
   risk_per_trade: 0.005        # 0.5 % of equity lost if the stop fills (owner's plan default)
   vol_target_annual: 0.10      # vol_target: 10 % annualized (the baseline board's target)
-  probability_zero: 0.5        # calibrated win probability giving zero size ...
-  probability_full: 0.6        # ... and full size (linear between, capped at 1)
+  ev_r_full: 0.25              # full size once the edge net of costs is 0.25 of the risk (ADR 0053)
+  lcb_z: 1.645                 # p_lcb = p - 1.645 x p_se (one-sided 95 %, as in SIGNAL-002)
   throttle_start: 0.05         # full size up to a 5 % drawdown ...
   throttle_end: 0.15           # ... falling linearly to zero at the 15 % halt
 limits:

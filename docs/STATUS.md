@@ -5,16 +5,18 @@ sprint and whenever a decision or carry-over item changes; anything decided in c
 recorded in an ADR and here in the same session. If a memory of an earlier conversation conflicts
 with the repository, the repository wins.
 
-- **Last updated:** 2026-09-27, at the end of Sprint 12 A (in review; ADR 0050, ADR 0051,
-  ADR 0052)
-- **Merged to `main`:** Sprints 1–6 and 11 with the revised H-0001 draft and the Sprint 5 and
-  Sprint 6 review fixes (PRs #2, #3, #6, #7, #8, #9, #10, #11, #12). Sprint 12 A is on branch
+- **Last updated:** 2026-09-27, at the start of Sprint 9 (after the owner's review of Sprint 12 A,
+  ADR 0053)
+- **Merged to `main`:** Sprints 1–6, 11 and 12 A with the revised H-0001 draft and the Sprint 5 and
+  Sprint 6 review fixes (PRs #2, #3, #6, #7, #8, #9, #10, #11, #12, #13). Sprint 9 is on branch
   `claude/nice-keller-dc5zeb`.
 
 ## Current sprint
 
-- **Sprint:** 12 A — risk and signal engines, data-independent part (ADR 0051) — **complete, in
-  review, synthetic data only**. First the Sprint 11 review decisions (ADR 0050): the
+- **Sprint:** 9 — statistical validation and robustness (ADR 0051) — **in progress, synthetic
+  data only**. The previous sprint, 12 A — risk and signal engines, data-independent part — is
+  **complete, merged in PR #13, synthetic data only**, and its review decided C-22 (ADR 0053). In
+  Sprint 12 A, first the Sprint 11 review decisions (ADR 0050): the
   reconciliation tolerance after the sizing effect (`c4c490b`), limit orders filling only on a
   trade through by at least one tick (`d835141`) and the TGT-002 closed-market fill fix
   (`fdd5261`, forward-return code version 5). Then RISK-001 … RISK-006 and SIGNAL-001 …
@@ -37,10 +39,10 @@ with the repository, the repository wins.
   the interim EWMA of signal bars). The decision-chain schemas are exported as JSON Schemas to
   `docs/specs/interfaces/`. There is no CLI for event backtests yet: they wait for real data and a
   candidate.
-- **Next:** the owner's review of Sprint 12 A (the PR), including the open points of ADR 0052
-  (C-22). After that review: Sprint 9 (VAL-003, VAL-004, VAL-006, ROB-001, ROB-002, ROB-003,
-  ROB-006, ROB-007, EXP-006), validated on simulated overfit versus genuine-edge strategies
-  (ADR 0051). Deferred with their dependencies: ROB-004, ROB-005, ROB-008 (after Sprint 9's ROB
+- **Next:** the owner's Sprint 12 A decision (C-22, ADR 0053: sizing on the edge per unit of
+  risk), then Sprint 9 (VAL-003, VAL-004, VAL-006, ROB-001, ROB-002, ROB-003, ROB-006, ROB-007,
+  EXP-006), validated on simulated noise, overfit and genuine-edge strategies (ADR 0051); it ends
+  with a PR and the owner's review. Deferred with their dependencies: ROB-004, ROB-005, ROB-008 (after Sprint 9's ROB
   tasks) and the real regime filter (REG-007, Sprint 8). Still open from earlier sprints: Claude
   implements the revised H-0001 in the board runner (C-15); with real data (C-8): the research
   halves of Sprint 5 (C-16) and Sprint 6 (C-18); then Sprints 7, 8 and 10.
@@ -52,8 +54,8 @@ with the repository, the repository wins.
   running event backtests, reconciliations or reports on real or pseudo-real data (ADR 0048);
   treating any event-tier result as evidence (synthetic quotes, placeholder costs, a provisional
   risk profile, no regime model); treating the template strategy or the synthetic test
-  forecaster as a candidate; starting Sprint 9 before the owner's review of Sprint 12 A; pushing
-  to `main`.
+  forecaster as a candidate; starting the sprints after Sprint 9 before the owner's review of
+  Sprint 9; pushing to `main`.
 - **Earlier sprint (6, merged in PR #11):** statistical and volatility research, build-only —
   STAT-001, STAT-002, STAT-003, STAT-006, STAT-008 (framework), VOL-001 … VOL-006 and BASE-003,
   each passing a recovery test on simulated processes (`xq.research.recovery.RECOVERY_TESTS`,
@@ -86,7 +88,8 @@ with the repository, the repository wins.
 | C-19 | Whether the `ar1` forecast baseline (BASE-003) joins H-0001's board, which raises its approved trial budget from 36 to 40, or is evaluated under its own pre-registered hypothesis | Sprint 6 (ADR 0045) | Owner (decision) | decided (ADR 0046): `ar1` stays off H-0001 (budget 36), stays on benchmark boards, and gets H-0002 only if STAT-002/003 find dependence on real data (C-18) |
 | C-20 | Owner review of Sprint 11's open points (ADR 0049): the weekly-close blackout length (60 min) and weekend-exit lead (30 min), provisional; the reconciliation tolerance applied to the raw equity difference, sizing included (at 100,000 USD, lot-step rounding alone can exceed 5 % of costs; reported separately); limit orders never filling better than their price; the provisional margin rate 0.05; Sprint 12's scope under ADR 0048 | Sprint 11 | Owner, then Claude | decided (ADR 0050, ADR 0051): tolerance after the sizing effect; 60-min blackout, optional weekend exit (off) and 5 % margin approved; limit orders fill only on a trade through by ≥ 1 tick, never better; Sprint 12's data-independent part now, then Sprint 9. Implemented: `c4c490b` (tolerance after sizing), `d835141` (limit trade-through) |
 | C-21 | TGT-002 forward-return labels take the first quote at or after the intended fill time even when the market is closed (a stray quote in the daily break within the fill delay), the rule the screener no longer follows (`aa88b2a`). Fixing it bumps the target code version and changes dataset hashes, so it waits for the owner's go-ahead | Sprint 11 | Owner (go-ahead), then Claude | `fdd5261` (ADR 0050): market-hours fills only, forward-return code version 5 |
-| C-22 | Owner review of Sprint 12 A's open points (ADR 0052): the provisional risk profile `risk-1` (everything but the owner's 0.5 % per trade and 15 % drawdown halt); refused intents that still close an opposite position (`risk rule:` exits); stops required on every long or short intent, widened when closer than 3 spreads and refused beyond 5 daily sigma-hats; the kill switch ignored by backtests unless given; **probability scaling on the raw calibrated p (0.5 → 0.6) suits 1:1 payoffs only — for 2:1 barriers break-even is p = 1/3, so either each strategy's profile matches its payoff or scaling moves to the edge p − SL/(TP + SL)**; the spread filter's hour-of-week median in New York time with an overall-median fallback | Sprint 12 A | Owner, then Claude | open |
+| C-22 | Owner review of Sprint 12 A's open points (ADR 0052): the provisional risk profile `risk-1` (everything but the owner's 0.5 % per trade and 15 % drawdown halt); refused intents that still close an opposite position (`risk rule:` exits); stops required on every long or short intent, widened when closer than 3 spreads and refused beyond 5 daily sigma-hats; the kill switch ignored by backtests unless given; **probability scaling on the raw calibrated p (0.5 → 0.6) suits 1:1 payoffs only — for 2:1 barriers break-even is p = 1/3, so either each strategy's profile matches its payoff or scaling moves to the edge p − SL/(TP + SL)**; the spread filter's hour-of-week median in New York time with an overall-median fallback | Sprint 12 A | Owner, then Claude | decided (ADR 0053): sizing scales on the edge per unit of risk, `clip(ev_r / ev_r_full, 0, 1)` with `ev_r = p_lcb x TP/SL - (1 - p_lcb) - cost/SL` and p_lcb the lower confidence bound; the other points approved as they stand (provisional profile values; a refused reversal still closes the opposite position; backtests may run without a kill switch). Implemented: the C-22 commit of Sprint 9 |
+| C-23 | PAPER-001 requirement: the paper and live runtimes refuse to start without a kill-switch source (a file, an environment variable or the database flag); the backtester may run without one | Sprint 12 A review (ADR 0053) | Claude, when PAPER-001 is built | open |
 
 ## Open owner decisions
 
@@ -131,7 +134,10 @@ weekend exit (off) and 5 % margin are approved provisional defaults; limit order
 the price trades through the limit by at least one tick, never better; TGT-002 closed-market
 fills are fixed now; Sprint 12's data-independent part runs next (the regime filter an interface
 with a pass-through), then Sprint 9; ROB-004, ROB-005, ROB-008 and the real regime filter wait for
-their dependencies. Sprint 12 A's own choices (ADR 0052) await the owner's review (C-22).
+their dependencies. Decided at the Sprint 12 A review (ADR 0053): position sizes scale on the edge
+per unit of risk of a calibrated probability's lower confidence bound, net of costs (replacing the
+raw-probability scaling); ADR 0052's other open points approved as they stand; the paper and live
+runtimes must refuse to start without a kill-switch source (C-23, PAPER-001).
 
 ## Provisional assumptions not yet confirmed
 
@@ -144,7 +150,7 @@ their dependencies. Sprint 12 A's own choices (ADR 0052) await the owner's revie
 | Costs (commission, slippage, financing) | placeholder model, PROVISIONAL: commission 3.5 USD/lot/side; slippage 0.5 bp + 0.1·σ̂₁ₘ, ×3 rollover window, ×2 US release; financing 6 %/yr long, 2 %/yr short (both a cost, required while provisional), act/360, triple Wednesday; spread fallback p90 | `config/costs/placeholder.yaml`, ADR 0029, ADR 0032 | broker terms, paper trading |
 | Execution latency | 1 s (market time from ADR 0026) | `config/targets.yaml` `fwd_returns.v1`, cost model | BT-001, paper trading |
 | Event-tier execution rules | margin 5 % of notional (1:20); limit orders fill at their price, never better, and only when the price trades through them by at least one tick; bar mode (no ticks) resolves a bar touching both bracket legs to the stop; entry blackouts: rollover window, US release window, last 60 min before a weekly close; optional weekend exit 30 min before it (off) | `config/base.yaml` `backtest.event`, ADR 0049, ADR 0050 (defaults approved by the owner) | broker terms, paper trading |
-| Risk profile of the event tier | `RiskEngine` with `config/risk/default.yaml` (`risk-1`, PROVISIONAL): 0.5 % of equity to the stop and the 15 % drawdown halt are the owner's plan defaults; throttle 5 %→15 %, probability scaling 0.5→0.6 (raw p, C-22), 20 lots, 3 × equity notional, 50 % margin use, 3 % daily loss, 4 h cooldown after 5 losses, 12 entries a day, stops within 3 spreads and 5 daily sigma-hats; breakers: quote older than 120 s, spread above 5 × the median of the last 500 quotes; kill switch `XQ_KILL_SWITCH`, no flattening | `config/risk/default.yaml`, ADR 0052 | paper trading; the owner's review of Sprint 12 A (C-22) |
+| Risk profile of the event tier | `RiskEngine` with `config/risk/default.yaml` (`risk-2`, PROVISIONAL, values approved as provisional in ADR 0053): 0.5 % of equity to the stop and the 15 % drawdown halt are the owner's plan defaults; edge-per-unit-risk scaling with `ev_r_full` 0.25 and `lcb_z` 1.645; throttle 5 %→15 %, 20 lots, 3 × equity notional, 50 % margin use, 3 % daily loss, 4 h cooldown after 5 losses, 12 entries a day, stops within 3 spreads and 5 daily sigma-hats; breakers: quote older than 120 s, spread above 5 × the median of the last 500 quotes; kill switch `XQ_KILL_SWITCH`, no flattening | `config/risk/default.yaml`, ADR 0052, ADR 0053 | paper trading |
 | Sigma-hat in the event tier | a supplied daily series, else the interim EWMA of signal-bar log returns (span 96, known after 20 returns, scaled by the square root of the signal bars in a 23-hour day); strategies' stops at `stop_sigmas` (3) of it | ADR 0052 | a VOL-006 selection on real data (C-18) |
 | Regime filter | PLACEHOLDER pass-through: accepts a `RegimeState`, blocks nothing, says so in every signal record | `xq.signals.filters`, ADR 0051, ADR 0052 | REG-007 (Sprint 8) |
 | Maximum fill delay | 300 s | `fwd_returns.v1`, cost model | ADR 0026: kept, provisional |
@@ -209,8 +215,6 @@ their dependencies. Sprint 12 A's own choices (ADR 0052) await the owner's revie
 - Event-tier results are engineering tests on synthetic quotes with placeholder costs and a
   provisional risk profile; no forecasting model or regime model exists, so the signal engine has
   run only on a synthetic stub forecaster declared calibrated (SIGNAL-005).
-- The risk engine's probability scaling uses the raw calibrated p (0.5 → 0.6), meaningful for 1:1
-  payoffs; asymmetric barriers need a matching profile or edge-based scaling (C-22).
 - Risk halts stop new exposure, not the strategy's intents: while a halt holds, a strategy keeps
   sending intents that are rejected (all recorded). Consecutive losing round trips keep counting
   during a cooldown when risk-forced exits close at a loss, which extends the cooldown.

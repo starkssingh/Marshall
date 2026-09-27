@@ -619,6 +619,17 @@ IDs from `docs/specs/development-plan.md`.
 
 ### Changed
 
+- C-22 (owner's decision, ADR 0053): position sizing scales on the edge per unit of risk instead
+  of the raw calibrated probability — `ev_r = p_lcb x TP/SL - (1 - p_lcb) - round_trip_cost/SL`
+  with `p_lcb` the probability's lower confidence bound, and the multiplier
+  `clip(ev_r / ev_r_full, 0, 1)`; `ev_r_full` (0.25) and `lcb_z` (1.645) are provisional profile
+  values (`risk-2`). The risk engine takes its own bound and prices the round trip with its own cost
+  model (`CostModel.round_trip_cost_bps`, shared with the signal engine); an intent with a
+  probability needs its standard error (`TradeIntent.p_se`) and a target. Tested: 1:1 and 2:1
+  payoffs at break-even get no size, a 2:1 trade at p = 0.45 gets a positive one, costs and
+  uncertainty shrink it, and the limit properties still hold; the forecast-to-fill run uses the
+  default profile.
+
 - EDA-006 holding periods are TGT-002's (ADR 0040, owner review of PR #9): candidates are TGT-002
   horizon labels; from every market-open decision of a 1m bar on a 5-minute grid, the move over h
   of market time is computed by `xq.targets.returns.compute` (mid) on quotes rebuilt from the 1m

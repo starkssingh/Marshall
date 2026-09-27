@@ -17,9 +17,10 @@ one of them in a `SignalRecord`, including the rejected ones with their reasons:
    (with the conservative lower bound of p when the strategy asks for it);
 4. every configured filter (SIGNAL-003) must let it through;
 5. of the candidates left, the one with the highest EV_net becomes a `TradeIntent` (market entry,
-   the strategy's requested exposure, the candidate's stop, target and time stop, and its
-   calibrated probability for the risk engine's scaling); a candidate on the side already held is
-   not selected. The others are recorded as not selected.
+   the strategy's requested exposure, the candidate's stop, target and time stop, and the
+   forecast's calibrated probability with its standard error, from which the risk engine prices
+   the edge it sizes on, ADR 0053); a candidate on the side already held is not selected. The
+   others are recorded as not selected.
 
 The engine never sizes: sizing, limits and the stop policy are the risk engine's (RISK-005), which
 decides every intent. Thresholds come from the YAML and are chosen on validation folds only (plan
@@ -29,7 +30,6 @@ Phase 15).
 from __future__ import annotations
 
 import itertools
-import math
 from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import timedelta
@@ -43,7 +43,6 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 from xq.backtest.costs import CostModel
 from xq.core.config import SessionsConfig
 from xq.core.time import from_ns, to_ns
-from xq.data.calendar import regular_trading_day
 from xq.signals.ev import cost_in_sigmas, expected_value
 from xq.signals.filters import (
     BlackoutFilter,
@@ -60,7 +59,6 @@ from xq.signals.filters import (
 from xq.signals.schema import Forecast, RegimeState, SignalCandidate, SignalRecord, TradeIntent
 
 Side = Literal["long", "short"]
-_BPS = 1e-4
 UNCALIBRATED = "uncalibrated forecast: refused (SIGNAL-004)"
 
 
@@ -184,7 +182,6 @@ class SignalEngine:
         self.spec = spec
         self.costs = costs
         self.spreads = HourOfWeekSpreads(spec.filters.spread.min_obs if spec.filters.spread else 1)
-        self._minutes_per_day = regular_trading_day(sessions) / pd.Timedelta(minutes=1)
         filters = spec.filters
         self.filters: list[SignalFilter] = [
             regime_filter if regime_filter is not None else PassThroughRegimeFilter(filters.regimes)
@@ -205,18 +202,6 @@ class SignalEngine:
     def observe_spread(self, ts: int, spread: float) -> None:
         """A spread known from `ts` on, for the hour-of-week reference (after deciding at `ts`)."""
         self.spreads.observe(ts, spread)
-
-    def round_trip_cost_bps(self, ts: int, bid: float, ask: float, sigma_daily: float) -> float:
-        """Spread plus twice the slippage and commission of the cost model, in bps of the mid.
-
-        The slippage's sigma term takes the daily sigma-hat scaled to one minute of market time.
-        """
-        mid = (bid + ask) / 2
-        sigma_1m_bps = sigma_daily / math.sqrt(self._minutes_per_day) / _BPS
-        slippage = self.costs.slippage_bps_at(ts, sigma_1m_bps)
-        contract = float(self.costs.instrument.contract_size)
-        commission = float(self.costs.commission_usd([1.0], [mid])[0]) / (contract * mid) / _BPS
-        return (ask - bid) / mid / _BPS + 2 * slippage + 2 * commission
 
     def decide(
         self,
@@ -271,7 +256,7 @@ class SignalEngine:
             if b.reasons:
                 records.append(SignalRecord(**fields, outcome="rejected", reasons=tuple(b.reasons)))
             elif b is chosen:
-                intent = self._intent(b.candidate, b.record_id)
+                intent = self._intent(b.candidate, b.record_id, forecast)
                 intents.append(intent)
                 records.append(SignalRecord(**fields, outcome="intent", intent=intent))
             elif b.sign == held:
@@ -310,7 +295,7 @@ class SignalEngine:
         stop = entry - sign * barriers.sl_sigmas * sigma * entry
         target = entry + sign * barriers.tp_sigmas * sigma * entry
         # without a daily sigma-hat the slippage's sigma term uses the forecast's
-        cost_bps = self.round_trip_cost_bps(ts, bid, ask, sigma_daily or sigma)
+        cost_bps = self.costs.round_trip_cost_bps(ts, bid, ask, sigma_daily or sigma)
         cost = cost_in_sigmas(cost_bps, sigma)
         conservative = spec.ev.conservative
         p_se = forecast.p_se if conservative is not None else None
@@ -351,14 +336,17 @@ class SignalEngine:
         )
         return _Built(candidate, record_id, reasons, ev.reasons)
 
-    def _intent(self, candidate: SignalCandidate, record_id: str) -> TradeIntent:
+    def _intent(
+        self, candidate: SignalCandidate, record_id: str, forecast: Forecast
+    ) -> TradeIntent:
         return TradeIntent(
             direction=candidate.direction,
             exposure=self.spec.exposure,
             stop=candidate.stop,
             target=candidate.target,
             time_stop=candidate.ts + candidate.horizon,
-            p_win=candidate.p_win,
+            p_win=candidate.p_forecast,
+            p_se=forecast.p_se,
             calibrated=True,
             strategy_id=self.spec.strategy_id,
             signal_id=record_id,

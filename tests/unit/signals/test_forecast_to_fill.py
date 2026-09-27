@@ -14,10 +14,10 @@ import pytest
 from helpers.event_backtest import (
     CAPITAL,
     CLOCK,
+    RISK,
     SESSIONS,
     exact_costs,
     random_quotes,
-    risk_engine,
 )
 from helpers.pipeline import REPO
 from xq.backtest.engine import EventBacktestResult, MarketData, StrategyContext, run_event_backtest
@@ -29,9 +29,6 @@ from xq.signals.engine import UNCALIBRATED, SignalEngine, load_strategy_spec
 from xq.signals.schema import Forecast
 
 SPEC = load_strategy_spec(REPO / "experiments" / "configs" / "strategies" / "template_barrier.yaml")
-#: The template's 2:1 barriers break even at p = 1/3: the risk profile's probability scaling is
-#: set to match (zero size at 0.34, full at 0.5) — the default 0.5 -> 0.6 assumes 1:1 payoffs.
-RISK = risk_engine(sizing={"probability_zero": 0.34, "probability_full": 0.5})
 HORIZON_DAYS = 4 / 23  # four hours of a 23-hour trading day
 
 
@@ -136,15 +133,16 @@ def test_every_candidate_is_recorded_and_every_intent_is_its_records(
         assert (detail["stop"], detail["target"]) == (record.intent.stop, record.intent.target)
         assert record.candidate.ts == pd.Timestamp(row["ts"])  # decided when forecast
         assert all(f.ts == record.candidate.ts for f in record.forecasts)
-    # the risk engine sized every signal on its calibrated probability
+    # the default profile sizes these 2:1 trades on their edge per unit of risk (ADR 0053)
     decisions = ledger.loc[ledger["kind"] == "decision"]
     signal_decisions = decisions.loc[decisions["intent_id"].isin(intents["intent_id"])]
-    scales = signal_decisions["detail"].map(
-        lambda d: json.loads(d)["limits_snapshot"].get("probability_scale")
-    )
-    sized = scales.dropna().to_numpy(np.float64)
-    assert len(sized) > 0
-    assert (sized < 1).any()
+    snapshots = signal_decisions["detail"].map(lambda d: json.loads(d)["limits_snapshot"])
+    edges = snapshots.map(lambda s: s.get("ev_r")).dropna().to_numpy(np.float64)
+    scales = snapshots.map(lambda s: s.get("edge_scale")).dropna().to_numpy(np.float64)
+    assert len(edges) > 0
+    assert (scales > 0).any()
+    assert ((scales >= 0) & (scales <= 1)).all()
+    np.testing.assert_allclose(scales, np.clip(edges / RISK.config.sizing.ev_r_full, 0, 1))
 
 
 def test_uncalibrated_forecasts_never_reach_the_risk_engine() -> None:

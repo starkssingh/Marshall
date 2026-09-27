@@ -17,6 +17,11 @@ conservative assumptions, not broker terms (ADR 0029).
   long or short rate by the position's sign, three times on the configured weekday.
 - **Latency**: orders arrive ``latency_ms`` of market time after the decision; a fill more than
   ``max_fill_delay_s`` after that is missed.
+- **Round trip** (`round_trip_cost_bps`): the expected cost of entering and leaving at the current
+  quote, for decisions — the spread, plus twice the slippage and the commission, in basis points of
+  the mid; the slippage's sigma term takes the daily sigma-hat scaled to one minute of market time
+  (the square root of the minutes in a regular trading day). The signal engine prices EV with it
+  and the risk engine the edge it sizes on, from the same model the fills use.
 
 Amounts are USD (the quote currency of XAUUSD); a positive cost reduces P&L. A provisional model
 charges financing on both sides (ADR 0032), and every net result computed with it carries
@@ -35,7 +40,7 @@ from sqlalchemy import Engine
 from xq.core.config import WEEKDAYS, AppConfig, CostModelConfig, InstrumentSpec, SessionsConfig
 from xq.core.errors import ConfigError
 from xq.core.time import local_time_to_utc, trading_day, trading_day_bounds
-from xq.data.calendar import MarketCalendar
+from xq.data.calendar import MarketCalendar, regular_trading_day
 from xq.data.spreads import NoSpreadDataError, hour_of_week, latest_spread_stats
 from xq.datasets.calendar_columns import calendar_columns
 
@@ -141,6 +146,19 @@ class CostModel:
                 value = self.config.slippage.multipliers[key]
                 multiplier = np.where(inside, np.maximum(multiplier, value), multiplier)
         return multiplier
+
+    def round_trip_cost_bps(self, ts: int, bid: float, ask: float, sigma_daily: float) -> float:
+        """Expected cost of a round trip at this quote, in bps of the mid (module docstring)."""
+        if ask < bid or bid <= 0:
+            raise ValueError("a round trip needs a positive, uncrossed quote")
+        if sigma_daily < 0:
+            raise ValueError("sigma must not be negative")
+        mid = (bid + ask) / 2
+        minutes = regular_trading_day(self.sessions) / pd.Timedelta(minutes=1)
+        slippage = self.slippage_bps_at(ts, sigma_daily / np.sqrt(minutes) / _BPS)
+        contract = float(self.instrument.contract_size)
+        commission = float(self.commission_usd([1.0], [mid])[0]) / (contract * mid) / _BPS
+        return float((ask - bid) / mid / _BPS + 2 * slippage + 2 * commission)
 
     def slippage_bps_at(self, ts: int, sigma_1m_bps: float) -> float:
         """`slippage_bps` of one fill at `ts` (UTC nanoseconds), for the event tier.

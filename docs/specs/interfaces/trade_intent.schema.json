@@ -1,6 +1,6 @@
 {
   "additionalProperties": false,
-  "description": "The position a strategy wants, before any risk decision (module docstring).\n\n``flat`` closes the position (market order, no exposure, no bracket). ``long`` and ``short``\nask for ``exposure`` (> 0, a fraction of equity) on that side, entered by ``entry_type``;\n``limit``/``stop`` entries need ``limit_price``. ``stop`` and ``target`` form an OCO bracket\non the whole resulting position; ``time_stop`` closes it at that instant (or at the next\nopen). ``p_win`` is the probability that the trade reaches its target first; the risk engine\nscales the size by it only when ``calibrated`` is true and refuses an uncalibrated one.",
+  "description": "The position a strategy wants, before any risk decision (module docstring).\n\n``flat`` closes the position (market order, no exposure, no bracket). ``long`` and ``short``\nask for ``exposure`` (> 0, a fraction of equity) on that side, entered by ``entry_type``;\n``limit``/``stop`` entries need ``limit_price``. ``stop`` and ``target`` form an OCO bracket\non the whole resulting position; ``time_stop`` closes it at that instant (or at the next\nopen). ``p_win`` is the probability that the trade reaches its target first and ``p_se`` its\nstandard error; the risk engine sizes on the edge they imply (its lower confidence bound\nagainst the target, the stop and the costs, ADR 0053) only when ``calibrated`` is true, and\nrefuses an uncalibrated probability, or one without a standard error or a target.",
   "properties": {
     "calibrated": {
       "default": false,
@@ -69,6 +69,19 @@
       ],
       "default": null,
       "title": "Limit Price"
+    },
+    "p_se": {
+      "anyOf": [
+        {
+          "minimum": 0,
+          "type": "number"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "P Se"
     },
     "p_win": {
       "anyOf": [

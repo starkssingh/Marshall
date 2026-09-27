@@ -53,7 +53,7 @@ def risk_engine(
             "kill_switch": config.kill_switch.model_copy(update=kill_switch or {}),
         }
     )
-    return RiskEngine(changed, INSTRUMENT, margin_rate=0.05)
+    return RiskEngine(changed, INSTRUMENT, margin_rate=0.05, costs=RISK.costs)
 
 
 #: The real risk engine with halts that never bind in a test's few days — for tests of other
