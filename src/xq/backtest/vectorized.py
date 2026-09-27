@@ -8,11 +8,11 @@ into fills, daily P&L and trades:
   mid price of its fill; while the target is unchanged, the lots are unchanged (no rebalancing).
   This is a research screener: the event-driven tier (BT-004+) routes orders through the risk
   engine, which sizes them.
-- **Fills** happen at the first quote at or after ``latency`` of *market time* after the decision,
-  on the correct side — buy at the ask, sell at the bid — plus slippage. Never at the signal bar's
-  close, never at mid. If that quote comes more than ``max_fill_delay`` after the intended time,
-  the trade is missed and the position stays; the next decision tries again from the position
-  actually held.
+- **Fills** happen at the first quote at or after ``latency`` of *market time* after the decision
+  that lies in market hours, on the correct side — buy at the ask, sell at the bid — plus
+  slippage. Never at the signal bar's close, never at mid, never on a quote while the market is
+  closed. If that quote comes more than ``max_fill_delay`` after the intended time, the trade is
+  missed and the position stays; the next decision tries again from the position actually held.
 - **Decisions taken while the market is closed** (the 17:00 close itself, the daily break,
   weekends, holidays) place no order at all — no entry, no exit, no change (ADR 0032). The
   position held stays until the next decision taken while the market is open; the skipped
@@ -121,8 +121,7 @@ def run_vectorized(
 
     market_open = clock.is_open(t) if len(t) else np.array([], dtype=bool)
     intended = clock.advance(t, costs.latency.value) if len(t) else np.array([], np.int64)
-    quote = np.searchsorted(ts, intended, side="left")
-    found = (quote < len(ts)) & (intended != NAT_NS)
+    quote, found = _first_open_quote(ts, intended, clock)
     timely = np.zeros(len(t), dtype=bool)
     timely[found] = ts[quote[found]] - intended[found] <= costs.max_fill_delay.value
 
@@ -180,10 +179,8 @@ def required_quotes(
     keep = [np.array([len(ts) - 1], dtype=np.int64)]
     t = _ns(pd.DatetimeIndex(decisions))
     if len(t):
-        intended = clock.advance(t, costs.latency.value)
-        intended = intended[intended != NAT_NS]
-        first = np.searchsorted(ts, intended, side="left")
-        keep.append(first[first < len(ts)])
+        first, found = _first_open_quote(ts, clock.advance(t, costs.latency.value), clock)
+        keep.append(first[found])
     days = np.unique(trading_days(pd.DatetimeIndex(quotes["ts_utc"])))
     ends = np.array([trading_day_bounds(d.item())[1].value for d in days], dtype=np.int64)
     first_quote = pd.Timestamp(int(ts[0]), tz="UTC")
@@ -395,6 +392,27 @@ def _trades(
         )
     columns = ["entry_time", "exit_time", "side", "max_lots", "pnl", "open"]
     return pd.DataFrame(records, columns=columns)
+
+
+def _first_open_quote(
+    ts: IntArray, intended: IntArray, clock: MarketClock
+) -> tuple[IntArray, npt.NDArray[np.bool_]]:
+    """Row of the first quote at or after each intended time that lies in market hours.
+
+    A quote while the market is closed (a stray quote in the daily break, say) is never a fill
+    quote; quotes outside the clock's range cannot be judged and are not used either. Returns the
+    rows (0 where there is none) and whether one was found.
+    """
+    usable = np.zeros(len(ts), dtype=bool)
+    inside = (ts >= clock.covered_from) & (ts < clock.covered_to)
+    if inside.any():
+        usable[inside] = clock.is_open(ts[inside])
+    rows = np.flatnonzero(usable)
+    k = np.searchsorted(ts[rows], intended, side="left")
+    found = (k < len(rows)) & (intended != NAT_NS)
+    quote = np.zeros(len(intended), dtype=np.int64)
+    quote[found] = rows[k[found]]
+    return quote, found
 
 
 def _checked_positions(positions: pd.Series) -> pd.DatetimeIndex:

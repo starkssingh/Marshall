@@ -640,6 +640,11 @@ IDs from `docs/specs/development-plan.md`.
 
 ### Fixed
 
+- BT-002 screener: a quote while the market is closed (a stray quote in the daily break, for
+  example) is never a fill quote; the fill is the first quote at or after the intended time that
+  lies in market hours, or the trade is missed. Before, a closed-market quote within the fill
+  delay could fill a decision taken just before the close. Found while reconciling the screener
+  with the event tier, which never fills while closed (BT-005, BT-009).
 - ARCH-008 Docker test stage: the image now copies `docs/`, so the EXP-005 test that reads the
   committed research log (`docs/research/log.md`) passes inside it; the CI `docker` job had failed
   on `main` since Sprint 5 (PR #9) with `FileNotFoundError` for that file.

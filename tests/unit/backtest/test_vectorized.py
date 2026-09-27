@@ -157,6 +157,21 @@ def test_an_exit_decided_while_closed_is_not_executed() -> None:
     assert result.fills["position_lots"].iloc[1] == 0.0
 
 
+def test_a_quote_while_the_market_is_closed_is_never_a_fill_quote() -> None:
+    # decided at 16:59:58 New York; the only quote within the fill delay is a stray one at 17:01,
+    # after the close: the order is missed, as in the event tier (BT-005), not filled there
+    q = quotes(
+        ("2024-03-12 20:59:30", 1999.9, 2000.1),
+        ("2024-03-12 21:01:00", 1999.9, 2000.1),  # the daily break
+        ("2024-03-12 22:00:05", 2001.9, 2002.1),  # reopen, too late for a 300 s delay
+    )
+    result = screen(positions(("2024-03-12 20:59:58", 1.0)), q)
+    assert result.fills.empty
+    assert result.missed.tolist() == [at("2024-03-12 20:59:58")]
+    keep = required_quotes(q, pd.DatetimeIndex([at("2024-03-12 20:59:58")]), COSTS, CLOCK)
+    assert 1 not in keep.tolist()  # the stray quote is never read
+
+
 def test_a_side_flip_closes_one_trade_and_opens_another() -> None:
     q = quotes(
         ("2024-03-12 14:00:02", 1999.9, 2000.1),
