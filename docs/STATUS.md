@@ -5,73 +5,101 @@ sprint and whenever a decision or carry-over item changes; anything decided in c
 recorded in an ADR and here in the same session. If a memory of an earlier conversation conflicts
 with the repository, the repository wins.
 
-- **Last updated:** 2026-09-27, after Sprint 9 was merged (PR #14; C-22 decided and implemented
-  at its start, ADR 0053)
+- **Last updated:** 2026-09-27, at the end of Sprint 12 B (in review on branch
+  `claude/friendly-rubin-6pp1zt`): the owner's Sprint 9 review decisions (C-24, ADR 0055), then
+  ROB-004, ROB-005, ROB-008 and `xq validate-strategy` (ADR 0056)
 - **Merged to `main`:** Sprints 1–6, 9, 11 and 12 A with the revised H-0001 draft and the Sprint 5
   and Sprint 6 review fixes (PRs #2, #3, #6, #7, #8, #9, #10, #11, #12, #13, #14).
 
 ## Current sprint
 
-- **Sprint:** 9 — statistical validation and robustness (ADR 0051, ADR 0054) — **complete, merged
-  in PR #14, synthetic data only**; its open points (C-24) wait for the owner's review. First the owner's Sprint 12 A decision C-22: sizing on the edge
-  per unit of risk (`5ab2678`, ADR 0053). Then, one commit each: VAL-003 PBO by CSCV (`b516a07`),
-  VAL-004 Reality Check, SPA and Romano–Wolf (`1dc1fbc`), VAL-006 Holm and Benjamini–Hochberg per
-  family (`2a95486`), ROB-001 parameter perturbation (`6403286`), ROB-002 cost and latency stress
-  (`87457ae`), ROB-003 block bootstrap and trade permutation (`2dd5412`), ROB-006 slicing read
-  from the pre-registered hypothesis (`d8db5d9`), ROB-007 execution delay (`3d0c4fb`) and EXP-006
-  `xq exp reproduce` (`ffe51a1`). Every method is proven on simulated strategies with known truth
-  (noise-only families, a single-point optimum on noise, a genuine trend edge, planted edges) and
-  listed in the recovery registry; its open points are C-24. **Nothing has run on real data.** The
-  previous sprint, 12 A — risk and signal engines, data-independent part — is **complete, merged
-  in PR #13, synthetic data only**. In Sprint 12 A, first the Sprint 11 review decisions
-  (ADR 0050): the
-  reconciliation tolerance after the sizing effect (`c4c490b`), limit orders filling only on a
-  trade through by at least one tick (`d835141`) and the TGT-002 closed-market fill fix
-  (`fdd5261`, forward-return code version 5). Then RISK-001 … RISK-006 and SIGNAL-001 …
-  SIGNAL-005 (ADR 0052), one commit each. The Sprint 11 placeholder risk approver is **removed
-  and replaced by the real `RiskEngine` everywhere**; the regime filter is an interface with only
-  a clearly marked PLACEHOLDER pass-through, since no regime model exists (REG-007, Sprint 8).
-  The previous sprint, 11 — event-driven backtester — was merged in PR #12. **Nothing has run on
-  real data.**
-- **Working system:** library code, exercised by the tests. The event backtester
-  (`run_event_backtest`, tick or bar mode) now runs the whole chain the plan prescribes:
-  forecasts → `SignalEngine` (a strategy defined entirely by YAML; uncalibrated, stale and
-  filtered forecasts refused; EV in sigma units with a conservative variant; a `SignalRecord` for
-  every candidate) → `TradeIntent` → session constraints → `RiskEngine.evaluate` (pure; risk
-  state rebuilt from the ledger; fixed-fractional or volatility-target sizing with the
-  calibrated-probability and drawdown scaling; stop policy; halts at their exact thresholds;
-  caps; kill switch and data-health breakers; exits always approved) → `OrderIntent` (only from an
-  approved decision the risk engine issued — enforced at runtime and by an AST architectural
-  test) → `SimulatedBroker` → `Portfolio` → `Ledger`; `SignalStrategy.audit` traces every fill
-  back to its forecasts. Stops everywhere are in sigma-hat units (a supplied daily sigma-hat or
-  the interim EWMA of signal bars). The decision-chain schemas are exported as JSON Schemas to
-  `docs/specs/interfaces/`. There is no CLI for event backtests yet: they wait for real data and a
-  candidate. Sprint 9 adds the validation and robustness library: `xq.validation.pbo`,
-  `xq.validation.spa`, `xq.validation.multiple_testing`, and `xq.robustness.perturb`,
-  `costs_stress`, `bootstrap`, `slicing` and `delay`. Each gives its R2 check from
-  `config/gates.yaml` through `GatesConfig.criterion` where a gate applies. `xq exp reproduce
-  <run_id>` rebuilds a run's dataset, reruns it (baseline-board runs) and compares every metric
-  within tolerance. **Not built:** `xq validate-strategy <run_id>`, which the plan's Sprint 9
-  "working system" names but no Sprint 9 task covers. The robustness report and score are ROB-008,
-  and the full statistical report goes with GATE-001 (C-24).
-- **Next:** the owner's review of Sprint 9 (C-24), then the owner chooses the next sprint. Sprint
-  9's ROB tasks unblock ROB-004, ROB-005 and ROB-008 (Sprint 12's remaining part, with
-  `xq validate-strategy` if the owner wants it there); the real regime filter waits for REG-007
-  (Sprint 8). Still open from earlier sprints: Claude
-  implements the revised H-0001 in the board runner (C-15); with real data (C-8): the research
-  halves of Sprint 5 (C-16) and Sprint 6 (C-18); then Sprints 7, 8 and 10.
-- **Not allowed yet:** running H-0001 (or any board) on real data before the owner has approved
-  and registered it; generating an EDA report, a statistical verdict report or a volatility board
-  on real or pseudo-real data, or writing values to `config/horizons.yaml`, before the owner
-  allows it (ADR 0035, Sprint 6 instruction); promoting a volatility forecaster or replacing the
-  interim sigma-hat (ADR 0044); registering H-0000 before real data fixes its windows (ADR 0041);
-  running event backtests, reconciliations or reports on real or pseudo-real data (ADR 0048);
-  treating any event-tier result as evidence (synthetic quotes, placeholder costs, a provisional
-  risk profile, no regime model); treating the template strategy or the synthetic test
-  forecaster as a candidate; running the Sprint 9 validation or robustness methods on real or
-  pseudo-real results, or citing their output as evidence, before a candidate exists and the
-  owner allows it; starting the sprints after Sprint 9 before the owner's review of Sprint 9;
-  pushing to `main`.
+- **Sprint:** 12 B — the Sprint 9 review decisions and the rest of Sprint 12 (ROB-004, ROB-005,
+  ROB-008) with `xq validate-strategy` (ADR 0055, ADR 0056) — **complete, in review, synthetic
+  data only**.
+  - First, `STATUS` recorded Sprint 9 as merged in PR #14 (`21db00d`).
+  - Then the owner's C-24 decisions, one commit each with tests (ADR 0055):
+    1. SPA and the Reality Check always use the gates' bootstrap convention; the size re-run
+       still over-rejects, so a per-sample size check puts "test over-rejects on this sample" on
+       the gate result (`468b2f0`);
+    2. BT-003 drawdowns start from the capital (`6ca4562`);
+    3. the neighbourhood gate reads the full ±20 % grid, with a seeded sample of 243 points above
+       3^5, a one-at-a-time table and a failing ridge test (`acb47b1`);
+    4. slice names are validated at registration, and volatility terciles are labelled
+       "descriptive, cut ex post" (`b22a50d`);
+    5. a reproduction is REPRODUCED only on the same git sha, config hash and lock hash, otherwise
+       RERUN_DIFFERENT_CODE (`cf12d15`).
+  - Then, one commit each (ADR 0056):
+    - ROB-004, Monte Carlo through the real `RiskEngine` (`0cf6137`);
+    - ROB-005, noise injection (`fa556fa`);
+    - ROB-008, the robustness report and score, with the known-truth simulated strategies
+      (`15047ad`);
+    - `xq validate-strategy` with `xq robustness simulate`, the R1 best-baseline test, the R2
+      decay test and the `stat_tests` and `robustness_results` tables (`fe627fa`);
+    - a fix to that decay test, which now regresses walk-forward fold means. The daily
+      Newey–West version over-rejected genuine edges that drift in regimes (`bbb4d70`).
+  - Validated on simulated strategies only: a recorded genuine trend edge passes R1 and R2, and a
+    recorded single-point optimum on noise fails R2. The new open points are C-25. **Nothing has
+    run on real data.**
+  - The previous sprint, 9 (statistical validation and robustness, ADR 0054), was merged in PR
+    #14; 12 A (risk and signal engines, ADR 0052, ADR 0053) in PR #13; 11 (event-driven
+    backtester) in PR #12.
+- **Working system:** library code and CLI, exercised by the tests.
+  - **Event backtester** (`run_event_backtest`, tick or bar mode). It runs the whole chain the
+    plan prescribes:
+    - forecasts go to the `SignalEngine`: a strategy defined entirely by YAML, uncalibrated,
+      stale and filtered forecasts refused, EV in sigma units with a conservative variant, and a
+      `SignalRecord` for every candidate;
+    - a `TradeIntent` then passes session constraints and `RiskEngine.evaluate`: pure, risk state
+      rebuilt from the ledger, sizing on the edge per unit of risk with drawdown scaling, the
+      stop policy, halts at their exact thresholds, caps, the kill switch and data-health
+      breakers, exits always approved;
+    - an approved decision becomes an `OrderIntent`, only from a decision the risk engine issued
+      (enforced at runtime and by an AST architectural test), and goes through the
+      `SimulatedBroker`, the `Portfolio` and the `Ledger`.
+
+    There is no CLI for event backtests yet: they wait for real data and a candidate.
+  - **Validation and robustness library** (Sprint 9): PBO, SPA, Reality Check and Romano–Wolf,
+    Holm and Benjamini–Hochberg, parameter perturbation, cost stress, block bootstrap, slicing and
+    execution delay.
+  - **Added this sprint:**
+    - ROB-004, Monte Carlo equity replayed through the real risk engine;
+    - ROB-005, noise injection;
+    - ROB-008, the robustness report and score over seven R2 robustness gates;
+    - `xq robustness simulate --truth genuine|overfit`, which records a known-truth simulated
+      strategy as a run (synthetic, always exploratory);
+    - `xq validate-strategy <run_id>`, the combined significance and robustness report with R1
+      and R2 verdicts (`pass`, `fail` or `incomplete`). It writes `reports/validation/` and the
+      `stat_tests` and `robustness_results` tables. Its subject adapter exists only for
+      `simulated_strategy` runs; baseline-board runs are refused by name until their adapter is
+      built (C-25).
+  - `xq exp reproduce <run_id>` rebuilds a baseline-board run's dataset, reruns it and reports
+    REPRODUCED, NOT_REPRODUCED or RERUN_DIFFERENT_CODE.
+  - Validation and robustness settings are in `config/validation.yaml`; the thresholds stay in
+    `config/gates.yaml`.
+- **Next:** the owner's review of Sprint 12 B (C-25), then the owner chooses the next sprint.
+  - Candidate follow-ups in Claude's scope: the baseline-board subject adapter for
+    `xq validate-strategy` (C-25), and the revised H-0001 in the board runner (C-15).
+  - With real data (C-8): the research halves of Sprint 5 (C-16) and Sprint 6 (C-18), then
+    Sprints 7, 8, 10 and 13.
+  - The real regime filter waits for REG-007 (Sprint 8).
+- **Not allowed yet:**
+  - running H-0001 (or any board) on real data before the owner has approved and registered it;
+  - generating an EDA report, a statistical verdict report or a volatility board on real or
+    pseudo-real data, or writing values to `config/horizons.yaml`, before the owner allows it
+    (ADR 0035, Sprint 6 instruction);
+  - promoting a volatility forecaster or replacing the interim sigma-hat (ADR 0044);
+  - registering H-0000 before real data fixes its windows (ADR 0041);
+  - running event backtests, reconciliations or reports on real or pseudo-real data (ADR 0048);
+  - treating any event-tier result as evidence (synthetic quotes, placeholder costs, a
+    provisional risk profile, no regime model);
+  - treating the template strategy, the synthetic test forecaster or a simulated strategy as a
+    candidate;
+  - running the validation or robustness methods, or `xq validate-strategy`, on real or
+    pseudo-real results, or citing their output as evidence, before a candidate exists and the
+    owner allows it;
+  - recording simulated strategies under a real hypothesis's family;
+  - starting the next sprint before the owner's review of Sprint 12 B;
+  - pushing to `main`.
 - **Earlier sprint (6, merged in PR #11):** statistical and volatility research, build-only —
   STAT-001, STAT-002, STAT-003, STAT-006, STAT-008 (framework), VOL-001 … VOL-006 and BASE-003,
   each passing a recovery test on simulated processes (`xq.research.recovery.RECOVERY_TESTS`,
@@ -106,7 +134,8 @@ with the repository, the repository wins.
 | C-21 | TGT-002 forward-return labels take the first quote at or after the intended fill time even when the market is closed (a stray quote in the daily break within the fill delay), the rule the screener no longer follows (`aa88b2a`). Fixing it bumps the target code version and changes dataset hashes, so it waits for the owner's go-ahead | Sprint 11 | Owner (go-ahead), then Claude | `fdd5261` (ADR 0050): market-hours fills only, forward-return code version 5 |
 | C-22 | Owner review of Sprint 12 A's open points (ADR 0052): the provisional risk profile `risk-1` (everything but the owner's 0.5 % per trade and 15 % drawdown halt); refused intents that still close an opposite position (`risk rule:` exits); stops required on every long or short intent, widened when closer than 3 spreads and refused beyond 5 daily sigma-hats; the kill switch ignored by backtests unless given; **probability scaling on the raw calibrated p (0.5 → 0.6) suits 1:1 payoffs only — for 2:1 barriers break-even is p = 1/3, so either each strategy's profile matches its payoff or scaling moves to the edge p − SL/(TP + SL)**; the spread filter's hour-of-week median in New York time with an overall-median fallback | Sprint 12 A | Owner, then Claude | decided (ADR 0053): sizing scales on the edge per unit of risk, `clip(ev_r / ev_r_full, 0, 1)` with `ev_r = p_lcb x TP/SL - (1 - p_lcb) - cost/SL` and p_lcb the lower confidence bound; the other points approved as they stand (provisional profile values; a refused reversal still closes the opposite position; backtests may run without a kill switch). Implemented: the C-22 commit of Sprint 9 |
 | C-23 | PAPER-001 requirement: the paper and live runtimes refuse to start without a kill-switch source (a file, an environment variable or the database flag); the backtester may run without one | Sprint 12 A review (ADR 0053) | Claude, when PAPER-001 is built | open |
-| C-24 | Owner review of Sprint 9's open points (ADR 0054). (1) SPA and the Reality Check over-reject under strong serial dependence in short samples (AR(1) φ = 0.4, 400 periods: 15 % and 20 % at a 10 % level); test such families on non-overlapping periods. (2) The ±20 % neighbourhood gate reads the joint neighbourhood (3^k − 1 points), stricter than one parameter at a time. (3) Cost stress runs the plan's grid one dimension at a time plus the gate's joint scenario (no full factorial); a financing credit is divided by the multiplier. (4) Robustness drawdowns start from the capital; BT-003's `drawdown_metrics` does not (known issue, fix proposed as a separate task). (5) Volatility terciles are cut on the whole sliced period (descriptive only); slice names are checked when loaded, not at registration; the template's `volatility regime` became `volatility tercile`. (6) The execution delay shifts entries and exits alike. (7) `xq exp reproduce`: a reproduction adds no trials, the DSR is shown but not judged, provenance differences are reported rather than refused, and only `baseline_board` runs have a reproducer. (8) `xq validate-strategy` is not built: no Sprint 9 task covers it; proposed with ROB-008 and GATE-001 | Sprint 9 | Owner, then Claude | decided (ADR 0055): (1) SPA/Reality Check on the gates' bootstrap convention, size re-run (still above 1.5x nominal: 18.5 % SPA, 15.4 % Reality Check at 10 %), so a per-sample size check puts "test over-rejects on this sample" on the gate result; (2) BT-003 drawdowns start from the capital; (3) the neighbourhood gate on the full ±20 % grid (seeded sample of 243 points above 3^5), a one-at-a-time table in the report, a ridge optimum fails; (4) slice names validated at registration, volatility terciles labelled "descriptive, cut ex post"; (5) a reproduction is REPRODUCED only with the same git sha, config hash and lock hash and metrics within tolerance, otherwise RERUN_DIFFERENT_CODE; approved as they stand: one-dimension cost stress plus the combined scenario, financing credit divided by the multiplier, equal entry and exit delay, reproductions add no trials, DSR shown not judged. Implemented: (1) `468b2f0`, (2) `6ca4562`, (3) `acb47b1`, (4) `b22a50d`, (5) this sprint's fifth C-24 commit; Claude's reading (same code, metrics out of tolerance: NOT_REPRODUCED) awaits the owner |
+| C-24 | Owner review of Sprint 9's open points (ADR 0054). (1) SPA and the Reality Check over-reject under strong serial dependence in short samples (AR(1) φ = 0.4, 400 periods: 15 % and 20 % at a 10 % level); test such families on non-overlapping periods. (2) The ±20 % neighbourhood gate reads the joint neighbourhood (3^k − 1 points), stricter than one parameter at a time. (3) Cost stress runs the plan's grid one dimension at a time plus the gate's joint scenario (no full factorial); a financing credit is divided by the multiplier. (4) Robustness drawdowns start from the capital; BT-003's `drawdown_metrics` does not (known issue, fix proposed as a separate task). (5) Volatility terciles are cut on the whole sliced period (descriptive only); slice names are checked when loaded, not at registration; the template's `volatility regime` became `volatility tercile`. (6) The execution delay shifts entries and exits alike. (7) `xq exp reproduce`: a reproduction adds no trials, the DSR is shown but not judged, provenance differences are reported rather than refused, and only `baseline_board` runs have a reproducer. (8) `xq validate-strategy` is not built: no Sprint 9 task covers it; proposed with ROB-008 and GATE-001 | Sprint 9 | Owner, then Claude | decided (ADR 0055): (1) SPA/Reality Check on the gates' bootstrap convention, size re-run (still above 1.5x nominal: 18.5 % SPA, 15.4 % Reality Check at 10 %), so a per-sample size check puts "test over-rejects on this sample" on the gate result; (2) BT-003 drawdowns start from the capital; (3) the neighbourhood gate on the full ±20 % grid (seeded sample of 243 points above 3^5), a one-at-a-time table in the report, a ridge optimum fails; (4) slice names validated at registration, volatility terciles labelled "descriptive, cut ex post"; (5) a reproduction is REPRODUCED only with the same git sha, config hash and lock hash and metrics within tolerance, otherwise RERUN_DIFFERENT_CODE; approved as they stand: one-dimension cost stress plus the combined scenario, financing credit divided by the multiplier, equal entry and exit delay, reproductions add no trials, DSR shown not judged. Implemented: (1) `468b2f0`, (2) `6ca4562`, (3) `acb47b1`, (4) `b22a50d`, (5) `cf12d15`; Claude's readings are carried into C-25 |
+| C-25 | Owner review of Sprint 12 B's open points (ADR 0055, ADR 0056). (1) The SPA/RC over-rejection warning is decided per sample by a size check (AR sieve null families, 500 by default), not attached to every result: on iid-like samples the tests are near nominal; its Monte Carlo error is about 1.5 points at 500 families. (2) A reproduction with the same code but a metric out of tolerance is a third status, NOT_REPRODUCED (not "different code"); never counted as reproduced. (3) PBO judges the choice among configurations: a genuine edge in a homogeneous family (near-identical configurations) has PBO near 0.5 and fails R2's `pbo_max`; mirror-image configurations break the DSR's benchmark instead; gates unchanged. (4) A gate that cannot be evaluated makes a verdict `incomplete`, never `pass`: a strategy without tunable parameters has no neighbourhood and never reaches R2 `pass`. (5) A validation run records no trials (it selects nothing; a variant picked from its diagnostics needs a new run). (6) The Monte Carlo keeps R-multiples as observed (a loss beyond the stop keeps its size) and calls a path ruined at half the capital (provisional). (7) `xq validate-strategy` has a subject adapter only for simulated runs; the baseline-board adapter (rebuilding the board's screening context) is the next build task. (8) Volatility-tercile slices bucket the sigma-hat warm-up days as `no_sigma_hat` | Sprint 12 B | Owner, then Claude | open |
 
 ## Open owner decisions
 
@@ -155,8 +184,14 @@ their dependencies. Decided at the Sprint 12 A review (ADR 0053): position sizes
 per unit of risk of a calibrated probability's lower confidence bound, net of costs (replacing the
 raw-probability scaling); ADR 0052's other open points approved as they stand; the paper and live
 runtimes must refuse to start without a kill-switch source (C-23, PAPER-001). Sprint 9's own
-choices, made by Claude within the plan and the owner's instructions, are in ADR 0054 and wait
-for the owner's review (C-24).
+choices, made by Claude within the plan and the owner's instructions, are in ADR 0054. Decided
+at the Sprint 9 review (ADR 0055): SPA and the Reality Check on the gates' bootstrap convention
+with a per-sample over-rejection warning, BT-003 drawdowns from the capital, the full ±20 %
+neighbourhood grid, slice names checked at registration with volatility terciles "descriptive,
+cut ex post", and REPRODUCED only on the same code; one-dimension cost stress with the combined
+scenario, the financing credit divided by the multiplier, equal entry and exit delay, no trials
+for reproductions and the DSR shown not judged approved as they stand. Sprint 12 B's own choices
+are in ADR 0055 and ADR 0056 and wait for the owner's review (C-25).
 
 ## Provisional assumptions not yet confirmed
 
@@ -185,6 +220,8 @@ for the owner's review (C-24).
 | Statistical tests (STAT-001 … STAT-006) | level 0.05; ADF with AIC lags, KPSS level and trend, Zivot-Andrews 15 % trimming; Ljung-Box lags 1, 5, 10, 20 with Holm across lags; ARCH-LM lags 5, 10; variance ratios at 2 … 64 bars with Chow-Denning; ARMA models `ar1`, `arma11`, `ar_aic` (p ≤ 5 by AIC on training folds) against `zero_return` and `random_walk`, DM with Holm across horizons | `config/stats.yaml`, ADR 0043 | fixed before results; changes need an ADR |
 | Volatility research (VOL-001 … VOL-006) | estimator window 20 bars, Wilder ATR 14; RV from 1m and 5m returns per hour and trading day; diurnal factor day-standardized, at least 20 training rows per bucket; benchmarks `rolling_22`, `ewma_0.94`, `ewma_0.97`, HAR (1, 5, 22 days; 1, 23, 115 hours), HAR floor 1 % of mean training RV; GARCH, GJR, EGARCH × normal, t, skewed t, zero mean, 1,000 EGARCH simulations; QLIKE primary, MCS 90 % (1,000 resamples, block 5), DM level 0.05 against HAR; selection default `ewma_0.94`, challengers' one-sided DM p-values Holm-adjusted before the 0.05 level (ADR 0046) | `config/volatility.yaml`, ADR 0044 | fixed before results; changes need an ADR |
 | Horizon admission | cost-to-volatility bound 0.3 (plan default) on the overall mean ratio; horizons are TGT-002 labels 1m–1d measured from 1m bars on a 5-minute decision grid with `fwd_returns.v1`'s latency and fill delay; spread at the fills; slippage sigma-hat from the last 60 one-minute returns (causal fallback); financing at the mean of the long and short rates | `config/eda.yaml`, ADR 0037, ADR 0040 | owner review of the first real EDA; broker costs |
+| Validation and robustness procedures | SPA size check: 500 null families × 199 resamples, AR sieve ≤ 5, warn above 1.5 × level (owner); perturbation levels 10/20/30 %, full grid up to 243 points (owner); Monte Carlo 1,000 paths, one R = 3 daily sigma-hats, ruin at 50 % of capital (provisional); noise at 0.25–5 spreads and 0.1–1 feature sigma, 20 draws; PBO 16 blocks; bootstrap convention and thresholds from `config/gates.yaml` | `config/validation.yaml`, ADR 0055, ADR 0056 | fixed before results; changes need an ADR |
+| Known-truth simulated strategies | 20 years of daily bars; costs half of a 1.5 bp spread + 0.5 bp slippage + 0.35 bp commission per turnover, 0.15 bp a day financing; genuine: AR(1) drift (persistence 0.99, 6 bp), 24 trend configurations (lookbacks 2–80, deadbands 0.25/0.5/1); overfit: 50 independent-noise configurations; baseline buy-and-hold | `xq.robustness.simulated`, ADR 0056 | synthetic only; never evidence |
 
 ## Known issues and technical debt
 
@@ -224,13 +261,15 @@ for the owner's review (C-24).
 - Target computation reads a month of ticks at a time; memory and speed on four years of real
   ticks are unmeasured. The same holds for the baseline board (24 strategies and 24,000
   random-entry screens by default), although it reduces quotes to those the screener reads.
-- PBO, SPA/Reality Check/Romano–Wolf, the multiple-testing corrections and five robustness
-  measures (ROB-001, ROB-002, ROB-003, ROB-006, ROB-007) exist as library functions proven on
-  simulated strategies. Nothing wires them into a report or a CLI yet (ROB-008,
-  `xq validate-strategy`, GATE-001), and none has run on real data. Still not implemented: the R1
-  gate's paired block-bootstrap test against the best baseline (the board stores each baseline's
-  daily returns in `returns.parquet` for it), the Monte Carlo with risk rules (ROB-004) and noise
-  injection (ROB-005).
+- The validation and robustness methods (VAL-001 … VAL-006, ROB-001 … ROB-008, the R1
+  best-baseline test and the R2 decay test) are wired into `xq validate-strategy`. They are proven
+  on simulated strategies only, and none has run on real data.
+  - Only `simulated_strategy` runs can be validated. The baseline-board subject adapter is not
+    built (C-25), so the board's own strategies cannot yet be validated from their run.
+  - GATE-001 (`xq gate evaluate`) is not built.
+- A validation with the default settings takes a few minutes on 20 years of daily data. The
+  Monte Carlo replays about 0.3 ms per trade through the pure-Python risk engine, and the SPA size
+  check simulates 500 null families.
 - SPA and the Reality Check over-reject under strong serial dependence in short samples, even on
   the gates' Politis–White block (AR(1) φ = 0.4, 400 periods, 8 strategies: 18.5 % and 15.4 % at a
   10 % level; more with more strategies). Every SPA gate result therefore runs a per-sample size
@@ -287,7 +326,7 @@ for the owner's review (C-24).
 | 13 Backtesting | BT-001 … BT-010 | yes | yes (hand-computed trades, simulated quotes, reconciliation of the tiers) | no |
 | 14 Risk engine | RISK-001 … RISK-006 | yes | yes (hand-computed cases, exact thresholds, property tests, architectural test, synthetic runs) | no |
 | 15 Signal engine | SIGNAL-001 … SIGNAL-005 (the regime filter a pass-through until REG-007) | yes | yes (golden EV, filter cases, forecast-to-fill with a synthetic stub forecaster) | no |
-| 16 Robustness research | ROB-001, ROB-002, ROB-003, ROB-006, ROB-007 (ROB-004, ROB-005, ROB-008 later) | yes | yes (simulated strategies with known truth: overfit vs genuine edges, planted edges, coverage; recovery registry) | no |
-| 17 Statistical validation | VAL-001 … VAL-007 | yes | yes (published examples, independent implementations; VAL-003, VAL-004, VAL-006 on simulated noise, graded and overfit families) | no |
-| 18 Experiment tracking | EXP-001 … EXP-006; reserved trial families (ADR 0047); `backtests` table (migration 0009) | yes | yes (a fixture board run reproduces) | not applicable until real research runs |
+| 16 Robustness research | ROB-001 … ROB-008 (report and score; Monte Carlo through the real risk engine; noise injection) | yes | yes (simulated strategies with known truth: overfit vs genuine edges, planted edges, coverage, a ridge, reckless risk profiles; recovery registry) | no |
+| 17 Statistical validation | VAL-001 … VAL-007; `xq validate-strategy` (R1 best-baseline test, R2 decay test, per-sample SPA size check) | yes | yes (published examples, independent implementations; simulated noise, graded and overfit families; a recorded genuine edge passes R1 and R2, a recorded overfit strategy fails R2) | no |
+| 18 Experiment tracking | EXP-001 … EXP-006 (reproduction status, ADR 0055); reserved trial families (ADR 0047); `backtests` (migration 0009), `stat_tests` and `robustness_results` (migration 0010) | yes | yes (a fixture board run reproduces; other code is RERUN_DIFFERENT_CODE) | not applicable until real research runs |
 | All other phases | not started | no | no | no |

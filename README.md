@@ -11,8 +11,9 @@ follow are in [`CLAUDE.md`](CLAUDE.md), and decisions are recorded in [`docs/adr
 
 ## Status
 
-Sprints 1 to 6, 11 and 12 A are merged; Sprint 9 (statistical validation and robustness, ADR 0051,
-ADR 0054) is in review. Sprints 11 and 12 A ran ahead of Sprints 7-10 while real data is pending
+Sprints 1 to 6, 9, 11 and 12 A are merged. Sprint 12 B is in review: the Sprint 9 review
+decisions (ADR 0055), Monte Carlo with the risk engine, noise injection, the robustness report and
+`xq validate-strategy` (ADR 0056). Sprints 11 and 12 A ran ahead of Sprints 7-10 while real data is pending
 (ADR 0048, ADR 0051). Sprint 2 (clean ticks, bars and data quality) is implemented and tested on
 synthetic data but **not validated**: its quality report must first run on at least one year of real
 broker ticks, followed by the human review (DQ-008); the owner's decisions on its open questions are
@@ -44,7 +45,18 @@ measures: parameter perturbation, cost and latency stress with the break-even mu
 block-bootstrap intervals and trade-order permutation, slicing read from the pre-registered
 hypothesis and execution delay, each checked against `config/gates.yaml` where a gate applies, plus
 `xq exp reproduce`. Every method is proven on simulated strategies with known truth (noise-only
-families, a single-point optimum on noise, a genuine edge); none has run on real data. See
+families, a single-point optimum on noise, a genuine edge); none has run on real data. Sprint 12 B
+adds:
+
+- a Monte Carlo that replays resampled trade outcomes through the real risk engine;
+- noise injection;
+- the robustness report and score against the gates;
+- `xq validate-strategy <run_id>`, the combined significance and robustness report with R1 and R2
+  verdicts, with an R1 test against the best baseline and an R2 decay test.
+
+It is proven end to end on recorded simulated strategies (`xq robustness simulate`): a genuine
+trend edge passes R1 and R2, and a single-point optimum on noise fails R2. Synthetic data only.
+See
 [`CHANGELOG.md`](CHANGELOG.md) for
 completed backlog tasks and [`docs/STATUS.md`](docs/STATUS.md) for the current sprint, open
 decisions and carry-over items.
@@ -79,6 +91,8 @@ uv run xq research eda --dataset <ds-id> --hypothesis <H>  # EDA report on the d
 uv run xq exp close <experiment-id> --conclusion <yaml>    # close with a verdict (research log)
 uv run xq exp audit                           # experiments still without a conclusion
 uv run xq exp reproduce <run-id>              # rebuild the dataset, rerun, compare the metrics
+uv run xq robustness simulate --truth genuine --hypothesis <H>  # known-truth run (synthetic)
+uv run xq validate-strategy <run-id>          # significance + robustness report vs the gates
 uv run xq verify-raw                          # re-hash every raw file against the manifest
 uv run xq config show                         # resolved configuration, secrets masked
 ```
@@ -88,7 +102,8 @@ missing-minute failures on them; that is the checks working, not a bug. For the 
 `xq dataset build experiments/configs/ds_base.yaml` stops at the quality gate (DQ-007), listing
 every failing fixture day and check: a meaningful base dataset needs real broker history for the
 four years before the vault. The dataset, hypothesis, trial, baseline-board, EDA, conclusion and
-reproduce commands are exercised end to end on dense synthetic weeks in `tests/integration/`. The
+reproduce commands are exercised end to end on dense synthetic weeks in `tests/integration/`, and
+the simulate and validate-strategy commands on the known-truth simulated strategies. The
 board's net figures are screening results while the cost model is a provisional placeholder
 (ADR 0032).
 

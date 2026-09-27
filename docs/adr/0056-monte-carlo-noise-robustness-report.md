@@ -253,3 +253,24 @@ everywhere they appear.
    minutes. The Monte Carlo (1,000 paths through the risk engine), the SPA size check (500 null
    families) and the 10,000-resample bootstraps dominate. The tests lower the paths, draws and
    families through `--set validation....`, never the gates.
+
+## Characterization over 20 seeds of each truth
+
+The library-level validation, with the configured gates, effective trial counts from the
+family's clustering, 200 Monte Carlo paths, 3 noise draws and 200 size-check families, gave:
+
+| Simulated truth | R1 pass | R2 pass | Robustness verdict `pass` | SPA size warning |
+| --- | --- | --- | --- | --- |
+| genuine trend edge | 18 / 20 | 16 / 20 | 20 / 20 | 4 / 20 |
+| single-point optimum on noise | 5 / 20 | 0 / 20 | 0 / 20 | 1 / 20 |
+
+- **Genuine failures** are near misses on single significance gates: PBO (2), the decay trend
+  (2), the DSR (2), the best-baseline test (1) and 99 closed trades against 100 (1). A genuine
+  edge with a net Sharpe ratio near 1.3 over 20 years does not clear every gate in every sample,
+  and the gates are not meant to be lenient.
+- **Overfit failures** come from the DSR and PBO (20 of 20), SPA (19), the neighbourhood (19)
+  and the evaluated period's drawdown (11). In-sample selection can pass R1 on its own sample (5
+  of 20). R2 exists to catch exactly that, and it does.
+- **The size-check warning** fired on 4 genuine families. Their trend configurations' returns
+  inherit the drift's regimes, which is the dependence SPA over-rejects under. The warning never
+  changed a verdict.
