@@ -464,6 +464,21 @@ IDs from `docs/specs/development-plan.md`.
   moves to `xq.models.arma` (re-exported by `xq.research.stats.arima`). H-0001's `board.yaml` is
   unchanged: adding `ar1` would raise its approved trial budget from 36 to 40 (owner decision).
   ADR 0045.
+- BT-004: event core of the event-driven backtester (`xq.backtest.events`, `xq.backtest.engine`) —
+  `TickEvent`, `BarEvent`, `SignalEvent`, `OrderEvent`, `FillEvent`, `TimerEvent` and, for
+  execution without ticks, `ExecutionBarEvent`; an `EventQueue` ordered by (timestamp, rank,
+  sequence), where the rank puts timers before order arrivals before quotes before fills before
+  signal bars before intents at one instant; a `SimulationClock` that never goes back;
+  `MarketData` in tick mode (quotes, with signal bars built by DATA-008 `build_bars`) or bar
+  mode (one-minute execution bars, open then range); the `Strategy.on_bar(bar, ctx)` interface;
+  and the `EventEngine` loop, which stamps each intent's id and decision time, refuses decisions
+  taken while the market is closed (ADR 0032), and schedules rollover financing, day ends, order
+  expiries, time stops and weekend exits as timers. The decision-chain schemas `TradeIntent`,
+  `RiskDecision` and `OrderIntent` (`xq.signals.schema`; an order can only be built from an
+  approved decision) and the PLACEHOLDER pass-through risk approver (`xq.risk.placeholder`, no
+  risk checks until RISK-005) come with it. Tested: queue order at equal instants, the clock,
+  the data stream, schema validation, the placeholder's sizing, and a deterministic engine trace
+  with stub components. ADR 0049.
 
 ### Changed
 
