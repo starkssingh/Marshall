@@ -32,8 +32,11 @@ simulation, realized volatility and entry timing.
 
 While the cost model is provisional, every cost and ratio is a screening figure and carries its
 label ("screening, placeholder costs"). The admission list is written to the report
-(`admission_yaml`); `write_admission` copies it to ``config/horizons.yaml`` only on explicit
-request (``xq research admit-horizons``), and only from a confirmatory run.
+(`admission_yaml`, with the cost basis and whether the costs are provisional);
+`write_admission` copies it to ``config/horizons.yaml`` only on explicit request
+(``xq research admit-horizons``), only from a confirmatory run's unaltered report, and — while
+the costs are placeholders — only with ``--allow-placeholder-costs``; the written file records
+the cost basis and that flag.
 """
 
 from __future__ import annotations
@@ -109,6 +112,7 @@ class HorizonAdmission:
     by_session: dict[str, list[str]]
     max_cost_to_vol: float
     cost_basis: str
+    provisional_costs: bool
     ratios: dict[str, float] = field(default_factory=dict)
 
     def as_dict(self) -> dict[str, Any]:
@@ -117,6 +121,7 @@ class HorizonAdmission:
             "excluded": self.excluded,
             "max_cost_to_vol": self.max_cost_to_vol,
             "cost_basis": self.cost_basis,
+            "provisional_costs": self.provisional_costs,
             "cost_to_vol": {h: round(r, 6) for h, r in self.ratios.items()},
             "admitted_by_session": self.by_session,
         }
@@ -340,11 +345,16 @@ def cost_to_volatility_table(
 
 
 def admission(
-    table: pd.DataFrame, candidates: Sequence[str], max_cost_to_vol: float
+    table: pd.DataFrame,
+    candidates: Sequence[str],
+    max_cost_to_vol: float,
+    *,
+    provisional_costs: bool,
 ) -> HorizonAdmission:
     """The admission list: candidates whose overall ratio is at most `max_cost_to_vol`.
 
     A candidate without data is excluded (it cannot be shown to be affordable).
+    `provisional_costs` says whether the table was priced with a provisional cost model.
     """
     overall = table.loc[table["session"] == ALL_SESSIONS].set_index("horizon")
     column = overall["cost_to_vol"]
@@ -361,6 +371,7 @@ def admission(
         by_session=by_session,
         max_cost_to_vol=max_cost_to_vol,
         cost_basis=basis,
+        provisional_costs=provisional_costs,
         ratios=ratios,
     )
 
@@ -375,12 +386,19 @@ def admission_yaml(result: HorizonAdmission, provenance: Mapping[str, Any]) -> s
     return header + yaml.safe_dump(body, sort_keys=False)
 
 
-def write_admission(report_dir: Path, config_dir: Path) -> Path:
+def write_admission(
+    report_dir: Path, config_dir: Path, *, allow_placeholder_costs: bool = False
+) -> Path:
     """Copy a report's admission list to ``<config_dir>/horizons.yaml``.
 
+    The written file is the report's list plus ``allow_placeholder_costs`` and where it came from
+    (the list already carries its ``cost_basis`` and ``provisional_costs``).
+
     Raises:
-        AdmissionError: if the report has no admission list or run record, the admission list
-            differs from the report manifest, or the run was not confirmatory.
+        AdmissionError: if the report has no admission list or run record, the run was not
+            confirmatory, the admission list differs from the report manifest, or the list was
+            priced with provisional (placeholder) costs and `allow_placeholder_costs` is False.
+            A list that does not say whether its costs were provisional counts as provisional.
     """
     proposal = report_dir / ADMISSION_FILE
     run_file = report_dir / RUN_FILE
@@ -398,10 +416,25 @@ def write_admission(report_dir: Path, config_dir: Path) -> Path:
     actual = hashlib.sha256(proposal.read_bytes()).hexdigest()
     if expected != actual:
         raise AdmissionError(f"{proposal} differs from the report manifest")
+    listed: dict[str, Any] = yaml.safe_load(proposal.read_text(encoding="utf-8"))
+    provisional = bool(listed.get("provisional_costs", True))
+    if provisional and not allow_placeholder_costs:
+        raise AdmissionError(
+            f"the admission list was priced with provisional costs "
+            f"({listed.get('cost_basis', 'cost basis not recorded')}); pass "
+            "--allow-placeholder-costs to write it to the configuration anyway"
+        )
+    written = {
+        **listed,
+        "allow_placeholder_costs": allow_placeholder_costs,
+        "source": {"report": str(report_dir), "run_id": run["run_id"]},
+    }
     target = config_dir / HORIZONS_CONFIG
-    text = proposal.read_text(encoding="utf-8")
-    source = f"# Copied from {report_dir} (run {run['run_id']}).\n"
-    target.write_text(source + text, encoding="utf-8")
+    header = (
+        "# Horizon admission list (EDA-006), copied from an EDA report by\n"
+        "# `xq research admit-horizons`. Generated; do not edit by hand.\n"
+    )
+    target.write_text(header + yaml.safe_dump(written, sort_keys=False), encoding="utf-8")
     return target
 
 

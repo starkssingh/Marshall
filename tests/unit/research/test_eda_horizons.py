@@ -12,10 +12,12 @@ import numpy as np
 import pandas as pd
 import pytest
 import yaml
+from typer.testing import CliRunner
 
 from helpers.pipeline import REPO, config
 from helpers.simulate import minute_bars
 from xq.backtest.costs import SCREENING_LABEL, CostModel
+from xq.cli.main import app
 from xq.core.errors import ConfigError
 from xq.data.calendar import MarketClock, regular_trading_day
 from xq.research.eda.data import market_clock
@@ -235,7 +237,7 @@ def test_cost_table_and_admission() -> None:
     assert 0 < overall.loc["4h", "crosses_close_share"] < 1
     assert set(table["cost_basis"]) == {SCREENING_LABEL}
     assert {"london", "new_york", "london_new_york"} <= set(table["session"])
-    result = admission(table, ["15m", "5m", "4h"], 0.3)
+    result = admission(table, ["15m", "5m", "4h"], 0.3, provisional_costs=True)
     assert result.admitted == ["4h"]
     assert result.excluded == ["15m", "5m"]  # no data for 15m: not shown to be affordable
     assert result.by_session["london"] == ["4h"]
@@ -243,6 +245,7 @@ def test_cost_table_and_admission() -> None:
     loaded = yaml.safe_load(admission_yaml(result, {"dataset_id": "ds-x"}))
     assert loaded["admitted"] == ["4h"]
     assert loaded["provenance"] == {"dataset_id": "ds-x"}
+    assert (loaded["cost_basis"], loaded["provisional_costs"]) == (SCREENING_LABEL, True)
     assert len(cost_to_volatility_figure(table, 0.3, "t").axes) == 1
 
 
@@ -253,9 +256,15 @@ def test_the_target_set_must_be_a_configured_forward_return_set() -> None:
         config(REPO, **{"eda.horizons.candidates": ["1d12h"]})
 
 
-def report(directory: Path, *, confirmatory: bool) -> Path:
+def report(directory: Path, *, confirmatory: bool, provisional: bool | None = False) -> Path:
+    """A minimal EDA report holding an admission list (`provisional` None: not recorded)."""
     directory.mkdir(parents=True)
-    text = "admitted:\n- 4h\n"
+    listed: dict[str, object] = {"admitted": ["4h"], "cost_basis": "net of broker costs"}
+    if provisional is not None:
+        listed["provisional_costs"] = provisional
+        if provisional:
+            listed["cost_basis"] = SCREENING_LABEL
+    text = yaml.safe_dump(listed, sort_keys=False)
     (directory / ADMISSION_FILE).write_text(text)
     digest = hashlib.sha256(text.encode()).hexdigest()
     (directory / MANIFEST_FILE).write_text(json.dumps({"files": {ADMISSION_FILE: digest}}))
@@ -279,5 +288,51 @@ def test_write_admission_only_from_a_confirmatory_unaltered_report(tmp_path: Pat
     good = report(tmp_path / "good", confirmatory=True)
     target = write_admission(good, config_dir)
     assert target == config_dir / "horizons.yaml"
-    assert yaml.safe_load(target.read_text()) == {"admitted": ["4h"]}
-    assert "run 01RUN" in target.read_text()
+    written = yaml.safe_load(target.read_text())
+    assert written["admitted"] == ["4h"]
+    assert (written["cost_basis"], written["provisional_costs"]) == ("net of broker costs", False)
+    assert written["allow_placeholder_costs"] is False
+    assert written["source"] == {"report": str(good), "run_id": "01RUN"}
+
+
+def test_placeholder_costs_need_an_explicit_flag(tmp_path: Path) -> None:
+    config_dir = tmp_path / "config"
+    config_dir.mkdir()
+    placeholder = report(tmp_path / "placeholder", confirmatory=True, provisional=True)
+    with pytest.raises(AdmissionError, match="--allow-placeholder-costs"):
+        write_admission(placeholder, config_dir)
+    unrecorded = report(tmp_path / "unrecorded", confirmatory=True, provisional=None)
+    with pytest.raises(AdmissionError, match="provisional costs"):
+        write_admission(unrecorded, config_dir)  # not saying counts as provisional
+    assert not (config_dir / "horizons.yaml").exists()
+    target = write_admission(placeholder, config_dir, allow_placeholder_costs=True)
+    written = yaml.safe_load(target.read_text())
+    assert written["cost_basis"] == SCREENING_LABEL
+    assert written["provisional_costs"] is True
+    assert written["allow_placeholder_costs"] is True
+
+
+def test_cli_admit_horizons_flag(tmp_path: Path) -> None:
+    config_dir = tmp_path / "config"
+    for path in (REPO / "config").rglob("*.yaml"):
+        target = config_dir / path.relative_to(REPO / "config")
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(path.read_bytes())
+    placeholder = report(tmp_path / "placeholder", confirmatory=True, provisional=True)
+    command = [
+        "--config-dir",
+        str(config_dir),
+        "--set",
+        f"paths.root={tmp_path}",
+        "research",
+        "admit-horizons",
+        "--report",
+        str(placeholder),
+    ]
+    refused = CliRunner().invoke(app, command)
+    assert refused.exit_code == 2
+    assert "--allow-placeholder-costs" in refused.output
+    assert not (config_dir / "horizons.yaml").exists()
+    allowed = CliRunner().invoke(app, [*command, "--allow-placeholder-costs"])
+    assert allowed.exit_code == 0, allowed.output
+    assert yaml.safe_load((config_dir / "horizons.yaml").read_text())["allow_placeholder_costs"]

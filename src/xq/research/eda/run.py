@@ -466,7 +466,12 @@ def _horizons(
         max_cost_to_vol=config.max_cost_to_vol,
         sigma_minutes=config.sigma_1m_minutes,
     )
-    admission = horizons.admission(table, list(config.candidates), config.max_cost_to_vol)
+    admission = horizons.admission(
+        table,
+        list(config.candidates),
+        config.max_cost_to_vol,
+        provisional_costs=cost.config.provisional,
+    )
     section.text(
         f"Costs: {cost.result_label}. Holding periods are TGT-002's ({reference.name}."
         f"{reference.version}: latency {params.execution_latency_ms} ms, fills at most "

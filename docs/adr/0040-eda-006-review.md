@@ -34,3 +34,12 @@ The spread cost is half the quoted spread at the entry fill plus half the spread
 each over its own mid: the closing spread (`spread_close`) of the 1m bar whose close is the fill.
 The bar's mean spread over the holding period averaged in spread spikes (the rollover) and quiet
 stretches that the trade never meets.
+
+## Decision 3 — No placeholder costs in the configuration by default
+
+The admission list records its cost basis and whether the cost model was provisional
+(`provisional_costs`). `xq research admit-horizons` refuses to write `config/horizons.yaml` from
+a list priced with provisional (placeholder) costs unless `--allow-placeholder-costs` is passed;
+a list that does not say is treated as provisional. The written file records the cost basis, the
+provisional flag, `allow_placeholder_costs` and the source report and run, so a configuration
+built on screening costs is visible as such.
