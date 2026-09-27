@@ -211,3 +211,37 @@ simulations (`tests/helpers/strategies.py`) are:
    - Per seed, a delayed Sharpe ratio can tick up by chance, so smoothness is judged on the
      median across replications, as a report on one strategy should judge it against its own
      bootstrap interval (ROB-003).
+
+## EXP-006 — `xq exp reproduce <run_id>`
+
+1. **Rebuild, rerun, compare.** The dataset is rebuilt from the resolved spec that
+   `dataset_versions` recorded, so it can be rebuilt even if its directory is gone. The builder
+   already refuses different content for the same id. A spec that now builds another id means the
+   producing code changed, and the reproduction fails. The run is then repeated in a new run
+   context of kind `reproduction`, under the original's hypothesis, with its run configuration and
+   seed. The walk-forward prediction cache is off, so every forecast is recomputed. Finally every
+   metric the original logged is compared with `|b − a| ≤ atol + rtol·|a|`, defaults 1e-9 and
+   1e-6. A rerun on the same code and data is exact; the tolerance only allows for floating-point
+   differences between machines.
+2. **A reproduction adds no trials.** The same configuration on the same data is not a new
+   trial. `RunContext.reproduces` makes `record_trial` return the original run's trial for a
+   configuration it already recorded in that family. A configuration the original never
+   evaluated is still counted. Without this, every reproduction would inflate the family's raw
+   trial count and flag it for review.
+3. **Registry-dependent metrics are shown, not judged.** The board's deflated Sharpe ratio uses
+   the family's trial count at the time, so it can move when other runs add trials, even though
+   the run itself reproduces. Metrics ending in `/dsr` are listed but not judged.
+4. **Provenance differences are reported, not refused.** Git sha, `uv.lock` hash and the
+   application config hash are compared and each difference is printed: code moving on is what
+   a reproduction tests. A confirmatory reproduction still needs a clean tree (`--exploratory`
+   otherwise).
+5. **Scope.** Reproducers exist for `baseline_board` runs, the only kind the CLI can start with
+   a dataset today. Other kinds are refused by name until they get one; that is an open point for
+   the robustness report (ROB-008) and for `xq validate-strategy`. The reproduction run sits in
+   the hypothesis's open experiment, so the sprint-end audit (`xq exp audit`) sees it with the
+   original.
+6. **Known truth.** A fixture board run (synthetic ticks, the fixture board) reproduces with every
+   judged metric equal within 1e-9 and the family's trial count unchanged. With one stored metric
+   altered by 0.1, exactly that metric is reported as a mismatch and the command exits 1. Altered
+   dataset bytes are refused (exit 2). An unfinished run and a kind without a reproducer are
+   refused.

@@ -673,6 +673,15 @@ IDs from `docs/specs/development-plan.md`.
   `execution_delay` check. Proven on known truth: a genuine trend edge decays smoothly (median
   retention falling to above 0.8 at three bars) and passes, a bid-ask-bounce edge flips at the
   first delay and fails, a look-ahead leak collapses. ADR 0054.
+- EXP-006: `xq exp reproduce <run_id>` (`xq.tracking.reproduce`) — rebuilds the run's dataset
+  from the spec `dataset_versions` recorded (`recorded_spec`; altered content is refused, a spec
+  that now builds another id fails), repeats the run in a `reproduction` run with the original's
+  configuration and seed and the walk-forward cache off, and compares every metric within
+  `--rtol`/`--atol` (1e-6/1e-9), showing but not judging metrics that depend on the registry's
+  trial count (the DSR); exit 1 when not reproduced. A reproduction does not count the original's
+  configurations as trials again (`RunContext.reproduces`). Reproducible kinds: `baseline_board`.
+  A fixture board run reproduces; a changed metric, altered dataset bytes and kinds without a
+  reproducer are refused. ADR 0054.
 
 ### Changed
 

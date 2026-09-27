@@ -309,6 +309,20 @@ def read_manifest(cfg: AppConfig, ds_id: str) -> dict[str, Any]:
     return manifest
 
 
+def recorded_spec(engine: Engine, ds_id: str) -> DatasetSpec:
+    """The resolved spec a dataset was built from, as ``dataset_versions`` records it (so it can
+    be rebuilt even if its directory is gone).
+
+    Raises:
+        NoDatasetDataError: if the dataset was never recorded.
+    """
+    with session_factory(engine)() as session:
+        record = session.get(DatasetVersion, ds_id)
+        if record is None:
+            raise NoDatasetDataError(f"dataset {ds_id} is not recorded in dataset_versions")
+        return DatasetSpec.model_validate(record.spec_json)
+
+
 def verify_dataset(cfg: AppConfig, ds_id: str) -> dict[str, Any]:
     """Re-hash every file of a dataset against its manifest; return the manifest.
 
