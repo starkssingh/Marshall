@@ -133,3 +133,28 @@
    which the requested exposure binds and the halts cannot (a 5 % budget to 4.5-sigma stops, the
    instrument's lot cap); a test with the default profile shows its sizes, cooldown rejections and
    flips cut to exits are all explained.
+
+## RISK-006 — kill switch and data-health breakers
+
+1. **Kill switch.** On while the profile's file exists, while its environment variable is set to a
+   true value (`XQ_KILL_SWITCH` by default: `1`, `true`, `yes`, `on`), or after
+   `KillSwitch.engage` until `release` (the hook for the plan's database flag, which arrives with
+   the paper runtime). It blocks new exposure; exits stay allowed, and an intent against the
+   position still closes it (RISK-005). Reading the flag is I/O, so the event engine reads it at
+   each decision and passes its reason in the market state; `RiskEngine.evaluate` stays pure.
+2. **Flatten policy.** With the profile's `flatten`, the event engine sends a `flat` intent
+   through the risk engine at every signal bar while the switch is on and a position is open (so
+   an exit that expires is retried). The default profile keeps positions (`flatten: false`,
+   provisional).
+3. **Backtests ignore the machine's switch by default.** `run_event_backtest` honours a kill
+   switch only when one is passed: an environment flag set on the machine running a historical
+   simulation says nothing about the past, and silently refusing entries in research would be a
+   hidden result change. Paper and live runtimes will always pass one (PROD-003 adds an
+   independent check in the execution gateway).
+4. **Breakers.** New exposure is refused on a latest quote older than `stale_quote_s` (120 s,
+   strictly older) or with a spread strictly above `spread_multiple` (5) times the median spread
+   of the last `spread_window` (500) quotes, known once ten quotes have been seen. The median
+   includes the latest quote, so one abnormal quote cannot move its own reference far. Both are
+   provisional and apply in the event tier; the plan's "abnormal spread" is read as relative to
+   the recent median rather than to an hour-of-week profile, which is the signal filter's job
+   (SIGNAL-003).

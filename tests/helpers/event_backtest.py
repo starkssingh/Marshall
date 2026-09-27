@@ -31,14 +31,25 @@ MINUTE_NS = 60_000_000_000
 RISK = RiskEngine.from_config(CFG)
 
 
-def risk_engine(*, risk_per_trade: float | None = None, **limits: Any) -> RiskEngine:
-    """The default profile's engine with changed sizing budget and limits."""
+def risk_engine(
+    *,
+    risk_per_trade: float | None = None,
+    breakers: dict[str, Any] | None = None,
+    kill_switch: dict[str, Any] | None = None,
+    **limits: Any,
+) -> RiskEngine:
+    """The default profile's engine with changed sizing budget, breakers, kill switch, limits."""
     config = CFG.risk_config()
     sizing = config.sizing
     if risk_per_trade is not None:
         sizing = sizing.model_copy(update={"risk_per_trade": risk_per_trade})
     changed = config.model_copy(
-        update={"sizing": sizing, "limits": config.limits.model_copy(update=limits)}
+        update={
+            "sizing": sizing,
+            "limits": config.limits.model_copy(update=limits),
+            "breakers": config.breakers.model_copy(update=breakers or {}),
+            "kill_switch": config.kill_switch.model_copy(update=kill_switch or {}),
+        }
     )
     return RiskEngine(changed, INSTRUMENT, margin_rate=0.05)
 

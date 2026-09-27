@@ -12,8 +12,11 @@ RISK-005), and every step is written to the recorder (the decision ledger, BT-00
 **Risk and market state.** At every decision the engine observes the account into the risk state
 (`RiskStateTracker`, RISK-001) and assembles the market state (`MarketState`): the latest quote,
 the daily sigma-hat known at the decision (a supplied series or the interim EWMA of signal-bar
-returns, `xq.risk.state`) and the sessions the risk profile caps. The strategy's context carries
-the same sigma-hat, so stops are set in volatility units.
+returns, `xq.risk.state`), the median spread of the last quotes (the abnormal-spread breaker's
+reference), the sessions the risk profile caps and the kill switch's reason, if one is given and
+on (RISK-006). The strategy's context carries the same sigma-hat, so stops are set in volatility
+units. With a kill switch whose profile says ``flatten``, the engine sends a ``flat`` intent at
+every signal bar while the switch is on and a position is open.
 
 **Data** (`MarketData`) is either quotes (*tick mode*: the broker executes on every quote and
 signal bars are built from the same quotes by the DATA-008 bar builder) or bars only (*bar mode*:
@@ -39,6 +42,7 @@ from __future__ import annotations
 
 import itertools
 from abc import ABC, abstractmethod
+from collections import deque
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass, field
 from datetime import date
@@ -76,6 +80,7 @@ from xq.data.bars import build_bars
 from xq.data.calendar import NAT_NS, MarketClock, regular_trading_day
 from xq.data.sessions import build_session_table
 from xq.risk.engine import RiskEngine
+from xq.risk.kill_switch import MIN_SPREAD_QUOTES, KillSwitch
 from xq.risk.state import (
     EwmaSigma,
     MarketState,
@@ -497,7 +502,8 @@ class EventEngine:
     """Replays `data` through strategy, constraints, risk engine, broker and account.
 
     `sigma` gives the daily sigma-hat known at each instant; by default the interim EWMA of the
-    signal bars with the risk profile's span (`xq.risk.state.EwmaSigma`).
+    signal bars with the risk profile's span (`xq.risk.state.EwmaSigma`). `kill_switch` is read at
+    every decision and signal bar (none by default: module docstring of `xq.risk.kill_switch`).
     """
 
     def __init__(
@@ -513,6 +519,7 @@ class EventEngine:
         clock: MarketClock,
         constraints: Constraints | None = None,
         sigma: SigmaSource | None = None,
+        kill_switch: KillSwitch | None = None,
         observer: Callable[[Event, int], None] | None = None,
     ) -> None:
         if not isinstance(risk, RiskEngine):
@@ -546,6 +553,8 @@ class EventEngine:
             per_day = regular_trading_day(costs.sessions) / data.timeframe.duration
             sigma = EwmaSigma(risk.config.sigma.span_bars, risk.config.sigma.min_bars, per_day)
         self.sigma = sigma
+        self.kill_switch = kill_switch
+        self._spreads: deque[float] = deque(maxlen=risk.config.breakers.spread_window)
         self._session_windows: dict[date, dict[str, tuple[int, int]]] = {}
 
     def run(self) -> EngineOutput:
@@ -624,6 +633,7 @@ class EventEngine:
 
     def _on_quote(self, quote: Quote) -> None:
         self.last_quote = quote
+        self._spreads.append(quote.ask - quote.bid)
         self.account.mark(quote)
 
     def _push_fills(self, fills: list[Fill]) -> None:
@@ -646,6 +656,20 @@ class EventEngine:
 
     def _on_bar(self, event: BarEvent) -> None:
         self.sigma.update(event.bar.close)
+        switch = self.kill_switch
+        if (
+            switch is not None
+            and switch.flatten
+            and self.broker.position_lots != 0
+            and switch.reason() is not None
+        ):
+            self._push_intent(
+                TradeIntent(
+                    direction="flat",
+                    strategy_id=self.strategy.strategy_id,
+                    reason="kill switch: flatten",
+                )
+            )
         context = self._context()
         self.output.bar_states.append(context.account)
         for intent in self.strategy.on_bar(event.bar, context):
@@ -735,13 +759,18 @@ class EventEngine:
         quote = self.last_quote
         if quote is None:
             return None
+        spreads = self._spreads
         return MarketState(
             ts=now,
             bid=quote.bid,
             ask=quote.ask,
             quote_ts=quote.ts,
             sigma_daily=self.sigma.at(now),
+            spread_reference=(
+                float(np.median(spreads)) if len(spreads) >= MIN_SPREAD_QUOTES else None
+            ),
             sessions=self._sessions(now),
+            kill_reason=None if self.kill_switch is None else self.kill_switch.reason(),
         )
 
     def _sessions(self, now: int) -> tuple[str, ...]:
@@ -804,6 +833,7 @@ def run_event_backtest(
     constraints: Constraints | None = None,
     sigma_1m_bps: pd.Series | None = None,
     sigma_daily: pd.Series | None = None,
+    kill_switch: KillSwitch | None = None,
     observer: Callable[[Event, int], None] | None = None,
 ) -> EventBacktestResult:
     """Run `strategy` on `data` through the simulated broker, portfolio and ledger.
@@ -820,6 +850,8 @@ def run_event_backtest(
         sigma_1m_bps: Sigma-hat of one-minute returns in bps, known at each instant (slippage).
         sigma_daily: Daily sigma-hat (fraction of price) indexed by when each value is known,
             for stops and sizing; default the interim EWMA of the signal bars.
+        kill_switch: A kill switch to honour (RISK-006); default none, since a flag on the
+            machine running a historical simulation says nothing about the past.
         observer: Called after every event with the event and the clock.
     """
     portfolio = Portfolio(costs, capital=capital, margin_rate=margin_rate)
@@ -845,6 +877,7 @@ def run_event_backtest(
         clock=clock,
         constraints=rules,
         sigma=None if sigma_daily is None else SeriesSigma(sigma_daily),
+        kill_switch=kill_switch,
         observer=observer,
     )
     output = engine.run()

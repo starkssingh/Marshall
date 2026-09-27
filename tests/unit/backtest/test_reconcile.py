@@ -5,10 +5,10 @@ caught.
 The event tier runs through the real risk engine (RISK-005). To compare execution mechanics, most
 tests give it a profile in which the requested exposure binds — a 5 % risk budget to stops 4.5
 daily sigma-hats away and a lot cap at the instrument's maximum, so the size is the strategy's
-exposure as in the screener — and the halts never do; a sigma-hat of 1 % is known from the start,
-so no entry is refused for want of one. The stops are far enough never to fill in these two weeks
-(the screener has none). With the default profile the risk engine's sizes and refusals are
-explained differences too (the last test).
+exposure as in the screener — and the halts and data-health breakers never do; a sigma-hat of 1 %
+is known from the start, so no entry is refused for want of one. The stops are far enough never
+to fill in these two weeks (the screener has none). With the default profile the risk engine's
+sizes and refusals are explained differences too (the last test).
 """
 
 import numpy as np
@@ -40,9 +40,11 @@ from xq.signals.schema import TradeIntent
 TOLERANCE = CFG.backtest_config().event_config().reconcile_tolerance
 PLACEHOLDER = CostModel.from_config(CFG, "xauusd")  # rollover and release slippage multipliers
 #: The requested exposure binds (5 % of equity to a 4.5-sigma stop is more, and the lot cap is
-#: the instrument's), no halt binds.
+#: the instrument's), no halt binds and the data-health breakers are off (the missed-decision
+#: test leaves quote gaps on purpose).
 MECHANICS = risk_engine(
     risk_per_trade=0.05,
+    breakers={"stale_quote_s": 1e9, "spread_multiple": 1e9},
     max_lots=100,
     max_daily_loss=0.99,
     max_drawdown=0.99,

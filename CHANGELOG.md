@@ -578,6 +578,14 @@ IDs from `docs/specs/development-plan.md`.
   sigma-hat to strategies; `ExposureStrategy` and `RuleStrategy` attach stops in sigma-hat
   units; `TradeIntent` gains `p_win` and `calibrated`; `RiskDecision` gains `order_type` and
   `price`. Reconciliation labels exits a risk rule forced as event rules. ADR 0052.
+- RISK-006: kill switch and data-health breakers (`xq.risk.kill_switch`) — a kill switch on
+  while a file exists, an environment variable (`XQ_KILL_SWITCH`) is true or it is engaged by
+  hand, and breakers for a stale quote (older than 120 s) and an abnormal spread (above 5 x the
+  median of the last 500 quotes); all block new exposure in `RiskEngine.evaluate`, never an exit.
+  The event engine reads the switch at every decision, keeps the spread reference, and with the
+  `flatten` policy sends a `flat` intent while the switch is on; backtests honour a kill switch
+  only when given one. Tested at the thresholds and end to end (stale and wide quotes refused, a
+  switch turned on mid-run, with and without flattening). ADR 0052.
 
 ### Changed
 

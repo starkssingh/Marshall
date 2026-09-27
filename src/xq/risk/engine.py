@@ -12,8 +12,9 @@ halts, breakers or missing data are in force.
 **New exposure** — an intent whose target opens, increases or flips the position — passes, in
 order:
 
-1. the data it needs: a quote at the decision, and a win probability that is calibrated if the
-   intent carries one (an uncalibrated probability never sizes a position);
+1. the data it needs and the switches: a quote at the decision, a win probability that is
+   calibrated if the intent carries one (an uncalibrated probability never sizes a position), the
+   kill switch off and no data-health breaker tripped (RISK-006, `xq.risk.kill_switch`);
 2. the stop policy (RISK-004, `check_stops`): the stop the decision accepts, possibly widened;
 3. sizing (RISK-002, `size_entry`): the target size from the risk budget to that stop (or the
    volatility target), capped by the requested exposure, scaled by the calibrated probability and
@@ -46,6 +47,7 @@ from xq.backtest.events import clean_lots
 from xq.core.config import AppConfig, InstrumentSpec, RiskConfig
 from xq.core.time import to_ns
 from xq.core.types import Side
+from xq.risk.kill_switch import breaker_reasons
 from xq.risk.limits import CorrelatedExposure, cap_target, entry_halts
 from xq.risk.sizing import size_entry
 from xq.risk.state import MarketState, RiskState
@@ -205,10 +207,14 @@ class RiskEngine:
     # --- helpers --------------------------------------------------------------------------------
 
     def _blocks(self, intent: TradeIntent, market: MarketState | None) -> list[str]:
-        """What stops any new exposure before the stop policy (RISK-006 adds the breakers)."""
+        """What stops any new exposure before the stop policy: data, kill switch, breakers."""
         blocks: list[str] = []
         if market is None:
             blocks.append("no quote known at the decision time")
+        else:
+            if market.kill_reason is not None:
+                blocks.append(market.kill_reason)
+            blocks.extend(breaker_reasons(market, self.config.breakers))
         if intent.p_win is not None and not intent.calibrated:
             blocks.append("an uncalibrated win probability cannot size a position")
         return blocks
@@ -285,6 +291,10 @@ class RiskEngine:
             )
             if market.sigma_daily is not None:
                 snapshot["sigma_daily"] = market.sigma_daily
+            if market.spread_reference is not None:
+                snapshot["spread_reference"] = market.spread_reference
+            if market.kill_reason is not None:
+                snapshot["kill_switch"] = market.kill_reason
         return snapshot
 
 
