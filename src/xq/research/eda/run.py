@@ -5,8 +5,8 @@ window (`xq.research.eda.data`), computes the sections below and writes one repo
 `xq.research.reports.ReportBuilder` under ``reports/eda/<dataset_id>/<run_id>/``:
 
 - ``overview`` — the discovery window, the bars and returns per timeframe, the excluded days;
-- ``distributions`` (EDA-002), ``dependence`` (EDA-003) and ``horizons`` (EDA-006), each with its
-  tables and figures;
+- ``distributions`` (EDA-002), ``dependence`` (EDA-003), ``seasonality`` (EDA-004) and ``horizons``
+  (EDA-006), each with its tables and figures;
 - ``admission.yaml`` — the horizon admission list (copied to ``config/horizons.yaml`` only by
   ``xq research admit-horizons``);
 - ``run.json`` — the run id, experiment, confirmatory flag, git sha and seed (outside the
@@ -36,7 +36,7 @@ from xq.core.config import config_hash
 from xq.core.seeds import derive_seed
 from xq.core.time import TimestampLike
 from xq.core.types import Timeframe
-from xq.research.eda import dependence, distributions, horizons
+from xq.research.eda import dependence, distributions, horizons, seasonality
 from xq.research.eda.bootstrap import eda_block_length
 from xq.research.eda.data import EdaInputs, bars_per_trading_day, load_eda_inputs
 from xq.research.reports import (
@@ -112,6 +112,7 @@ def run_eda(run: RunContext, dataset_id: str, *, end: TimestampLike | None = Non
     _overview(builder.section("overview", "Data and discovery window"), inputs, returns)
     _distributions(builder.section("distributions", "Return distributions (EDA-002)"), run, returns)
     _dependence(builder.section("dependence", "Serial dependence (EDA-003)"), run, returns)
+    _seasonality(builder.section("seasonality", "Seasonality and sessions (EDA-004)"), run, returns)
     admission = _horizons(
         builder.section("horizons", "Cost to volatility and horizon admission (EDA-006)"),
         run,
@@ -276,6 +277,98 @@ def _dependence(section: Section, run: RunContext, returns: dict[Timeframe, pd.D
         section.table(
             "summary", pd.concat(summaries, ignore_index=True), caption="Dependence summary"
         )
+
+
+def _seasonality(section: Section, run: RunContext, returns: dict[Timeframe, pd.DataFrame]) -> None:
+    eda = run.cfg.eda_config()
+    config = eda.seasonality
+    windows = seasonality.windows_config(run.cfg.sessions_config(), config.event_windows)
+    alpha = config.alpha
+    section.text(
+        "Effect = bucket mean minus overall mean (and in overall standard deviations). Standard "
+        "errors are cluster-robust (trading week; calendar month for months); intervals are "
+        f"Bonferroni-corrected within each family (family-wise level {alpha:g}). Split-half "
+        "stability: same sign in both halves of the trading days and no significant difference "
+        "between them. Unstable effects are not a basis for hypotheses; every effect must be "
+        "validated out of sample."
+    )
+    intraday = returns[config.intraday_timeframe]
+    daily = returns[Timeframe.D1]
+    events = returns[config.event_timeframe]
+    tables = []
+    if len(intraday):
+        weeks = seasonality.week_clusters(intraday["trading_day"])
+        labels = seasonality.hour_of_week_labels(intraday["bar_start"])
+        order = [h for h in seasonality.hour_of_week_order() if (labels == h).any()]
+        hours = seasonality.one_hot(labels, order)
+        tables.append(
+            seasonality.family_effects(intraday, hours, weeks, alpha=alpha, family="hour_of_week")
+        )
+        inside = seasonality.membership(intraday["bar_start"], windows)
+        names = [*windows.sessions, *windows.overlaps]
+        tables.append(
+            seasonality.family_effects(
+                intraday, inside[names], weeks, alpha=alpha, family="session"
+            )
+        )
+    if len(daily):
+        days = daily["trading_day"]
+        tables.append(
+            seasonality.family_effects(
+                daily,
+                seasonality.day_of_week_members(days),
+                seasonality.week_clusters(days),
+                alpha=alpha,
+                family="day_of_week",
+            )
+        )
+        tables.append(
+            seasonality.family_effects(
+                daily,
+                seasonality.month_members(days),
+                seasonality.month_clusters(days),
+                alpha=alpha,
+                family="month",
+            )
+        )
+    if len(events):
+        inside = seasonality.membership(events["bar_start"], windows)
+        names = [n for n in windows.event_windows if n in inside.columns]
+        tables.append(
+            seasonality.family_effects(
+                events,
+                inside[names],
+                seasonality.week_clusters(events["trading_day"]),
+                alpha=alpha,
+                family="event_window",
+            )
+        )
+    if not tables:
+        section.text("No returns in the discovery window.")
+        return
+    effects = pd.concat(tables, ignore_index=True)
+    notable = effects.loc[effects["significant"] & (effects["stability"] == seasonality.STABLE)]
+    section.table(
+        "significant-stable",
+        notable,
+        caption="Effects whose corrected interval excludes zero and that are split-half stable",
+    )
+    for family in effects["family"].unique():
+        chunk = effects.loc[effects["family"] == family]
+        section.table(
+            str(family),
+            chunk,
+            caption=f"All {family} effects",
+            max_rows=0 if family == "hour_of_week" else None,
+        )
+        if family in ("hour_of_week", "day_of_week", "month"):
+            section.figure(
+                str(family),
+                seasonality.effects_figure(
+                    chunk, ["ret_bps", "abs_ret_bps", "spread_bps"], f"{family} effects"
+                ),
+                caption=f"{family} effects with corrected intervals (hollow: not stable)",
+            )
 
 
 def _horizons(

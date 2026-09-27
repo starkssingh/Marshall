@@ -354,6 +354,12 @@ IDs from `docs/specs/development-plan.md`.
   heteroskedasticity-robust bands; lags are flagged against the robust band. Matches statsmodels;
   the robust band is wider than the i.i.d. one on a GARCH(1,1) simulation and equal on i.i.d.
   data. Adds `statsmodels` as a development dependency (the reference in tests only). ADR 0038.
+- EDA-004: seasonality (`xq.research.eda.seasonality`) — hour of week (New York), day of week,
+  month, sessions and event windows (the dataset's US-release and rollover windows plus the LBMA
+  auctions) for return, absolute return, tick count and spread: effect sizes, cluster-robust
+  standard errors (trading week; month), Bonferroni-corrected Student-t intervals and split-half
+  stability labels. Injected hour-of-week effects are found and stable; an effect that stops
+  half-way is unstable; noise stays within the family-wise error rate. ADR 0038.
 
 ### Changed
 

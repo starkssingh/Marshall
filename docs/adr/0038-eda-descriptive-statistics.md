@@ -2,7 +2,7 @@
 
 - **Status:** accepted
 - **Date:** 2026-09-27
-- **Tasks:** EDA-002, EDA-003 (on EDA-001)
+- **Tasks:** EDA-002, EDA-003, EDA-004 (on EDA-001)
 
 ## Context
 
@@ -40,6 +40,25 @@ processes with known properties. Exact formulas are in the module docstrings.
 - Tests: an AR(1) is recovered; the robust band equals the i.i.d. band for i.i.d. data and is
   about 1.5 times wider at lag 1 for GARCH(1,1) (alpha 0.15, beta 0.8), where it flags no more
   return lags than the i.i.d. band while still flagging volatility clustering.
+
+## Decision — EDA-004 seasonality
+
+- Families: New York hour of the week (1h bars), day of week and month (daily bars), sessions and
+  overlaps, and event windows (the dataset's US-release and rollover windows plus the LBMA AM and
+  PM auctions, −5/+30 minutes, on 5m bars). Variables: return, absolute return, tick count and
+  spread.
+- Effect = bucket mean − overall mean, also in overall standard deviations.
+- Standard errors are cluster-robust by trading week (by calendar month for `month`). Intervals
+  use the Student-t quantile with G − 1 degrees of freedom (G clusters in the bucket) at
+  1 − alpha / (2m), Bonferroni over the m buckets of a family (family-wise alpha 0.05). The t
+  quantile keeps buckets with few clusters from looking precise; a zero standard error is never
+  significant.
+- Split-half stability: the trading days are split at the median and the effect re-estimated in
+  each half; `stable` needs the same sign and no significant difference between the halves.
+  `unstable` and `insufficient data` are labelled; the report lists the significant **and** stable
+  effects separately. Nothing here is validated out of sample.
+- Tests: injected hour-of-week mean and volatility effects are significant and stable; noise stays
+  within the family-wise rate; an effect present only in the first half is unstable.
 
 ## Consequences
 

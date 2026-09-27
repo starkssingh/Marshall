@@ -26,7 +26,7 @@ from xq.tracking import registry
 HYPOTHESIS = "H-0900"
 #: A trading-day start inside the synthetic data: the discovery window of the enforcement tests.
 DISCOVERY_END = "2024-03-12T21:00:00Z"
-SECTIONS = ["overview", "distributions", "dependence", "horizons"]
+SECTIONS = ["overview", "distributions", "dependence", "seasonality", "horizons"]
 
 
 @pytest.fixture(scope="module")
@@ -137,6 +137,8 @@ def test_report_has_every_section_and_its_provenance(
     timeframes = ("1m", "5m", "15m", "1h", "4h", "1d")
     assert all((first / "figures" / f"distributions-qq-{tf}.png").is_file() for tf in timeframes)
     assert all((first / "tables" / f"dependence-acf-{tf}.csv").is_file() for tf in timeframes)
+    effects = pd.read_csv(first / "tables" / "seasonality-hour_of_week.csv")
+    assert {"effect", "ci_low", "ci_high", "significant", "stability"} <= set(effects.columns)
 
 
 def test_every_report_file_is_a_run_artifact(reports: tuple[Path, Path], engine: Engine) -> None:
