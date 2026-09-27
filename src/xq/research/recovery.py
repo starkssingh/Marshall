@@ -118,6 +118,8 @@ RECOVERY_TESTS: Mapping[str, tuple[str, ...]] = {
     "vol_selection": (
         f"{_SELECTION}::test_nothing_beats_the_default_so_ewma_stays",
         f"{_SELECTION}::test_the_best_eligible_model_is_selected",
+        f"{_SELECTION}::test_p_values_are_holm_adjusted_across_all_challengers",
+        f"{_SELECTION}::test_twelve_null_challengers_promote_in_at_most_about_five_percent_of_samples",
         f"{_SELECTION}::test_ewma_is_kept_end_to_end_when_it_is_the_true_model",
         f"{_SELECTION}::test_sigma_is_served_per_fold_from_training_periods_only",
     ),

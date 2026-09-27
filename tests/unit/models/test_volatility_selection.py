@@ -16,6 +16,7 @@ from xq.models.volatility import Selection, select_forecaster, serve_sigma
 from xq.research.volatility.benchmarks import Deseasonalized, Ewma, benchmark_forecasters
 from xq.research.volatility.evaluate import board_forecasters, evaluate_forecasters
 from xq.research.volatility.garch import garch_forecasters
+from xq.validation.forecast_eval import diebold_mariano_less, model_confidence_set
 from xq.validation.splitters import WalkForwardConfig
 
 DEFAULT = "ewma_0.94"
@@ -35,7 +36,7 @@ def test_nothing_beats_the_default_so_ewma_stays() -> None:
         ]
     )
     selection = select_forecaster(metrics, default=DEFAULT, dm_alpha=0.05)
-    assert selection == Selection(DEFAULT, DEFAULT, False, (), selection.reasons)
+    assert selection == Selection(DEFAULT, DEFAULT, False, (), selection.reasons, selection.p_holm)
     assert "does not beat" in selection.reasons["har"]
     assert "not in the model confidence set" in selection.reasons["garch_t"]
 
@@ -62,6 +63,48 @@ def test_the_best_eligible_model_is_selected() -> None:
     assert selection.beats_default
     assert selection.eligible == ("har", "gjr_t")
     assert "selected" in selection.reasons["gjr_t"]
+
+
+def test_p_values_are_holm_adjusted_across_all_challengers() -> None:
+    metrics = _metrics(
+        [
+            (DEFAULT, 0.30, True, math.nan),
+            ("har", 0.27, True, 0.02),  # below 0.05 alone, not after Holm across three
+            ("gjr_t", 0.28, True, 0.30),
+            ("egarch_t", 0.29, False, 0.60),  # outside the MCS, but still in the Holm family
+        ]
+    )
+    selection = select_forecaster(metrics, default=DEFAULT, dm_alpha=0.05)
+    assert selection.selected == DEFAULT
+    assert selection.p_holm == pytest.approx({"har": 0.06, "gjr_t": 0.6, "egarch_t": 0.6})
+    assert "after Holm across 3 challengers" in selection.reasons["har"]
+
+
+def test_twelve_null_challengers_promote_in_at_most_about_five_percent_of_samples() -> None:
+    """Twelve challengers whose expected QLIKE equals the default's: promotions are false."""
+    rng = np.random.default_rng(20260927)
+    challengers = [f"m{k:02d}" for k in range(12)]
+    n_sims, n_obs = 400, 500
+    promoted = naive = 0
+    for sim in range(n_sims):
+        common = rng.gamma(2.0, 0.5, n_obs)  # the shared difficulty of each period
+        default_loss = common + rng.normal(0.0, 0.3, n_obs)
+        losses = {DEFAULT: default_loss}
+        for name in challengers:
+            losses[name] = common + rng.normal(0.0, 0.3, n_obs)
+        frame = pd.DataFrame(losses)
+        mcs = model_confidence_set(frame, alpha=0.10, n_boot=200, mean_block=5.0, seed=sim)
+        rows = [(DEFAULT, float(default_loss.mean()), DEFAULT in mcs.included, math.nan)]
+        for name in challengers:
+            p = diebold_mariano_less(losses[name], default_loss).p_value
+            rows.append((name, float(losses[name].mean()), name in mcs.included, p))
+        metrics = _metrics(rows)
+        promoted += select_forecaster(metrics, default=DEFAULT, dm_alpha=0.05).beats_default
+        naive += bool(  # the rule without the Holm adjustment
+            ((metrics["dm_vs_default_p_less"] < 0.05) & metrics["in_mcs"]).any()
+        )
+    assert promoted / n_sims <= 0.07  # at most about dm_alpha (binomial error ~1 %)
+    assert naive / n_sims >= 0.25  # about 40 %: why the adjustment is needed
 
 
 def test_the_default_must_be_on_the_board() -> None:

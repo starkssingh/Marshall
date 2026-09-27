@@ -82,3 +82,12 @@ before any real result; changing one afterwards needs an ADR.
    configuration or a target set. The platform's sigma-hat stays the interim EWMA (span 96 base
    bars) of `fwd_returns.v1` until a volatility board runs on the discovery and evaluation windows
    of real data, the owner approves the selection, and an ADR records the switch.
+
+## Amendment — owner review of PR #11 (2026-09-27)
+
+10. **Holm across challengers.** The one-sided Diebold-Mariano p-values of all challengers against
+    the default are Holm-adjusted as one family (every model other than `ewma_0.94` with a defined
+    p-value, whether or not it is in the MCS) before `dm_alpha` is applied. With twelve challengers
+    equal to the default in truth, a simulation of 400 boards promotes one in 4.5 % of them with
+    the adjustment and in 30.5 % without it; a test pins the adjusted rate at 7 % or less.
+    `Selection.p_holm` records the adjusted p-values.

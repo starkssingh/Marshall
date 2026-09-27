@@ -13,14 +13,17 @@ each period's tz-aware decision time, in time order. The plan's interface:
 Forecasters never size positions (CLAUDE.md): sigma-hat scales targets, stops and costs; sizing
 is the risk engine's.
 
-**Selection** (`select_forecaster`, the plan's promotion rule): a model is selected only if it is
-in the 90 % Model Confidence Set **and** beats the default (``ewma_0.94``) by a one-sided
-Diebold-Mariano test on QLIKE with p below ``dm_alpha``; among such models the lowest mean QLIKE
-wins. When nothing beats the default — including when nothing else was evaluated — the default
-stays. The selection is a record, not a switch: nothing here writes it anywhere. Replacing the
-platform's sigma-hat (the interim EWMA of ``fwd_returns.v1``) needs the owner's approval, an ADR
-and a configuration change after a board on real data (Sprint 6 is build-only; no model is
-promoted, ADR 0044).
+**Selection** (`select_forecaster`, the plan's promotion rule): a model is selected only if it is in
+the 90 % Model Confidence Set **and** beats the default (``ewma_0.94``) by a one-sided
+Diebold-Mariano test on QLIKE whose p-value, **Holm-adjusted across all challengers** (every model
+other than the default with a defined p-value), is below ``dm_alpha``; among such models the lowest
+mean QLIKE wins. Without the adjustment, a board of twelve challengers that are no better than the
+default promotes one of them in about 30 % of simulated samples (up to 46 % for twelve independent
+tests); with it, in at most about ``dm_alpha`` of them (a test simulates this). When nothing beats
+the default — including when nothing else was evaluated — the default stays. The selection is a
+record, not a switch: nothing here writes it anywhere. Replacing the platform's sigma-hat (the
+interim EWMA of ``fwd_returns.v1``) needs the owner's approval, an ADR and a configuration change
+after a board on real data (Sprint 6 is build-only; no model is promoted, ADR 0044).
 
 **Serving** (`serve_sigma`): the selected forecaster serves sigma-hat per walk-forward fold — fitted
 on each fold's training periods only, forecasting its test periods — so every sigma-hat a later
@@ -32,13 +35,14 @@ from __future__ import annotations
 import math
 from abc import ABC, abstractmethod
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Self
 
 import numpy as np
 import pandas as pd
 
 from xq.core.errors import NaiveTimestampError
+from xq.research.stats.results import holm_adjust
 from xq.validation.splitters import WalkForwardConfig, WalkForwardSplitter
 
 #: Columns every periods frame carries (`xq.research.volatility.realized.REALIZED_COLUMNS`).
@@ -122,6 +126,8 @@ class Selection:
     beats_default: bool
     eligible: tuple[str, ...]
     reasons: dict[str, str]
+    #: Each challenger's one-sided DM p-value against the default, Holm-adjusted across them.
+    p_holm: dict[str, float] = field(default_factory=dict)
 
 
 def select_forecaster(metrics: pd.DataFrame, *, default: str, dm_alpha: float) -> Selection:
@@ -129,7 +135,8 @@ def select_forecaster(metrics: pd.DataFrame, *, default: str, dm_alpha: float) -
 
     Args:
         metrics: One row per model with ``model``, ``qlike``, ``in_mcs`` and
-            ``dm_vs_default_p_less`` (`xq.research.volatility.evaluate.VolBoard.metrics`).
+            ``dm_vs_default_p_less`` (`xq.research.volatility.evaluate.VolBoard.metrics`), the
+            unadjusted one-sided p-value of each model beating the default.
 
     Raises:
         ValueError: if the default is not on the board.
@@ -137,26 +144,32 @@ def select_forecaster(metrics: pd.DataFrame, *, default: str, dm_alpha: float) -
     table = metrics.set_index("model")
     if default not in table.index:
         raise ValueError(f"the default {default!r} is not on the board")
+    challengers = [str(name) for name in table.index if str(name) != default]
+    raw = table.loc[challengers, "dm_vs_default_p_less"].to_numpy(dtype=np.float64)
+    adjusted = dict(zip(challengers, (float(p) for p in holm_adjust(raw)), strict=True))
     reasons: dict[str, str] = {default: "the default: kept unless a model beats it"}
     eligible: list[str] = []
-    for name, row in table.iterrows():
-        model = str(name)
-        if model == default:
-            continue
-        p = float(row["dm_vs_default_p_less"])
-        if not bool(row["in_mcs"]):
+    for model in challengers:
+        p = adjusted[model]
+        if not bool(table.loc[model, "in_mcs"]):
             reasons[model] = "not in the model confidence set"
         elif not (math.isfinite(p) and p < dm_alpha):
-            reasons[model] = f"does not beat {default} (one-sided DM p {p:.3g} >= {dm_alpha:g})"
+            reasons[model] = (
+                f"does not beat {default} (one-sided DM p {p:.3g} after Holm across "
+                f"{len(challengers)} challengers >= {dm_alpha:g})"
+            )
         else:
             eligible.append(model)
-            reasons[model] = f"in the MCS and beats {default} (one-sided DM p {p:.3g})"
+            reasons[model] = (
+                f"in the MCS and beats {default} (one-sided DM p {p:.3g} after Holm across "
+                f"{len(challengers)} challengers)"
+            )
     if not eligible:
-        return Selection(default, default, False, (), reasons)
+        return Selection(default, default, False, (), reasons, adjusted)
     qlike = table["qlike"].astype(float)
     winner = min(eligible, key=lambda m: float(qlike[m]))
     reasons[winner] += "; lowest mean QLIKE among eligible models: selected"
-    return Selection(winner, default, True, tuple(eligible), reasons)
+    return Selection(winner, default, True, tuple(eligible), reasons, adjusted)
 
 
 def serve_sigma(
