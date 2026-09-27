@@ -16,6 +16,7 @@ _DEPENDENCE = "tests/unit/research/test_stats_dependence.py"
 _VARIANCE_RATIO = "tests/unit/research/test_stats_variance_ratio.py"
 _ARIMA = "tests/unit/research/test_stats_arima.py"
 _ESTIMATORS = "tests/unit/research/test_vol_estimators.py"
+_REALIZED = "tests/unit/research/test_vol_realized.py"
 
 RECOVERY_TESTS: Mapping[str, tuple[str, ...]] = {
     "ADF": (
@@ -70,6 +71,15 @@ RECOVERY_TESTS: Mapping[str, tuple[str, ...]] = {
         f"{_ESTIMATORS}::test_estimators_are_trailing",
     ),
     "wilder_atr": (f"{_ESTIMATORS}::test_wilder_atr_by_hand",),
+    "realized_measures": (
+        f"{_REALIZED}::test_measures_match_hand_computations",
+        f"{_REALIZED}::test_hourly_rv_adds_up_to_daily_rv",
+        f"{_REALIZED}::test_bipower_separates_jumps_from_the_diffusion",
+    ),
+    "diurnal_factor": (
+        f"{_REALIZED}::test_the_diurnal_factor_recovers_an_injected_pattern",
+        f"{_REALIZED}::test_the_diurnal_factor_is_fitted_on_training_rows_only",
+    ),
 }
 
 

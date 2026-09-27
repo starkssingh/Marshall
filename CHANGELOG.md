@@ -418,6 +418,14 @@ IDs from `docs/specs/development-plan.md`.
   hand computations; on a simulated Brownian path with opening gaps the range estimators recover
   the intraday variance and Yang-Zhang and close-to-close the total; trailing (later bars never
   change earlier values). ADR 0044.
+- VOL-002: realized measures and the diurnal factor (`xq.research.volatility.realized`) — RV,
+  bipower variation, the jump component and the intraday return per UTC hour and per trading day
+  from 1m or 5m returns inside one trading day (the daily-break return is left out), indexed by
+  the period's decision time; `DiurnalFactor` of the intraday variance pattern (buckets since the
+  17:00 New York roll, day-standardized), fitted only on rows available by `train_end`. Match hand
+  computations; hourly RVs add up to the daily RV; bipower separates simulated jumps up to its
+  known finite-sample contamination; an injected pattern is recovered; perturbing test data leaves
+  the factor unchanged while a full-sample fit moves. ADR 0044.
 
 ### Changed
 
