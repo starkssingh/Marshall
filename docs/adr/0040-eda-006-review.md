@@ -27,3 +27,10 @@ timeframe, which is not how a target (TGT-002) or a strategy holds a position.
   the share of periods that cross a close. Sessions are those of the decision time.
 - The fills come only from discovery-window bars, and `run_eda` checks every period's exit
   against the window.
+
+## Decision 2 — Spread at the fills
+
+The spread cost is half the quoted spread at the entry fill plus half the spread at the exit fill,
+each over its own mid: the closing spread (`spread_close`) of the 1m bar whose close is the fill.
+The bar's mean spread over the holding period averaged in spread spikes (the rollover) and quiet
+stretches that the trade never meets.

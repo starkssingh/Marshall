@@ -83,6 +83,26 @@ def test_minute_quotes_are_bar_closes_stamped_inside_the_bar() -> None:
     np.testing.assert_allclose(minute_quotes(bid_bars, "bid")["mid"], bars["close"])
 
 
+def test_spreads_are_quoted_at_the_fills_not_bar_means() -> None:
+    # The closing spread rises through the day (1 bp at the first bar, 1 bp more per market hour)
+    # while the mean spread is ten times larger everywhere: the cost must use the closing spreads
+    # of the entry and exit fills' bars, half each.
+    bars = drifting_bars()
+    hours = np.arange(len(bars)) / 60.0
+    bars["spread_close"] = bars["close"] * (1.0 + hours) / 1e4
+    bars["spread_mean"] = bars["spread_close"] * 10
+    periods = periods_of(bars, "1h")
+    quotes = minute_quotes(bars)
+    stamps = quotes["ts_utc"].to_numpy()
+    entry = np.searchsorted(stamps, periods["label_start"].to_numpy())
+    exit_ = np.searchsorted(stamps, periods["label_end"].to_numpy())
+    np.testing.assert_allclose(periods["entry_spread"], bars["spread_close"].to_numpy()[entry])
+    np.testing.assert_allclose(periods["exit_spread"], bars["spread_close"].to_numpy()[exit_])
+    costs = period_costs(periods, cost_model(), minutes(), sigma_minutes=60)
+    expected = 0.5 * (1.0 + hours[entry]) + 0.5 * (1.0 + hours[exit_])  # bps of each mid
+    np.testing.assert_allclose(costs["spread_bps"], expected, rtol=1e-9)
+
+
 def test_decisions_are_the_bars_on_the_grid() -> None:
     bars = drifting_bars()
     decisions = decision_times(bars, STEP)
@@ -169,8 +189,8 @@ def two_periods() -> pd.DataFrame:
             "move": [10e-4, -20e-4],
             "entry_mid": 2000.0,
             "exit_mid": [2002.0, 1996.0],
-            "entry_spread_mean": 0.2,
-            "exit_spread_mean": 0.4,
+            "entry_spread": 0.2,
+            "exit_spread": 0.4,
         },
         index=pd.DatetimeIndex(entry - pd.Timedelta(seconds=1), name="decision_time"),
     )

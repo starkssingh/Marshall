@@ -14,8 +14,9 @@ decision every 5 minutes); that is fine for means, and n is reported.
 Its **round-trip cost** in basis points, from the configured cost model (BT-001,
 `xq.backtest.costs.CostModel`):
 
-- **spread** — half the mean spread of the entry fill's 1m bar over its mid plus half that of the
-  exit fill's bar;
+- **spread** — half the quoted spread at the entry fill plus half the spread at the exit fill, each
+  over its mid: the closing spread of the 1m bar whose close is the fill (buying at the ask and
+  selling at the bid costs half a spread each way, at the instants the trade happens);
 - **commission** — both sides' commission of one lot at the entry mid, over its notional;
 - **slippage** — the model's slippage at the entry fill and at the exit fill, with sigma-hat the RMS
   of the last ``horizons.sigma_1m_minutes`` one-minute returns completed by the entry (the median
@@ -75,8 +76,8 @@ PERIOD_COLUMNS = [
     "move",
     "entry_mid",
     "exit_mid",
-    "entry_spread_mean",
-    "exit_spread_mean",
+    "entry_spread",
+    "exit_spread",
 ]
 TABLE_COLUMNS = [
     "horizon",
@@ -124,9 +125,9 @@ class HorizonAdmission:
 def minute_quotes(bars: pd.DataFrame, basis: PriceBasis | str = PriceBasis.MID) -> pd.DataFrame:
     """One quote per complete 1m bar: its closing mid and spread, stamped just before its end.
 
-    `bars` are 1m bars of price `basis` (``close``, ``spread_close``, ``spread_mean``, sorted by
-    ``bar_start_utc``). The close is the last quote of the bar, so its stamp is the last instant
-    of the bar: a fill "at or after" an instant never uses a bar that ended before it.
+    `bars` are 1m bars of price `basis` (``close``, ``spread_close``, sorted by ``bar_start_utc``).
+    The close is the last quote of the bar, so its stamp is the last instant of the bar: a fill
+    "at or after" an instant never uses a bar that ended before it.
     """
     starts = instants_ns(bars[BAR_START])
     close = bars["close"].to_numpy(dtype=np.float64)
@@ -145,7 +146,6 @@ def minute_quotes(bars: pd.DataFrame, basis: PriceBasis | str = PriceBasis.MID) 
             "ask": mid + spread / 2,
             "mid": mid,
             "spread_close": spread,
-            "spread_mean": bars["spread_mean"].to_numpy(dtype=np.float64),
         }
     )
 
@@ -172,7 +172,7 @@ def holding_periods(
     Returns:
         One row per measured decision (indexed by decision time): the fills' instants
         (``label_start``, ``label_end``), ``crosses_close``, the log mid ``move``, and the mid and
-        mean spread of the entry and exit fills' bars.
+        spread quoted at the entry and exit fills.
     """
     quotes = minute_quotes(bars, basis)
     decisions = decision_times(bars, step)
@@ -193,7 +193,7 @@ def holding_periods(
     entry = np.searchsorted(stamps, instants_ns(moves["label_start"]))
     exit_ = np.searchsorted(stamps, instants_ns(moves["label_end"]))
     mid = quotes["mid"].to_numpy()
-    spread = quotes["spread_mean"].to_numpy()
+    spread = quotes["spread_close"].to_numpy()
     return pd.DataFrame(
         {
             "label_start": moves["label_start"],
@@ -202,8 +202,8 @@ def holding_periods(
             "move": moves["value"].to_numpy(dtype=np.float64),
             "entry_mid": mid[entry],
             "exit_mid": mid[exit_],
-            "entry_spread_mean": spread[entry],
-            "exit_spread_mean": spread[exit_],
+            "entry_spread": spread[entry],
+            "exit_spread": spread[exit_],
         },
         index=moves.index,
     )
@@ -275,8 +275,8 @@ def period_costs(
     rate = (financing.long_rate_annual_pct + financing.short_rate_annual_pct) / 2
     financing_bps = rollover_weights(cost, starts, ends) * rate / 100 / financing.day_count * _BPS
     spread = (
-        periods["entry_spread_mean"].to_numpy(dtype=np.float64) / price
-        + periods["exit_spread_mean"].to_numpy(dtype=np.float64)
+        periods["entry_spread"].to_numpy(dtype=np.float64) / price
+        + periods["exit_spread"].to_numpy(dtype=np.float64)
         / periods["exit_mid"].to_numpy(dtype=np.float64)
     ) * (_BPS / 2)
     return pd.DataFrame(
