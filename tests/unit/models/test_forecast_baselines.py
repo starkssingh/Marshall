@@ -78,6 +78,7 @@ def test_baselines_are_fixed_benchmarks() -> None:
         "random_walk",
         "historical_mean",
         "climatology",
+        "ar1",
     }
     assert FORECAST_BASELINES["climatology"].task == "classification"
     assert all(s.task == "regression" for n, s in FORECAST_BASELINES.items() if n != "climatology")
@@ -95,3 +96,24 @@ def test_random_walk_columns_follow_the_horizon() -> None:
     assert random_walk_columns("15m", "15m") == ("open", "close")
     assert random_walk_columns("1h", "15m") == ("ctx_1h_open", "ctx_1h_close")
     assert random_walk_columns("1d", "15m") == ("ctx_1d_open", "ctx_1d_close")
+
+
+def test_ar1_is_an_ar1_of_bar_returns_whose_order_cannot_be_tuned() -> None:
+    rng = np.random.default_rng(3)
+    r = np.zeros(3000)
+    for t in range(1, 3000):
+        r[t] = 0.4 * r[t - 1] + rng.standard_normal() * 1e-3
+    close = 2000.0 * np.exp(np.cumsum(r))
+    x = pd.DataFrame({"open": close * np.exp(-r), "close": close})
+    estimator = forecast_baseline("ar1").factory(
+        {"open": "open", "close": "close", "horizon_bars": 2, "p": 5, "max_p": 9}
+    )
+    estimator.fit(x.iloc[:2000], pd.Series(np.zeros(2000)), np.random.default_rng(0))
+    fitted = estimator.fitted
+    assert (fitted.p, fitted.q) == (1, 0)
+    assert fitted.ar[0] == pytest.approx(0.4, abs=0.05)
+    forecast = estimator.predict(x.iloc[2000:])
+    phi, mu = fitted.ar[0], fitted.mu
+    expected = 2 * mu + (phi + phi**2) * (r[2000:] - mu)
+    np.testing.assert_allclose(forecast, expected, rtol=1e-9, atol=1e-15)
+    assert FORECAST_BASELINES["ar1"].task == "regression"

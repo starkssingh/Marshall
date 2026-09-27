@@ -13,7 +13,11 @@ benchmarks, not candidates: none has a grid, and none may be tuned.
   walk-forward windows, the expanding historical mean at the forecast origin (a random walk with
   drift), held for the whole test fold;
 - ``climatology`` (classification): the training fold's frequency of positive targets, the
-  forecast probability for every test row.
+  forecast probability for every test row;
+- ``ar1`` (regression, BASE-003): the statistical baseline of STAT-006 — an AR(1) of the decision
+  bars' own log returns fitted on the fold's training rows (`xq.models.arma`), iterated to the
+  target's horizon (``horizon_bars`` base bars) from each test row. Its order is fixed at 1 and
+  cannot be tuned.
 
 Models never size positions: turning forecasts into positions is a strategy's job (BASE-005).
 
@@ -67,6 +71,8 @@ from xq.core.errors import ConfigError
 from xq.core.seeds import derive_seed, make_rng
 from xq.datasets.asof import asof_join
 from xq.datasets.primitives import lag, log_returns, rolling
+from xq.models.arma import CODE_VERSION as ARMA_CODE_VERSION
+from xq.models.arma import ArmaForecast
 from xq.models.base import ModelSpec
 
 FloatArray = npt.NDArray[np.float64]
@@ -132,11 +138,18 @@ def _random_walk(params: Mapping[str, Any]) -> LastBarReturn:
     return LastBarReturn(params)
 
 
+def _ar1(params: Mapping[str, Any]) -> ArmaForecast:
+    # the order is part of the baseline's definition: a configuration cannot change it
+    fixed = {k: v for k, v in params.items() if k not in ("p", "q", "max_p")}
+    return ArmaForecast({**fixed, "p": 1, "q": 0})
+
+
 FORECAST_BASELINES: Mapping[str, ModelSpec] = {
     "zero_return": ModelSpec("zero_return", 1, "regression", _zero),
     "random_walk": ModelSpec("random_walk", 1, "regression", _random_walk),
     "historical_mean": ModelSpec("historical_mean", 1, "regression", _historical_mean),
     "climatology": ModelSpec("climatology", 1, "classification", _climatology),
+    "ar1": ModelSpec("ar1", ARMA_CODE_VERSION, "regression", _ar1),
 }
 
 

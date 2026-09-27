@@ -1,5 +1,6 @@
-"""BASE-005 end to end: `xq baselines run` puts every baseline through walk-forward and the cost
-model on a synthetic dataset and writes a board whose net figures are marked as screening."""
+"""BASE-005 end to end: `xq baselines run` puts every baseline (with BASE-003's AR(1)) through
+walk-forward and the cost model on a synthetic dataset and writes a board whose net figures are
+marked as screening."""
 
 import json
 from collections.abc import Iterator
@@ -29,7 +30,7 @@ FWD = {"name": "fwd_returns", "version": "v1"}
 BOARD = {
     "targets": ["fwd_ret_mid_15m", "fwd_ret_mid_1h"],
     "walk_forward": {"min_train": "5D", "test_len": "2D", "embargo": "1h"},
-    "forecast_baselines": ["zero_return", "random_walk", "historical_mean", "climatology"],
+    "forecast_baselines": ["zero_return", "random_walk", "historical_mean", "climatology", "ar1"],
     "signal_timeframe": "1h",
     "rules": {
         "buy_and_hold": {"rule": "buy_and_hold"},
@@ -51,7 +52,7 @@ RULES = ["buy_and_hold", "tsmom_8", "zscore_12", "ma_4_12", "donchian_8_4"]
 FORECAST_STRATEGIES = [
     f"{name}:{target}"
     for target in BOARD["targets"]
-    for name in ("random_walk", "historical_mean", "climatology")
+    for name in ("random_walk", "historical_mean", "climatology", "ar1")
 ]
 
 
@@ -183,6 +184,9 @@ def test_every_strategy_is_a_trial_and_has_intervals(
     assert mean["mean_loss_ci_low"] <= mean["mean_loss"] <= mean["mean_loss_ci_high"]
     assert 0 <= mean["dm_vs_zero_p"] <= 1
     assert forecasts[("fwd_ret_mid_1h", "zero_return")]["dm_vs_zero_p"] is None
+    ar1 = forecasts[("fwd_ret_mid_1h", "ar1")]  # BASE-003: the AR baseline is on the board
+    assert ar1["n"] > 0
+    assert 0 <= ar1["dm_vs_zero_p"] <= 1
 
 
 def test_daily_returns_cover_every_out_of_sample_day(

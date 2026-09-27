@@ -456,6 +456,14 @@ IDs from `docs/specs/development-plan.md`.
   keeps EWMA end to end when EWMA is the true model; served sigma-hat matches a per-fold refit and
   ignores later data. Nothing is promoted: sigma-hat stays the interim EWMA of `fwd_returns.v1`.
   ADR 0044.
+- BASE-003: statistical baselines on the boards — the `ar1` forecast baseline (an AR(1) of the
+  decision bars' returns per training fold, iterated to the target's horizon, order fixed) runs on
+  the baseline board like the other forecast baselines (metrics, DM against `zero_return`, a
+  forecast-sign strategy), shown end to end on a synthetic dataset; EWMA and HAR are the
+  volatility board's benchmark entries (the selection's default and DM reference). The ARMA model
+  moves to `xq.models.arma` (re-exported by `xq.research.stats.arima`). H-0001's `board.yaml` is
+  unchanged: adding `ar1` would raise its approved trial budget from 36 to 40 (owner decision).
+  ADR 0045.
 
 ### Changed
 

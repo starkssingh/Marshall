@@ -6,12 +6,12 @@ folds, the same cost model and the same metrics, inside an experiment run:
 1. **Folds.** The board's walk-forward splitter on the dataset's decision times, purged by the
    first target's ``label_end``. The out-of-sample (OOS) decisions are the union of the test
    windows; every strategy is judged on them and on every OOS trading day.
-2. **Forecast baselines** (BASE-001) run through `run_walk_forward` for each target. The board
-   reports their forecast metrics, a stationary-bootstrap interval of the mean loss, and a
-   one-sided Diebold-Mariano test of beating ``zero_return`` (regression baselines; its horizon is
-   the target horizon in base bars). Every forecast baseline except ``zero_return`` (always flat)
-   also becomes a strategy: the sign of the forecast, or of ``p - 0.5`` for ``climatology``,
-   re-decided at every decision.
+2. **Forecast baselines** (BASE-001, and BASE-003's ``ar1``) run through `run_walk_forward` for
+   each target. The board reports their forecast metrics, a stationary-bootstrap interval of the
+   mean loss, and a one-sided Diebold-Mariano test of beating ``zero_return`` (regression
+   baselines; its horizon is the target horizon in base bars). Every forecast baseline except
+   ``zero_return`` (always flat) also becomes a strategy: the sign of the forecast, or of
+   ``p - 0.5`` for ``climatology``, re-decided at every decision.
 3. **Rule baselines** (BASE-002) run on the signal bars of ``signal_timeframe`` (``1d``). When a
    ``vol_target`` is configured, each rule also runs volatility-targeted (``<name>_vol``), its
    realized volatility annualized with the signal bars per year (the gate periods per year for
@@ -367,6 +367,11 @@ def _forecast_baselines(
             if target.endswith("_vol") or not {opened, closed} <= set(features.columns):
                 continue  # not applicable: no bar of the horizon, or a scaled target
             params, columns = {"open": opened, "close": closed}, [opened, closed]
+        elif name == "ar1":
+            if target.endswith("_vol"):
+                continue  # not applicable: the AR forecasts returns, not scaled targets
+            params = {"open": "open", "close": "close", "horizon_bars": horizon_bars}
+            columns = ["open", "close"]
         result = run_walk_forward(
             run,
             dataset_id,
