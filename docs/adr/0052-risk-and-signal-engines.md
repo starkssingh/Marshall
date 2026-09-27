@@ -191,3 +191,22 @@
    bound `max(0, p − z·p_se)` replaces p in both EV and the `p_min` test. Golden cases pin both
    variants (p = 0.6, TP 2, SL 1, cost 0.2: gross 0.8, net 0.6; with `p_se` 0.05 and z 1.645:
    p 0.51775, net 0.35325).
+
+## SIGNAL-003 — filters
+
+1. **The regime filter is an interface with a pass-through only** (owner's instruction, ADR 0051):
+   `RegimeFilter` accepts the filtered `RegimeState` at the decision and the strategy's allowed
+   regimes; the only implementation, `PassThroughRegimeFilter`, blocks nothing and writes
+   "PLACEHOLDER pass-through regime filter: no regime model until REG-007 (Sprint 8)" into every
+   record it passes. The real filter arrives with REG-007.
+2. **Sessions and blackouts** use the session calendar (local times converted to UTC per date):
+   a per-minute table per trading day built from the dataset's `calendar_columns`, exact because
+   every configured boundary is on a whole minute (checked at construction; a test compares the
+   lookup with `calendar_columns` at random instants across both DST changes).
+3. **Volatility band**: the daily sigma-hat at the decision within `[low, high]`, inclusive; no
+   sigma-hat blocks.
+4. **Spread**: the current spread strictly below `k` × its New York hour-of-week median. The
+   median uses only spreads observed before the decision (the caller observes a bar's spread after
+   deciding on it). While the hour has fewer than `min_obs` observations the overall median stands
+   in; with fewer than `min_obs` overall the candidate is blocked (no reference, no trade). New
+   York time is used because gold's liquidity follows the local sessions, not UTC.

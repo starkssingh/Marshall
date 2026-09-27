@@ -596,6 +596,12 @@ IDs from `docs/specs/development-plan.md`.
   EV_net = EV_gross − round-trip cost, a candidate qualifying only if EV_net > θ and p > p_min
   (strict); the conservative variant uses the lower bound p − z·p_se; costs in basis points
   convert to sigma units. Golden cases for both variants and the strict thresholds. ADR 0052.
+- SIGNAL-003: signal filters (`xq.signals.filters`) — the regime filter as an interface
+  (`RegimeFilter`, taking the filtered `RegimeState`) with only a clearly marked PLACEHOLDER
+  pass-through until REG-007; session and blackout filters on a per-minute session calendar
+  (checked against the dataset calendar columns across DST); an inclusive daily sigma-hat band;
+  the spread strictly below k x its causal New York hour-of-week median (overall median as a
+  fallback, blocked without one). ADR 0052.
 
 ### Changed
 
