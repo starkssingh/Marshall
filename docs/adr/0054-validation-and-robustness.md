@@ -56,3 +56,17 @@ simulations (`tests/helpers/strategies.py`) are:
    SPA at 20 %, even with longer blocks. Daily strategy returns are usually far less
    autocorrelated, but a family with strong serial dependence (for example, overlapping holding
    periods) should be tested on non-overlapping periods. Recorded as a known issue.
+
+## VAL-006 — multiple-testing control per test family
+
+1. **Holm by default, Benjamini–Hochberg only where a family declares it.** A family's tests are
+   adjusted together and never with another family's. The default controls the family-wise error,
+   because a gate's claim ("this strategy works") is costly when false. False-discovery control
+   is for screening families that feed follow-up work, never for a gate.
+2. **One implementation.** `xq.validation.multiple_testing` now holds Holm, Benjamini–Hochberg and
+   Bonferroni. The Sprint 6 helper `holm_adjust` delegates to it, so the statistical studies and
+   the volatility selection use the same code. Missing p-values stay missing and do not count.
+3. **Known truth.** Hand-computed reference values, agreement with statsmodels to 1e-12, and on
+   simulated nulls the family-wise error (Holm) and the false discovery rate (BH) at or below the
+   level. Recording adjusted p-values in a `stat_tests` table waits for the validation report
+   (`xq validate-strategy`), which the plan attaches to Phase 17's report, not to VAL-006.

@@ -20,6 +20,8 @@ import numpy as np
 import numpy.typing as npt
 import pandas as pd
 
+from xq.validation.multiple_testing import holm
+
 
 @dataclass(frozen=True)
 class StatResult:
@@ -70,21 +72,10 @@ def results_table(results: Sequence[StatResult]) -> pd.DataFrame:
 def holm_adjust(p_values: npt.ArrayLike) -> npt.NDArray[np.float64]:
     """Holm step-down adjusted p-values (family-wise error control), in the input order.
 
-    ``p_(i) -> max_{j <= i} min(1, (m - j + 1) p_(j))`` over the ascending p-values; NaN p-values
-    stay NaN and do not count towards m.
+    The implementation of VAL-006 (`xq.validation.multiple_testing.holm`); NaN p-values stay NaN
+    and do not count towards m.
     """
-    p = np.asarray(p_values, dtype=np.float64)
-    adjusted = np.full(p.shape, np.nan)
-    finite = np.flatnonzero(np.isfinite(p))
-    m = len(finite)
-    if m == 0:
-        return adjusted
-    order = finite[np.argsort(p[finite], kind="stable")]
-    running = 0.0
-    for rank, position in enumerate(order):
-        running = max(running, min(1.0, (m - rank) * float(p[position])))
-        adjusted[position] = running
-    return adjusted
+    return holm(p_values)
 
 
 @contextmanager

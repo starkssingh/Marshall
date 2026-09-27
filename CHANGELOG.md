@@ -628,6 +628,11 @@ IDs from `docs/specs/development-plan.md`.
   adjusted p-values and survivors. Proven on known truth: about nominal size on noise-only families
   (iid and GARCH), a graded edge detected with its best configurations surviving, SPA's power over
   the Reality Check when poor strategies join the family. ADR 0054.
+- VAL-006: multiple-testing control per test family (`xq.validation.multiple_testing`) — Holm
+  (family-wise, the default), Benjamini–Hochberg (false discovery, only where a family declares
+  it) and Bonferroni, adjusted within each family (`adjust_by_family`); the Sprint 6
+  `holm_adjust` now delegates to it. Hand-computed references, agreement with statsmodels, and the
+  controlled error rates on simulated nulls. ADR 0054.
 
 ### Changed
 

@@ -27,6 +27,7 @@ _EVALUATE = "tests/unit/research/test_vol_evaluate.py"
 _SELECTION = "tests/unit/models/test_volatility_selection.py"
 _PBO = "tests/unit/validation/test_pbo.py"
 _SPA = "tests/unit/validation/test_spa.py"
+_MULTIPLE = "tests/unit/validation/test_multiple_testing.py"
 
 RECOVERY_TESTS: Mapping[str, tuple[str, ...]] = {
     "ADF": (
@@ -140,6 +141,11 @@ RECOVERY_TESTS: Mapping[str, tuple[str, ...]] = {
         f"{_SPA}::test_volatility_clustering_keeps_the_size_near_nominal",
         f"{_SPA}::test_a_genuine_edge_is_detected_and_its_survivors_named",
         f"{_SPA}::test_spa_keeps_its_power_when_poor_strategies_join_the_family",
+    ),
+    "holm_bh": (
+        f"{_MULTIPLE}::test_hand_computed_reference_values",
+        f"{_MULTIPLE}::test_the_adjustments_match_statsmodels",
+        f"{_MULTIPLE}::test_holm_controls_the_family_wise_error_and_bh_the_false_discovery_rate",
     ),
 }
 
