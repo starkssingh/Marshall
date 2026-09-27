@@ -25,7 +25,8 @@ success_criteria:
   - Net Sharpe CI excludes zero and DSR >= 0.95 with the registered trial count
 falsification_criteria:
   - Net Sharpe CI includes zero, or the effect reverses in more than half of the folds
-trial_budget: 20                 # configurations you may evaluate on test folds
+trial_budget: 20                 # configurations you may evaluate on test folds (>= 1; only
+                                 # family "descriptive" may use 0, ADR 0042)
 planned_tests:
   - Deflated Sharpe ratio
   - Diebold-Mariano against the best baseline

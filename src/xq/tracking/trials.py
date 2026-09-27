@@ -18,6 +18,11 @@ configuration.
   independent — the conservative direction, since more trials raise the bar a candidate must
   clear;
 - ``sharpe_variance``, the variance of the recorded trial Sharpe ratios (an input to the DSR).
+
+Forecasting models evaluated on test folds are trials too, but of their own families
+(`LINEAR_FORECAST_FAMILY` for STAT-006, `VOLATILITY_MODEL_FAMILY` for VOL-005), never of a
+trading-strategy family such as ``baselines``: a strategy's deflated Sharpe ratio counts the
+strategies of its family, not the forecasting models studied beside it (ADR 0046).
 """
 
 from __future__ import annotations
@@ -48,6 +53,13 @@ if TYPE_CHECKING:
 
 ARTIFACTS_DIR = "artifacts"
 RETURNS_COLUMN = "ret"
+#: Trial family of linear forecasting models evaluated on test folds (STAT-006, ADR 0046).
+LINEAR_FORECAST_FAMILY = "linear_forecasts"
+#: Trial family of volatility models evaluated on test folds (VOL-005, ADR 0046).
+VOLATILITY_MODEL_FAMILY = "volatility_models"
+#: Families of forecasting-model evaluations. They are never trading-strategy families, so their
+#: trials never enter the trial count or effective N that deflates a strategy's Sharpe ratio.
+MODEL_FAMILIES = frozenset({LINEAR_FORECAST_FAMILY, VOLATILITY_MODEL_FAMILY})
 
 
 @dataclass(frozen=True)

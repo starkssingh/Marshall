@@ -1,0 +1,30 @@
+# Statistical time-series research (Phase 5: STAT-001, STAT-002, STAT-003, STAT-006, STAT-008;
+# ADR 0043). Every parameter is fixed before any result on real data exists; changing one
+# afterwards needs an ADR. Sprint 6 is build-only: nothing here has run on real data. Every method
+# passes a recovery test on a simulated process with a known answer (xq.research.recovery) before
+# anything else uses it.
+
+alpha: 0.05                    # level of every single test (and of Holm and Chow-Denning families)
+
+stationarity:                  # STAT-001: ADF, KPSS, Phillips-Perron, Zivot-Andrews
+  trend: c                     # deterministic terms of ADF, PP and Zivot-Andrews (a level)
+  adf_lag_method: aic          # ADF lag selection (plan: AIC)
+  adf_max_lags: null           # null: arch's default 12 (n / 100)^(1/4)
+  kpss_trends: [c, ct]         # KPSS around a level and around a trend; `c` enters the joint verdict
+  zivot_andrews_trim: 0.15     # share of the sample at each end outside the break search
+
+dependence:                    # STAT-002: Ljung-Box (plain and heteroskedasticity-robust), ARCH-LM
+  ljung_box_lags: [1, 5, 10, 20]
+  arch_lm_lags: [5, 10]
+
+variance_ratio:                # STAT-003: Lo-MacKinlay z* and the Chow-Denning joint test
+  horizons: [2, 4, 8, 16, 32, 64]
+  regime_window: 92            # bars of trailing realized volatility behind the regime slices
+  regime_quantiles: [0.3333333333, 0.6666666667]   # terciles; cut-offs from the reference rows
+
+arima:                         # STAT-006: ARMA(p, q) on 1-bar log returns = ARIMA(p, 1, q) on log price
+  models:
+    ar1: {p: 1}
+    arma11: {p: 1, q: 1}
+    ar_aic: {max_p: 5}         # AR(p), p in 1..5 chosen by AIC on each training fold only
+  benchmarks: [zero_return, random_walk]

@@ -5,38 +5,55 @@ sprint and whenever a decision or carry-over item changes; anything decided in c
 recorded in an ADR and here in the same session. If a memory of an earlier conversation conflicts
 with the repository, the repository wins.
 
-- **Last updated:** 2026-09-27, after the owner's review of Sprint 5
-- **Merged to `main`:** Sprints 1–5 with the revised H-0001 draft (PRs #2, #3, #6, #7, #8, #9).
-  The fixes from the owner's review of PR #9 (EDA-006, ADR 0040, ADR 0041) are on branch
-  `claude/wonderful-euler-v8orf5`, restarted from `main` because PR #9 was already merged, in a
-  new pull request to `main`.
+- **Last updated:** 2026-09-27, after the owner's review of Sprint 6 (PR #11)
+- **Merged to `main`:** Sprints 1–5 with the revised H-0001 draft and the Sprint 5 review fixes
+  (PRs #2, #3, #6, #7, #8, #9, #10). Sprint 6 is on branch `claude/hopeful-einstein-co4sfq` in a
+  pull request to `main`.
 
 ## Current sprint
 
-- **Sprint:** 5 — exploratory research and horizon admission — **build-only, complete** (owner's
-  instruction, ADR 0035): EDA-001, EDA-006, EDA-002, EDA-003, EDA-004, EDA-005 and EXP-005 are
-  implemented and tested on synthetic data and on simulated processes with known properties
-  (GARCH(1,1), AR(1), injected hour-of-week effects). DATA-013 is deferred until the owner decides
-  whether a secondary feed is needed. The research half of the sprint — the EDA report on the
-  discovery window of real data, the admission list in `config/horizons.yaml`, the hypotheses
-  backlog and its pre-registrations — waits for real data (C-16). Nothing is validated on real data.
-  After the owner's review, EDA-006 measures horizons with TGT-002's holding periods (1m bars,
-  5-minute decision grid), prices the spread at the fills, reports medians beside the means, uses a
-  causal sigma-hat fallback, keeps placeholder costs out of `config/horizons.yaml` without an
-  explicit flag, and admits on the overall ratio only (ADR 0040, ADR 0041).
-- **Working system:** `xq research eda --dataset <id> --hypothesis <H>` writes a deterministic EDA
-  report (distributions, dependence, seasonality, trend and reversion, cost to volatility and the
-  horizon admission list) on the discovery window only (ADR 0036–0038); `xq exp close` closes an
-  experiment only with a written conclusion and appends it to `docs/research/log.md`, and
-  `xq exp audit` lists experiments without one (ADR 0039). Demonstrated end to end on a synthetic
-  three-week dataset only.
-- **Next:** the owner reviews the pull request with the EDA-006 fixes. Claude implements the revised
-  H-0001 in the board runner (C-15). With real data (C-8): the research half of Sprint 5 (C-16),
-  including H-0000. Then Sprint 6 (STAT-001, STAT-002, STAT-003, STAT-006, STAT-008, VOL-001 …
-  VOL-006, BASE-003), whose methods can likewise be built and simulation-tested first.
+- **Sprint:** 6 — statistical and volatility research — **build-only, complete** (owner's
+  instruction at the start of Sprint 6): STAT-001, STAT-002, STAT-003, STAT-006, STAT-008 (the
+  verdict report framework only), VOL-001 … VOL-006 and BASE-003 are implemented and tested on
+  simulated processes with known answers only. Every method passes a recovery test before
+  anything uses it, and `xq.research.recovery.RECOVERY_TESTS` names those tests per method (ADR
+  0043): random walk (ADF does not reject), AR(1) with phi = 0.5 recovered, GARCH(1,1), GJR and
+  EGARCH parameters recovered, Ljung-Box on squared GARCH returns rejects, OU increments give
+  variance ratios below 1, range estimators match hand computations, HAR and EWMA evaluated with
+  QLIKE on identical folds, the diurnal factor unchanged by perturbed test data, and the VOL-006
+  selection keeping EWMA when nothing beats it. After the owner's review (ADR 0046) the selection
+  Holm-adjusts the challengers' DM p-values (twelve null challengers promote in 4.5 % of simulated
+  boards, 30.5 % without the adjustment), and forecasting-model trials are recorded in their own
+  families (`linear_forecasts`, `volatility_models`), never in a trading-strategy family. Before
+  Sprint 6 the H-0000 prerequisite landed:
+  a zero trial budget is accepted only for family `descriptive` (ADR 0042); H-0000 is not
+  written or registered. **No statistical report or volatility board has run on real data, and no
+  volatility model is promoted**: sigma-hat stays the interim EWMA of `fwd_returns.v1`.
+- **Working system:** library code, exercised by the tests: the stationarity battery with a joint
+  verdict, Ljung-Box / robust Q* / ARCH-LM, variance ratios with the Chow-Denning test (also by
+  session and volatility regime), the walk-forward ARMA study with Diebold-Mariano and Holm, the
+  verdict report (`build_verdict_report`, Observed / Evidence / Interpretation / Limitations /
+  Action), range estimators and ATR, realized measures and the train-only diurnal factor, the
+  volatility board (`board_forecasters`, `evaluate_forecasters`: QLIKE, MSE, Mincer-Zarnowitz, DM,
+  90 % MCS, session and regime breakdowns, identical folds), the `VolForecaster` interface,
+  `select_forecaster` (EWMA unless a model in the MCS beats it by DM p < 0.05 after Holm across
+  the challengers) and per-fold `serve_sigma`. The baseline board accepts the `ar1` forecast
+  baseline, which stays off H-0001's board (ADR 0045, ADR 0046). There is no CLI for statistical
+  or volatility reports yet: they wait for real data.
+- **Next:** the owner merges PR #11. While real data is pending, the data-independent
+  engineering sprints come next, starting with Sprint 11 (the event-driven backtester: BT-004 …
+  BT-010, synthetic data only), then Sprint 12 (risk and signal engines) after the owner's review;
+  the re-ordering is recorded in an ADR at the start of Sprint 11. Claude implements the revised
+  H-0001 in the board runner (C-15). With real data (C-8): the research half of Sprint 5 (C-16,
+  including H-0000's pre-registration) and of Sprint 6 (C-18: the verdict report on the discovery
+  window, the volatility board on real folds, the sigma-hat selection and, if the owner approves,
+  its promotion by ADR; H-0002 only if STAT-002/003 find dependence). Then Sprint 7.
 - **Not allowed yet:** running H-0001 (or any board) on real data before the owner has approved
-  and registered it; generating an EDA report on real or pseudo-real data, or writing values to
-  `config/horizons.yaml`, before the owner allows it (ADR 0035); pushing to `main`.
+  and registered it; generating an EDA report, a statistical verdict report or a volatility board
+  on real or pseudo-real data, or writing values to `config/horizons.yaml`, before the owner
+  allows it (ADR 0035, Sprint 6 instruction); promoting a volatility forecaster or replacing the
+  interim sigma-hat (ADR 0044); registering H-0000 before real data fixes its windows (ADR 0041);
+  pushing to `main`.
 
 ## Carry-over items from reviews
 
@@ -57,8 +74,10 @@ with the repository, the repository wins.
 | C-13 | CI job that builds the image's test stage and runs the suite in it | Sprint 4 hold point | Claude | `0b84ca7` |
 | C-14 | Review the draft `experiments/hypotheses/H-0001.yaml` (the baseline board), then register it before any real-data run | Sprint 4 | Owner | reviewed at the start of Sprint 5: revision requested (ADR 0035), continued as C-15 |
 | C-15 | H-0001 draft revised as the owner asked (ADR 0035), still **unregistered**: rule baselines over the full pre-vault history after each rule's warm-up, with the fold-aligned version stored for comparison; rules on 1d and 1h signal bars (not 15m); trial budget 36 (24 rule + 12 forecast-sign strategies); discovery and evaluation windows "set from the real data's depth at registration" (registration is refused until they are); descriptive slices by year and by session (reported, not tested). Owner: review the revision, including two readings of Claude's (lookbacks count bars of the signal timeframe; the fold-aligned version is not a separate trial) — both **approved** at the Sprint 5 review (ADR 0041). Remaining: Claude implements the revision in the board runner; H-0001 is registered with windows from the real data, alongside H-0000 | Sprint 5 start | Claude (board runner), then owner (registration with real windows) | open — readings approved |
-| C-16 | Research half of Sprint 5, after real data (C-8): fix `eda.discovery.end` from the data's depth; pre-register the standing descriptive hypothesis H-0000 (zero trial budget; the EXP-002 schema must first accept a zero budget) alongside H-0001, and run EDA under it (ADR 0041); run the EDA confirmatory; review it; write `config/horizons.yaml` with `xq research admit-horizons`; write `docs/research/hypotheses-backlog.md` and pre-register its top items | Sprint 5 (build-only) | Owner (data, window, approval), then Claude | open — blocked on C-8 and the owner's go-ahead |
+| C-16 | Research half of Sprint 5, after real data (C-8): fix `eda.discovery.end` from the data's depth; pre-register the standing descriptive hypothesis H-0000 (zero trial budget, family `descriptive`; the EXP-002 schema accepts it since `89f241a`, ADR 0042) alongside H-0001, and run EDA under it (ADR 0041); run the EDA confirmatory; review it; write `config/horizons.yaml` with `xq research admit-horizons`; write `docs/research/hypotheses-backlog.md` and pre-register its top items | Sprint 5 (build-only) | Owner (data, window, approval), then Claude | open — schema prerequisite done; blocked on C-8 and the owner's go-ahead |
 | C-17 | DATA-013 secondary long-history adapter: build only if the owner decides a secondary feed is needed (depends on the broker's history depth) | Sprint 5 start | Owner (decision) | open |
+| C-18 | Research half of Sprint 6, after real data (C-8) and the owner's go-ahead: pre-register the statistical and volatility studies (families and trial budgets); run STAT-001/002/003 on the discovery window and STAT-006 in walk-forward at the admitted horizons (needs `config/horizons.yaml`, C-16) and write the verdict report; run the volatility board on real 1m/5m bars (daily and hourly periods) on identical folds; apply `select_forecaster`; the owner decides whether the selected forecaster replaces the interim sigma-hat (an ADR and a configuration change); add a CLI for these reports; measure their speed on real data. Trial rules approved (ADR 0046): STAT-001 … STAT-003 record none (descriptive, under H-0000); STAT-006 and the volatility board record one per (model, horizon) in the `linear_forecasts` and `volatility_models` families. If STAT-002 or STAT-003 finds dependence in returns, write and pre-register H-0002 (linear predictability, with `ar1`) | Sprint 6 (build-only) | Owner (data, go-ahead, promotion), then Claude | open — blocked on C-8 and C-16 |
+| C-19 | Whether the `ar1` forecast baseline (BASE-003) joins H-0001's board, which raises its approved trial budget from 36 to 40, or is evaluated under its own pre-registered hypothesis | Sprint 6 (ADR 0045) | Owner (decision) | decided (ADR 0046): `ar1` stays off H-0001 (budget 36), stays on benchmark boards, and gets H-0002 only if STAT-002/003 find dependence on real data (C-18) |
 
 ## Open owner decisions
 
@@ -74,6 +93,7 @@ with the repository, the repository wins.
 | Research horizon focus | 15m–1d, other | 15m–1d; four horizons kept until EDA-006 (ADR 0026) |
 | Risk budget | per-trade risk, drawdown halt | 0.5 % per trade, halt at 15 % drawdown (plan default; the gates' 0.15 drawdown limits match it) |
 | Vault | holdout start | `2025-09-25T21:00:00Z`, the last 12 months at project start (fixed) |
+| Replacing the interim sigma-hat (C-18) | the forecaster `select_forecaster` picks on real data; keep the interim EWMA | interim EWMA, span 96 base bars (`fwd_returns.v1`); nothing promoted (ADR 0044) |
 
 Decided at the Sprint 4 hold point (ADR 0032): the evidence gates, the meaning of `1d`, decisions
 taken while the market is closed, financing on both sides, and verifying the Docker image in CI.
@@ -84,6 +104,15 @@ EDA-006 changes; the H-0001 readings (lookbacks in signal-timeframe bars; the fo
 not a trial) and "EDA records no trials" approved; EDA runs belong to a standing descriptive
 hypothesis H-0000 with a zero trial budget, registered alongside H-0001 once real data fixes the
 windows; per-session admission is report-only, usable only through a pre-registered hypothesis.
+Decided at the start of Sprint 6 (ADR 0042, ADR 0043, ADR 0044): a zero trial budget only for
+family `descriptive`, with H-0000 not registered yet; Sprint 6 build-only — every method passes a
+recovery test on a simulated process before use, the diurnal factor is fitted on training folds
+only, the VOL-006 selection defaults to EWMA when nothing beats it, no reports on real data and no
+model promoted. Decided at the Sprint 6 review (ADR 0046): Holm across the challengers in the
+VOL-006 selection; forecasting-model trials in their own families (`linear_forecasts`,
+`volatility_models`), never a trading-strategy family, and the trial rules approved with them;
+`ar1` stays off H-0001 (budget 36) and gets its own hypothesis H-0002 (linear predictability) only
+if STAT-002 or STAT-003 finds dependence on real data.
 
 ## Provisional assumptions not yet confirmed
 
@@ -100,17 +129,19 @@ windows; per-session admission is report-only, usable only through a pre-registe
 | Quality thresholds | ratified provisional; one change allowed after DQ-008 | `config/quality.yaml`, ADR 0013 | DQ-008 review |
 | Event windows | US release −5/+30 min; rollover 16:45–18:15 New York (ADR 0026) | `config/sessions.yaml` | EDA |
 | Trial clustering | ρ 0.7, 60 common trading days; frozen with the gates (ADR 0032) | `config/base.yaml` `experiments` | fixed before results |
-| Sigma-hat | interim EWMA, span 96 base bars | `fwd_returns.v1` | VOL-006 (Sprint 6) |
+| Sigma-hat | interim EWMA, span 96 base bars | `fwd_returns.v1` | a VOL-006 selection on real data, approved by the owner and recorded in an ADR (C-18) |
 | `ds_base.yaml` start | 2021-09-26 | `experiments/configs/ds_base.yaml` | broker history depth |
 | Baseline board | fixed parameters (daily-bar rules, MA 20/50 and 50/200, 10 % vol target, 1,000 random-entry seeds); folds: expanding, ≥ 3 years training, 91-day tests, 1-day embargo | `experiments/configs/baselines/board.yaml`, ADR 0033, ADR 0034 | fixed before results; changes need an ADR |
 | Random-walk forecast baseline | persistence of the latest completed bar return of the horizon's timeframe (`zero_return` covers the price random walk) | ADR 0033 | owner review of Sprint 4 |
 | EDA parameters | bootstrap 1,000 resamples, block ≥ 5 trading days of bars and ≤ n/10; Hill tails 5 %; ≥ 20 lags (one trading day); Bonferroni family-wise 0.05 with cluster-robust Student-t intervals; LBMA windows −5/+30 min; VR q = 2, 4, 16, 92 on 15m; runs on 1h | `config/eda.yaml`, ADR 0038 | fixed before results; changes need an ADR |
+| Statistical tests (STAT-001 … STAT-006) | level 0.05; ADF with AIC lags, KPSS level and trend, Zivot-Andrews 15 % trimming; Ljung-Box lags 1, 5, 10, 20 with Holm across lags; ARCH-LM lags 5, 10; variance ratios at 2 … 64 bars with Chow-Denning; ARMA models `ar1`, `arma11`, `ar_aic` (p ≤ 5 by AIC on training folds) against `zero_return` and `random_walk`, DM with Holm across horizons | `config/stats.yaml`, ADR 0043 | fixed before results; changes need an ADR |
+| Volatility research (VOL-001 … VOL-006) | estimator window 20 bars, Wilder ATR 14; RV from 1m and 5m returns per hour and trading day; diurnal factor day-standardized, at least 20 training rows per bucket; benchmarks `rolling_22`, `ewma_0.94`, `ewma_0.97`, HAR (1, 5, 22 days; 1, 23, 115 hours), HAR floor 1 % of mean training RV; GARCH, GJR, EGARCH × normal, t, skewed t, zero mean, 1,000 EGARCH simulations; QLIKE primary, MCS 90 % (1,000 resamples, block 5), DM level 0.05 against HAR; selection default `ewma_0.94`, challengers' one-sided DM p-values Holm-adjusted before the 0.05 level (ADR 0046) | `config/volatility.yaml`, ADR 0044 | fixed before results; changes need an ADR |
 | Horizon admission | cost-to-volatility bound 0.3 (plan default) on the overall mean ratio; horizons are TGT-002 labels 1m–1d measured from 1m bars on a 5-minute decision grid with `fwd_returns.v1`'s latency and fill delay; spread at the fills; slippage sigma-hat from the last 60 one-minute returns (causal fallback); financing at the mean of the long and short rates | `config/eda.yaml`, ADR 0037, ADR 0040 | owner review of the first real EDA; broker costs |
 
 ## Known issues and technical debt
 
-- No real market data exists. Sprints 2–5 are tested only on synthetic data (Sprint 5 also on
-  simulated processes); nothing is validated on real data (C-8).
+- No real market data exists. Sprints 2–6 are tested only on synthetic data (Sprints 5 and 6 also
+  on simulated processes); nothing is validated on real data (C-8).
 - The board runner does not yet implement the revised H-0001 (full-history rule evaluation with a
   fold-aligned view, 1d and 1h signal bars in one board, year and session slices): C-15.
 - `config/horizons.yaml` does not exist, and nothing reads it yet: the target sets still emit all
@@ -120,7 +151,24 @@ windows; per-session admission is report-only, usable only through a pre-registe
 - The `SPREAD_OUTLIER` cleaning flag fires on rollover widening, and spread statistics use
   hourly buckets that blur short spikes; to be revisited in the DQ-008 review (ADR 0013).
 - `base.v1` is an interim feature set (bar values, context bars, calendar columns) until FEAT-001
-  (Sprint 7); sigma-hat is an interim EWMA until VOL-006 (Sprint 6).
+  (Sprint 7); sigma-hat is the interim EWMA of `fwd_returns.v1` until a VOL-006 selection on real
+  data is approved and promoted (C-18). The Sprint 6 plan's "the selected `VolForecaster` serves
+  sigma-hat to datasets" is therefore not done: `serve_sigma` exists, nothing is wired to datasets.
+- Sprint 6 methods are validated on simulated processes only; none has run on real data, and
+  there is no CLI for the statistical verdict report or the volatility board (C-18). Their speed on
+  four years of real 1m bars is unmeasured (EGARCH multi-step forecasts are simulated, 1,000 paths
+  per origin, in chunks).
+- Realized measures leave out the return across the daily break and weekends (not intraday);
+  only Yang-Zhang carries those gaps, so a sigma-hat from RV understates the risk of holding
+  across a weekend. The diurnal factor buckets by time of day only, not by day of week.
+- GARCH-family forecasts start their recursion from arch's backcast of the first 75 periods
+  passed; they are causal from the 75th period on (every test period in walk-forward). The plain
+  Ljung-Box on returns is reported next to the robust Q* but over-rejects under volatility
+  clustering; only Q* may support a claim of return autocorrelation (ADR 0043).
+- The trial counter does not compare recorded trials with a hypothesis's trial budget for any
+  family (ADR 0042). Nothing stops a trading-strategy hypothesis from being registered with a
+  model family's name (`linear_forecasts`, `volatility_models`); the studies' own trials can never
+  land in a strategy family (ADR 0046).
 - Vault gate tokens can be verified but not issued until GATE-002 (Sprint 13);
   `xq validate --include-vault` uses an explicit confirmation flag until then.
 - Parquet bytes depend on the pyarrow version, so a lockfile change can change dataset hashes
@@ -136,7 +184,9 @@ windows; per-session admission is report-only, usable only through a pre-registe
 - Undefined walk-forward metrics (NaN) are kept in results but not logged to the registry
   (`ef9bbd9`).
 - Not started, deferred by plan: EXP-006 (reproduce), DQ-005 (feed consistency), DATA-011,
-  DATA-012, BASE-003, BASE-004, EDA-007 (Sprint 8); DATA-013 deferred by the owner (C-17).
+  DATA-012, BASE-004, EDA-007, STAT-004, STAT-005 (Sprint 8), STAT-007 (gated); SARIMA (only if
+  EDA-004 finds a stable daily cycle) and FIGARCH (only if STAT-004 finds long memory) are not
+  built; DATA-013 deferred by the owner (C-17).
 - The raw-file permission test is skipped when the suite runs as root (it runs in CI, and in the
   Docker test stage, which runs as the non-root user).
 
@@ -149,8 +199,10 @@ windows; per-session admission is report-only, usable only through a pre-registe
 | 2 Data quality | DQ-001 … DQ-004, DQ-006, DQ-007 (DQ-005, DQ-008 open) | yes | yes | no |
 | 3 Datasets | DS-001 … DS-007 | yes | yes | no |
 | 4 Exploratory research | EDA-001 … EDA-006 (EDA-007 in Sprint 8) | yes | yes (synthetic data, simulated processes) | no (no report on real data yet, C-16) |
+| 5 Statistical time series | STAT-001, STAT-002, STAT-003, STAT-006, STAT-008 framework (STAT-004, STAT-005 in Sprint 8; STAT-007 gated) | yes | yes (simulated processes, recovery registry) | no (no verdict report on real data, C-18) |
+| 6 Volatility research | VOL-001 … VOL-006 | yes | yes (simulated processes, recovery registry) | no (no volatility board on real data; nothing promoted, C-18) |
 | 9 Targets | TGT-001, TGT-002 (TGT-003 … TGT-006 later) | yes | yes | no |
-| 10 Baselines | BASE-001, BASE-002, BASE-005, BASE-006 (BASE-003, BASE-004 later) | yes | yes | no |
+| 10 Baselines | BASE-001, BASE-002, BASE-003, BASE-005, BASE-006 (BASE-004 later) | yes | yes | no |
 | 12 Walk-forward | WF-001, WF-002, WF-003, WF-006 (WF-004, WF-005 later) | yes | yes | no |
 | 13 Backtesting | BT-001, BT-002, BT-003 (BT-004 … BT-010 later) | yes | yes | no |
 | 17 Statistical validation | VAL-001, VAL-002, VAL-005, VAL-007 (VAL-003, VAL-004, VAL-006 later) | yes | yes | no |

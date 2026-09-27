@@ -372,6 +372,98 @@ IDs from `docs/specs/development-plan.md`.
   running, and "supported" needs a finished confirmatory run; the entry is appended to the
   research log before the database commit; `xq exp audit` lists experiments still without a
   conclusion and exits 1 if any. ADR 0039.
+- STAT-001: stationarity battery (`xq.research.stats.stationarity`, `config/stats.yaml`) — ADF
+  with AIC lags, Phillips-Perron, KPSS around a level and a trend, and Zivot-Andrews with one
+  level break (its date reported), each as a typed `StatResult` (statistic, p-value, lags,
+  null and alternative, assumptions, decision, recorded warnings), with a joint verdict
+  (stationary, unit root, conflicting, inconclusive, mixed). Recovery: a random walk is not
+  rejected by ADF (size near 5 % over 200 draws) and reads as a unit root; a stationary AR(1)
+  reads as stationary; a level shift is found near its date. Adds `arch` and `statsmodels` as
+  runtime dependencies (unit-root tests, GARCH, ARMA; statsmodels was a development dependency)
+  and the recovery registry `xq.research.recovery`. Simulated data only. ADR 0043.
+- STAT-002: dependence tests (`xq.research.stats.dependence`) — Ljung-Box on returns, absolute
+  and squared returns, the heteroskedasticity-robust portmanteau Q* on returns (robust
+  autocorrelation standard errors of EDA-003) and ARCH-LM, at the lags of `config/stats.yaml`,
+  with Holm-adjusted p-values across the lags of each family. Matches statsmodels. Recovery: on a
+  GARCH(1,1) simulation Ljung-Box on squared returns and ARCH-LM reject; Q* keeps its size on GARCH
+  returns (at most 10 % rejections at 5 % over 150 draws) where the plain Ljung-Box over-rejects;
+  an AR(1) is detected. ADR 0043.
+- STAT-003: variance-ratio tests (`xq.research.stats.variance_ratio`) — Lo-MacKinlay robust z* at
+  2 to 64 bars with the Chow-Denning joint test; by slice (session, volatility regime) with q-bar
+  windows inside contiguous runs only and Holm across slices; volatility-regime labels from the
+  trailing volatility before each return with cut-offs from reference rows. Recovery: on
+  Ornstein-Uhlenbeck increments VR(q) is below 1 and matches (1 - phi^q) / (q (1 - phi)), and the
+  joint test rejects; on a random walk it does not; its size on GARCH returns stays at most 10 %;
+  slices find reversion only where it is. ADR 0043.
+- STAT-006: ARMA walk-forward forecasts (`xq.research.stats.arima`) — ARMA(p, q) of 1-bar log
+  returns by exact maximum likelihood per training fold (AR(p) by AIC for `ar_aic`), causal
+  h-bar forecasts, the `ArmaForecast` estimator for the walk-forward runner, and `arma_study`:
+  every model and benchmark (`zero_return`, `random_walk`) on identical folds, Diebold-Mariano
+  on squared errors (two- and one-sided, `diebold_mariano_less` in `xq.validation.forecast_eval`)
+  with Holm across horizons, "useful evidence" only out of sample, one trial per (model, horizon)
+  inside a run. Recovery: AR(1) with phi = 0.5 and ARMA(1, 1) recovered, AIC finds an AR(2),
+  forecasts match the closed form and statsmodels and are causal, an AR(1) beats both benchmarks
+  after Holm and i.i.d. returns do not. ADR 0043.
+- STAT-008: statistical verdict report framework (`xq.research.stats.verdict`) — builders turn
+  STAT-001, STAT-002, STAT-003 and STAT-006 results into verdicts in the Observed / Evidence /
+  Interpretation / Limitations / Action format (every field required, each citing the recovery
+  tests its method passed) with the plan's reading rules (non-rejection is not a unit root, ARCH
+  effects are not return predictability, a variance ratio counts only through the joint test,
+  only out-of-sample DM evidence after Holm is "useful evidence"), and `build_verdict_report`
+  writes them as a deterministic report. Exercised on simulated results only; no report on real
+  data exists. ADR 0043.
+- VOL-001: range estimators and ATR (`xq.research.volatility.estimators`, `config/volatility.yaml`)
+  — trailing close-to-close, Parkinson, Garman-Klass, Rogers-Satchell and Yang-Zhang per-bar
+  variances on any price basis, and Wilder's ATR in price units and relative to the close. Match
+  hand computations; on a simulated Brownian path with opening gaps the range estimators recover
+  the intraday variance and Yang-Zhang and close-to-close the total; trailing (later bars never
+  change earlier values). ADR 0044.
+- VOL-002: realized measures and the diurnal factor (`xq.research.volatility.realized`) — RV,
+  bipower variation, the jump component and the intraday return per UTC hour and per trading day
+  from 1m or 5m returns inside one trading day (the daily-break return is left out), indexed by
+  the period's decision time; `DiurnalFactor` of the intraday variance pattern (buckets since the
+  17:00 New York roll, day-standardized), fitted only on rows available by `train_end`. Match hand
+  computations; hourly RVs add up to the daily RV; bipower separates simulated jumps up to its
+  known finite-sample contamination; an injected pattern is recovered; perturbing test data leaves
+  the factor unchanged while a full-sample fit moves. ADR 0044.
+- VOL-003: volatility benchmarks (`xq.research.volatility.benchmarks`) and the `VolForecaster`
+  interface (`xq.models.volatility`: `fit`, `predict_variance`, `predict` on a periods frame
+  indexed by decision time) — `rolling_22`, `ewma_0.94`, `ewma_0.97` (RiskMetrics) and `har` (one
+  OLS per horizon on training rows whose future is training, floored), deseasonalized on hourly
+  periods with the train-only diurnal factor. EWMA and rolling RV match hand computations; HAR
+  recovers the coefficients of a simulated HAR process; every benchmark is causal; the diurnal
+  adjustment is fitted on training periods only. ADR 0044.
+- VOL-004: GARCH family (`xq.research.volatility.garch`) — GARCH(1,1), GJR-GARCH and EGARCH
+  with normal, Student-t and skewed-t errors as `VolForecaster`s, refitted per fold on scaled
+  training returns, with analytic multi-step forecasts (EGARCH beyond one step simulated with a
+  seeded distribution) and fit diagnostics. Recovery: GARCH(1,1), GJR leverage, EGARCH and
+  Student-t degrees of freedom recovered within tolerance on simulated data; forecasts match the
+  GARCH recursion and its multi-step closed form; causal and reproducible. ADR 0044.
+- VOL-005: volatility evaluation (`xq.research.volatility.evaluate`) — every forecaster on the
+  same walk-forward folds and target (RV summed over the horizon), fitted per fold on training
+  periods only: QLIKE (primary) and MSE, Mincer-Zarnowitz with Newey-West errors, Diebold-Mariano
+  against HAR and the EWMA default, the 90 % Model Confidence Set, fold-level scores, breakdowns
+  by session and by volatility regime (cut-offs from training rows), one trial per model inside a
+  run. Recovery: HAR and EWMA scored with QLIKE on identical folds and refit by hand; the true
+  GARCH variance ranks first, stays in the MCS and passes Mincer-Zarnowitz while a doubled
+  forecast fails. ADR 0044.
+- VOL-006: sigma-hat selection and serving (`xq.models.volatility`) — `select_forecaster` keeps
+  `ewma_0.94` unless a model is in the 90 % MCS and beats it by one-sided Diebold-Mariano on QLIKE
+  (p < 0.05), then picks the lowest QLIKE among such models, recording every candidate's reason;
+  `serve_sigma` serves the selected forecaster's sigma-hat per fold, fitted on training periods
+  only; `board_forecasters` is the volatility board (four benchmarks, nine GARCH-family models).
+  Tested: the rule defaults to EWMA when nothing beats it, promotes only an eligible model, and
+  keeps EWMA end to end when EWMA is the true model; served sigma-hat matches a per-fold refit and
+  ignores later data. Nothing is promoted: sigma-hat stays the interim EWMA of `fwd_returns.v1`.
+  ADR 0044.
+- BASE-003: statistical baselines on the boards — the `ar1` forecast baseline (an AR(1) of the
+  decision bars' returns per training fold, iterated to the target's horizon, order fixed) runs on
+  the baseline board like the other forecast baselines (metrics, DM against `zero_return`, a
+  forecast-sign strategy), shown end to end on a synthetic dataset; EWMA and HAR are the
+  volatility board's benchmark entries (the selection's default and DM reference). The ARMA model
+  moves to `xq.models.arma` (re-exported by `xq.research.stats.arima`). H-0001's `board.yaml` is
+  unchanged: adding `ar1` would raise its approved trial budget from 36 to 40 (owner decision).
+  ADR 0045.
 
 ### Changed
 
@@ -396,6 +488,18 @@ IDs from `docs/specs/development-plan.md`.
   whole-window median used data from after the entry (ADR 0040).
 - EDA-006 per-session admission is report-only (ADR 0041): the admission list and
   `config/horizons.yaml` admit on the overall ratio only; the table's per-row flag is `below_bound`.
+- EXP-002 accepts `trial_budget: 0` only for hypotheses of family `descriptive` (the H-0000
+  prerequisite, ADR 0041, ADR 0042); every other family still needs a budget of at least one, and
+  negative budgets are refused. H-0000 itself is not written or registered yet (C-16).
+- VOL-006 selection Holm-adjusts the one-sided DM p-values of all challengers against the default
+  before applying `dm_alpha` (owner review of PR #11): with twelve challengers equal to the default
+  in truth, a simulated board promotes one in 4.5 % of 400 samples (30.5 % without the adjustment);
+  `Selection.p_holm` records the adjusted p-values. ADR 0044.
+- STAT-006 and VOL-005 trials are recorded in their own families, `linear_forecasts` and
+  `volatility_models` (`xq.tracking.trials.MODEL_FAMILIES`), whatever the run's hypothesis, never
+  in a trading-strategy family (owner review of PR #11); `arma_study` and `evaluate_forecasters`
+  lose their `family_id` argument. A test records both under a `baselines` hypothesis and finds
+  the `baselines` family's trial count, effective N and Sharpe variance unchanged. ADR 0046.
 - BASE-005 H-0001 draft revised at the owner's request (ADR 0035, C-15), still unregistered: rule
   baselines are evaluated over the full pre-vault history after each rule's warm-up, with the
   fold-aligned version stored for comparison; they run on 1d and 1h signal bars (not 15m), so the
@@ -476,6 +580,9 @@ IDs from `docs/specs/development-plan.md`.
 
 ### Fixed
 
+- ARCH-008 Docker test stage: the image now copies `docs/`, so the EXP-005 test that reads the
+  committed research log (`docs/research/log.md`) passes inside it; the CI `docker` job had failed
+  on `main` since Sprint 5 (PR #9) with `FileNotFoundError` for that file.
 - WF-002: `run_walk_forward` no longer fails when a stitched metric is undefined (the hit rate of
   an all-zero forecast is NaN, which the non-null `metrics.value` column rejected with an
   `IntegrityError`); undefined metrics stay NaN in the result and are not logged, and

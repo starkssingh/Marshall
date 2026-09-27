@@ -4,7 +4,7 @@ Layers, from lowest to highest precedence:
 
 1. ``config/base.yaml`` plus the section files next to it (``instruments/<id>.yaml``,
    ``costs/<model>.yaml``, ``sessions.yaml``, ``quality.yaml``, ``targets.yaml``, ``gates.yaml``,
-   ``eda.yaml``)
+   ``eda.yaml``, ``stats.yaml``, ``volatility.yaml``)
 2. ``config/<profile>.yaml`` (for example ``dev``, ``research``, ``paper``, ``prod``)
 3. environment variables prefixed ``XQ_``; nested keys are separated by ``__``,
    e.g. ``XQ_LOGGING__LEVEL=DEBUG``
@@ -71,6 +71,8 @@ FRAGMENT_FILES = {
     "targets": "targets.yaml",
     "gates": "gates.yaml",
     "eda": "eda.yaml",
+    "stats": "stats.yaml",
+    "volatility": "volatility.yaml",
 }
 #: Sections that only their own file may set: no base.yaml key, profile, environment variable or
 #: override may change them (evidence gates are fixed before results are seen, ADR 0032).
@@ -643,6 +645,223 @@ class EdaConfig(FrozenModel):
     horizons: HorizonAdmissionConfig
 
 
+def _check_quantiles(value: list[float]) -> list[float]:
+    if any(not 0 < q < 1 for q in value) or value != sorted(set(value)):
+        raise ValueError("regime quantiles must be distinct, increasing and inside (0, 1)")
+    return value
+
+
+class StationarityConfig(FrozenModel):
+    """The stationarity battery (STAT-001, ADR 0043)."""
+
+    trend: Literal["n", "c", "ct"] = "c"
+    adf_lag_method: Literal["aic", "bic", "t-stat"] = "aic"
+    adf_max_lags: int | None = Field(default=None, ge=0)
+    kpss_trends: list[Literal["c", "ct"]] = Field(min_length=1)
+    zivot_andrews_trim: float = Field(gt=0, lt=0.5)
+
+    @model_validator(mode="after")
+    def _level_kpss(self) -> StationarityConfig:
+        if "c" not in self.kpss_trends:
+            raise ValueError("stats.stationarity.kpss_trends must include 'c' (the joint verdict)")
+        return self
+
+
+class StatsDependenceConfig(FrozenModel):
+    """Ljung-Box and ARCH-LM lags (STAT-002)."""
+
+    ljung_box_lags: list[int] = Field(min_length=1)
+    arch_lm_lags: list[int] = Field(min_length=1)
+
+    @field_validator("ljung_box_lags", "arch_lm_lags")
+    @classmethod
+    def _positive(cls, value: list[int]) -> list[int]:
+        if any(lag < 1 for lag in value) or len(set(value)) != len(value):
+            raise ValueError("lags must be unique and at least 1")
+        return sorted(value)
+
+
+class VarianceRatioConfig(FrozenModel):
+    """Variance-ratio tests (STAT-003)."""
+
+    horizons: list[int] = Field(min_length=1)
+    regime_window: int = Field(ge=2)
+    regime_quantiles: list[float] = Field(min_length=1)
+
+    @field_validator("horizons")
+    @classmethod
+    def _check_horizons(cls, value: list[int]) -> list[int]:
+        if any(q < 2 for q in value) or len(set(value)) != len(value):
+            raise ValueError("variance-ratio horizons must be unique and at least 2 bars")
+        return sorted(value)
+
+    @field_validator("regime_quantiles")
+    @classmethod
+    def _check_quantiles(cls, value: list[float]) -> list[float]:
+        return _check_quantiles(value)
+
+
+class ArmaSpec(FrozenModel):
+    """An ARMA(p, q) model of 1-bar log returns, or an AR(p) with p chosen by AIC (`max_p`)."""
+
+    p: int = Field(default=0, ge=0)
+    q: int = Field(default=0, ge=0)
+    max_p: int | None = Field(default=None, ge=1)
+
+    @model_validator(mode="after")
+    def _order(self) -> ArmaSpec:
+        if self.max_p is not None and (self.p or self.q):
+            raise ValueError("an AIC-selected AR model takes max_p only (no p, no q)")
+        if self.max_p is None and self.p + self.q == 0:
+            raise ValueError("an ARMA model needs p + q >= 1 (the zero forecast is a benchmark)")
+        return self
+
+
+class ArimaConfig(FrozenModel):
+    """Walk-forward ARMA forecasts (STAT-006)."""
+
+    models: dict[str, ArmaSpec] = Field(min_length=1)
+    benchmarks: list[Literal["zero_return", "random_walk"]] = Field(min_length=1)
+
+
+class StatsConfig(FrozenModel):
+    """Statistical time-series research settings (``config/stats.yaml``, Phase 5)."""
+
+    alpha: float = Field(gt=0, lt=1)
+    stationarity: StationarityConfig
+    dependence: StatsDependenceConfig
+    variance_ratio: VarianceRatioConfig
+    arima: ArimaConfig
+
+
+class EstimatorsConfig(FrozenModel):
+    """Range estimators (VOL-001)."""
+
+    window: int = Field(ge=2)
+    atr_window: int = Field(ge=1)
+
+
+class DiurnalConfig(FrozenModel):
+    """The intraday diurnal factor, fitted on training rows only (VOL-002)."""
+
+    day_standardized: bool = True
+    min_count: int = Field(ge=1)
+
+
+class RealizedConfig(FrozenModel):
+    """Realized measures (VOL-002)."""
+
+    intraday_timeframes: list[Timeframe] = Field(min_length=1)
+    periods: list[Timeframe] = Field(min_length=1)
+    diurnal: DiurnalConfig
+
+    @field_validator("periods")
+    @classmethod
+    def _check_periods(cls, value: list[Timeframe]) -> list[Timeframe]:
+        allowed = {Timeframe("1h"), Timeframe("1d")}
+        if any(tf not in allowed for tf in value):
+            raise ValueError("realized periods are 1h (UTC hours) or 1d (trading days)")
+        return value
+
+
+class VolBenchmarksConfig(FrozenModel):
+    """Volatility benchmarks with parameters fixed in advance (VOL-003)."""
+
+    rolling_windows: list[int] = Field(min_length=1)
+    ewma_lambdas: list[float] = Field(min_length=1)
+    har_components: list[int] = Field(min_length=1)
+    har_intraday_components: list[int] = Field(min_length=1)
+    variance_floor_share: float = Field(gt=0, lt=1)
+
+    @field_validator("ewma_lambdas")
+    @classmethod
+    def _check_lambdas(cls, value: list[float]) -> list[float]:
+        if any(not 0 < lam < 1 for lam in value):
+            raise ValueError("EWMA lambdas lie in (0, 1)")
+        return value
+
+    @field_validator("rolling_windows", "har_components", "har_intraday_components")
+    @classmethod
+    def _check_windows(cls, value: list[int]) -> list[int]:
+        if any(w < 1 for w in value) or len(set(value)) != len(value):
+            raise ValueError("windows must be unique and at least 1 period")
+        return sorted(value)
+
+
+class GarchSpec(FrozenModel):
+    """A GARCH-family volatility process: GARCH or EGARCH, with (o = 1) or without asymmetry."""
+
+    vol: Literal["GARCH", "EGARCH"]
+    o: int = Field(default=0, ge=0, le=1)
+
+
+class GarchConfig(FrozenModel):
+    """GARCH-family models (VOL-004)."""
+
+    mean: Literal["zero", "constant"] = "zero"
+    models: dict[str, GarchSpec] = Field(min_length=1)
+    distributions: list[Literal["normal", "t", "skewt"]] = Field(min_length=1)
+    simulations: int = Field(ge=100)
+
+
+class VolEvaluationConfig(FrozenModel):
+    """Volatility forecast evaluation (VOL-005)."""
+
+    target: Literal["rv"] = "rv"
+    mcs_alpha: float = Field(gt=0, lt=1)
+    mcs_n_boot: int = Field(ge=100)
+    mcs_mean_block: float = Field(ge=1)
+    dm_alpha: float = Field(gt=0, lt=1)
+    dm_reference: str
+    regime_window: int = Field(ge=1)
+    regime_quantiles: list[float] = Field(min_length=1)
+
+    @field_validator("regime_quantiles")
+    @classmethod
+    def _check_quantiles(cls, value: list[float]) -> list[float]:
+        return _check_quantiles(value)
+
+
+class VolSelectionConfig(FrozenModel):
+    """Which forecaster serves sigma-hat when nothing beats it (VOL-006)."""
+
+    default: str
+
+
+class VolatilityConfig(FrozenModel):
+    """Volatility research settings (``config/volatility.yaml``, Phase 6)."""
+
+    estimators: EstimatorsConfig
+    realized: RealizedConfig
+    benchmarks: VolBenchmarksConfig
+    garch: GarchConfig
+    evaluation: VolEvaluationConfig
+    selection: VolSelectionConfig
+
+    def benchmark_names(self) -> list[str]:
+        """Names of the VOL-003 benchmarks on the volatility board (``xq.research.volatility``)."""
+        return [
+            *(f"rolling_{w}" for w in self.benchmarks.rolling_windows),
+            *(f"ewma_{lam:g}" for lam in self.benchmarks.ewma_lambdas),
+            "har",
+        ]
+
+    @model_validator(mode="after")
+    def _check_names(self) -> VolatilityConfig:
+        names = self.benchmark_names()
+        if self.selection.default not in names:
+            raise ValueError(
+                f"volatility.selection.default {self.selection.default!r} is not a benchmark "
+                f"({names})"
+            )
+        if self.evaluation.dm_reference not in names:
+            raise ValueError(
+                f"volatility.evaluation.dm_reference {self.evaluation.dm_reference!r} is not a "
+                f"benchmark ({names})"
+            )
+        return self
+
+
 class SpreadCostConfig(FrozenModel):
     """Spread fallback when quotes carry no bid/ask (BT-001)."""
 
@@ -1106,6 +1325,8 @@ class AppConfig(BaseSettings):
     targets: dict[str, dict[str, TargetSetConfig]] = {}
     gates: GatesConfig | None = None
     eda: EdaConfig | None = None
+    stats: StatsConfig | None = None
+    volatility: VolatilityConfig | None = None
     secrets: SecretsConfig = SecretsConfig()
 
     @classmethod
@@ -1261,6 +1482,18 @@ class AppConfig(BaseSettings):
         if self.eda is None:
             raise ConfigError("no exploratory research configuration (config/eda.yaml) was loaded")
         return self.eda
+
+    def stats_config(self) -> StatsConfig:
+        """Return the statistical research settings; raise if ``config/stats.yaml`` is missing."""
+        if self.stats is None:
+            raise ConfigError("no statistical research configuration (config/stats.yaml)")
+        return self.stats
+
+    def volatility_config(self) -> VolatilityConfig:
+        """Return the volatility research settings (``config/volatility.yaml``), or raise."""
+        if self.volatility is None:
+            raise ConfigError("no volatility research configuration (config/volatility.yaml)")
+        return self.volatility
 
     def datasets_config(self) -> DatasetsConfig:
         """Return the dataset builder settings; raise if they are not configured."""

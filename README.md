@@ -11,7 +11,7 @@ follow are in [`CLAUDE.md`](CLAUDE.md), and decisions are recorded in [`docs/adr
 
 ## Status
 
-Sprints 1 to 5 are merged. Sprint 2 (clean ticks, bars and data quality) is implemented and tested
+Sprints 1 to 5 are merged; Sprint 6 is in review. Sprint 2 (clean ticks, bars and data quality) is implemented and tested
 on synthetic data but **not validated**: its quality report must first run on at least one year of
 real broker ticks, followed by the human review (DQ-008); the owner's decisions on its open
 questions are in ADR 0013. Sprint 3 (datasets, leakage harness, experiment registry, forward-return
@@ -21,7 +21,12 @@ tested on synthetic data only. Sprint 5 is build-only because no real broker dat
 exploratory-research report (distributions, dependence, seasonality, trend and reversion, cost to
 volatility and horizon admission, all on the discovery window) and experiment conclusions are
 implemented and tested on synthetic data and simulated processes; no EDA report has been generated
-on real data and `config/horizons.yaml` does not exist yet. See [`CHANGELOG.md`](CHANGELOG.md) for
+on real data and `config/horizons.yaml` does not exist yet. Sprint 6 (statistical and volatility
+research) is build-only too: stationarity, dependence and variance-ratio tests, walk-forward ARMA
+forecasts, the verdict-report framework, range and realized volatility estimators, EWMA/HAR/GARCH
+forecasters, their evaluation on identical folds and the sigma-hat selection are implemented and
+pass recovery tests on simulated processes; nothing has run on real data and no volatility model
+is promoted. See [`CHANGELOG.md`](CHANGELOG.md) for
 completed backlog tasks and [`docs/STATUS.md`](docs/STATUS.md) for the current sprint, open
 decisions and carry-over items.
 
