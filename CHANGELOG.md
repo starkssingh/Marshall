@@ -551,6 +551,12 @@ IDs from `docs/specs/development-plan.md`.
   scaled by the calibrated win probability and the drawdown throttle (5 % → 15 %), rounded down
   to the lot step. Hand-computed cases and hypothesis properties: never above the request or the
   risk budget, lot-step multiples within the lot range, monotone scales. ADR 0052.
+- RISK-003: limits and halts (`xq.risk.limits`) — halts on new exposure (sticky drawdown halt,
+  daily loss halt, cooldown after consecutive losing round trips, entries per day), each
+  triggering exactly at its threshold (tested at and a hair below every one), and caps on every
+  target (lots, notional with a correlated-exposure hook, margin use, per-session exposure),
+  rounded down to the lot step; a hypothesis property shows a capped target never exceeds any
+  limit or the requested size and keeps its side. ADR 0052.
 
 ### Changed
 

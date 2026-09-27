@@ -40,3 +40,23 @@
    never more, so models still never size — scaled by the calibrated win probability and by the
    drawdown throttle, and rounded down to the lot step within the instrument's lot range. Every
    step can only shrink the size; property tests pin the caps.
+
+## RISK-003 — limits and halts
+
+1. **Halts refuse new exposure only.** An order that opens, increases or flips a position is
+   refused while a halt is in force; an order that only reduces a position is never blocked by a
+   halt (RISK-005 applies this). Each halt triggers at its threshold (`>=`): the drawdown halt on
+   the *worst* drawdown since the start or the last manual reset (sticky: a recovery does not lift
+   it, only `RiskStateTracker.reset_halt` does), the daily loss halt on the trading day's loss as
+   a share of its starting equity (lifted at the next trading day), the cooldown for
+   `cooldown_minutes` after `max_consecutive_losses` losing round trips in a row (lifted exactly
+   at the end, or by a winning round trip), and the entries-per-day halt.
+2. **Caps bound the target, not the order.** The target position is cut to the smallest of the
+   caps — lots, notional (plus correlated exposure from other instruments through the
+   `CorrelatedExposure` hook, none with one instrument), margin use and, while a named session is
+   in force, the session's exposure — and rounded down to the lot step. Caps use the decision's
+   reference price (the side's quote) and equity at the decision; equity at or below zero allows
+   no exposure. The decision records which caps bound it.
+3. **Floating point.** Sizes are rounded to the lot step from their value at 12 decimals, as in
+   RISK-002, so a cap can be exceeded by at most 5e-13 lots through representation error; the
+   property test allows a relative 1e-9.
