@@ -602,6 +602,13 @@ IDs from `docs/specs/development-plan.md`.
   (checked against the dataset calendar columns across DST); an inclusive daily sigma-hat band;
   the spread strictly below k x its causal New York hour-of-week median (overall median as a
   fallback, blocked without one). ADR 0052.
+- SIGNAL-004: the signal engine (`xq.signals.engine.SignalEngine`) — a strategy defined entirely
+  by YAML (`StrategySpec`, `experiments/configs/strategies/template_barrier.yaml`, a template
+  for synthetic tests); every forecast of its model and target becomes a candidate with stop,
+  target and time stop in sigma-hat units; uncalibrated, stale and filtered forecasts and
+  unqualified EV are rejected with reasons; the best remaining candidate becomes the one
+  `TradeIntent`; a `SignalRecord` for every candidate. Tested on hand-computed stops, costs and
+  EV. ADR 0052.
 
 ### Changed
 

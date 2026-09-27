@@ -210,3 +210,31 @@
    deciding on it). While the hour has fewer than `min_obs` observations the overall median stands
    in; with fewer than `min_obs` overall the candidate is blocked (no reference, no trade). New
    York time is used because gold's liquidity follows the local sessions, not UTC.
+
+## SIGNAL-004 — orchestration and audit records
+
+1. **A strategy is its YAML** (`experiments/configs/strategies/*.yaml`, `StrategySpec`): the model
+   and barrier target it trades, its sides, horizon, barriers in sigma-hat units, EV thresholds
+   (with the optional conservative variant), requested exposure and filters. The committed
+   `template_barrier.yaml` is a template for the tests on synthetic forecasts, not a research
+   candidate; its thresholds are placeholders to be fixed on validation folds.
+2. **Candidates.** Every forecast of the strategy's model, target, instrument and sides at a
+   decision is a candidate: entry at the side's quote, stop and target `sl_sigmas` and
+   `tp_sigmas` of the forecast's horizon sigma-hat away, time stop at the end of the horizon.
+   Forecasts of other models are not the strategy's candidates and are not recorded; a forecast of
+   the strategy's model without `p_tp_first` is a configuration error and raises.
+3. **Rejections, all recorded with reasons.** An uncalibrated forecast is refused; so is one not
+   made at the decision time (later would be look-ahead, earlier stale), one whose conservative
+   variant lacks `p_se`, one whose EV does not qualify, and any a filter blocks. The costs in EV
+   are the current spread plus twice the cost model's slippage (its sigma term from the daily
+   sigma-hat scaled to one minute) and commission.
+4. **Selection.** Of the candidates left, the highest EV_net becomes the one `TradeIntent` (market
+   entry, the requested exposure, the candidate's stop, target and time stop, its calibrated —
+   possibly conservative — probability for the risk engine's scaling, `signal_id` = the record
+   id); a candidate on the side already held is "not selected", as are the others, with the
+   winner named. The engine never sizes and never exits: exits are the bracket, the time stop and
+   the risk engine's rules.
+5. **Layering.** The signal engine uses the backtest cost model (`xq.backtest.costs`) for the
+   round-trip cost, the same one the event tier fills with; the cost model is shared
+   infrastructure, and moving it to its own package is left to a layout ADR if the runtime needs
+   it without the backtester.

@@ -1,0 +1,28 @@
+# Template signal strategy (SIGNAL-004, ADR 0052). NOT a research candidate: no model exists yet,
+# and the tests run it on synthetic forecasts only. A real strategy copies this file, names its
+# model and barrier target, and fixes theta and p_min on validation folds before any test fold is
+# seen (plan Phase 15); the values below are placeholders.
+strategy_id: template_barrier
+version: "1"
+description: Barrier trade on a calibrated take-profit-first probability, both sides.
+instrument: xauusd
+forecast:
+  model_id: synthetic_momentum     # forecasts of other models are ignored
+  target_id: barrier.4h.tp2.sl1    # the barrier target the model was trained on
+sides: [long, short]
+horizon: 4h                        # time stop: the end of the target's horizon
+barriers:                          # in units of the forecast's sigma-hat over the horizon
+  tp_sigmas: 2.0
+  sl_sigmas: 1.0
+ev:
+  theta: 0.05                      # EV_net must exceed 0.05 sigma (strict)
+  p_min: 0.36                      # p must exceed 0.36 (break-even of 2:1 barriers is 1/3)
+  conservative:
+    z: 1.645                       # use p - 1.645 x p_se (one-sided 95 %)
+exposure: 1.0                      # requested exposure: a cap for the risk engine, never a size
+filters:
+  regimes: []                      # PLACEHOLDER pass-through until REG-007: no regime model yet
+  sessions: []                     # any session
+  blackouts: [rollover, us_data_release]
+  volatility_band: {low: 0.001, high: 0.05}
+  spread: {k: 3.0, min_obs: 8}
