@@ -299,6 +299,11 @@ IDs from `docs/specs/development-plan.md`.
 
 ### Changed
 
+- ARCH-007/ARCH-008 Docker verification (ADR 0032, C-6): `docker/Dockerfile` has `base`, `test`
+  (dev dependencies, `git`, `tzdata`, the test suite; runs as the non-root user under
+  `TZ=Asia/Tokyo`) and `runtime` (still the default and the compose target) stages; CI gains a
+  `docker` job that builds and starts the runtime image, builds the test stage and runs the suite
+  inside it.
 - BT-001 costs stay provisional, and financing is a cost on both sides until broker terms replace
   it (ADR 0032): a `provisional: true` cost model must have strictly positive long and short
   financing rates (only a non-provisional model may credit a side). Net results carry the cost

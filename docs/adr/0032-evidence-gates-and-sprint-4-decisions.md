@@ -152,10 +152,12 @@ results (the baseline board first) prints it in its header and on every row.
 
 ## Decision 5 — Verifying the Docker image
 
-The image cannot be built in the Claude sandbox (C-6). The Dockerfile gets a `test` stage (the
-runtime stage plus the dev dependencies, `git` and the test suite), and CI gets a job that builds
-that stage and runs the suite inside it, under `TZ=Asia/Tokyo` like the main job. The runtime
-image is unchanged.
+The image cannot be built in the Claude sandbox (C-6). The Dockerfile is split into a `base`
+stage (the locked runtime dependencies and the package, as before), a `test` stage (base plus the
+dev dependencies, `git`, `tzdata` and the test suite) and the `runtime` stage, which stays last so
+it remains the default build and the image `docker compose` builds (now also named as its
+`target`). CI gets a `docker` job that builds and starts the runtime image, builds the test stage
+and runs the suite inside it as the non-root user under `TZ=Asia/Tokyo`, like the main job.
 
 ## Consequences
 
