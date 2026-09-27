@@ -489,6 +489,15 @@ IDs from `docs/specs/development-plan.md`.
   for insufficient margin or when the position changed since their decision; newer orders
   replace working orders of earlier intents. Every fill carries its spread, slippage and
   commission decomposition. Golden hand-computed tests cover each rule. ADR 0049.
+- BT-006: portfolio accounting of the event tier (`xq.backtest.portfolio.Portfolio`) — a USD CFD
+  account for one instrument: cash moved by realized P&L, commissions and financing; FIFO lots
+  with per-trade price P&L, commission and financing shares; unrealized P&L at the latest mid;
+  margin used; financing at each rollover on the position held over it (both sides a cost while
+  costs are provisional, triple on Wednesday). Equity = cash + unrealized is checked against an
+  independent mark-to-market equity after every event of an engine run and in a hypothesis
+  property test; `daily_frame` gives the screener's daily layout for the BT-003 metrics. Tested:
+  a hand-computed FIFO case, a flip, financing over the triple rollover on longs and shorts.
+  ADR 0049.
 
 ### Changed
 

@@ -72,7 +72,7 @@ def minute_quotes(start: str, end: str, *, price: float = 2000.0, seed: int = 3)
 
 
 def state(position: float = 0.0) -> AccountState:
-    return AccountState(0, 100_000.0, 100_000.0, 0.0, 100_000.0, position, 0.0)
+    return AccountState(0, 100_000.0, 100_000.0, 0.0, 100_000.0, position, 0.0, 2000.0)
 
 
 def stamped(intent: TradeIntent, n: int = 1, at: str = "2024-03-12 14:00") -> TradeIntent:

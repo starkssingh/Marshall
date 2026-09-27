@@ -79,3 +79,24 @@ on synthetic data only (ADR 0048).
    slippage_cost` against the reference mid, where the spread cost is the half-spread and the
    slippage cost the rest (slippage for market and stop fills; the no-improvement cost of a limit
    fill); commission at the mid (`CostModel.commission_usd`).
+
+## BT-006 — portfolio accounting
+
+1. **A CFD account.** Cash starts at the capital and moves only by realized price P&L,
+   commissions and financing; the position is valued at the latest mid (the screener marks at mid
+   too). Equity = cash + unrealized P&L of the open FIFO lots. Independently, equity = capital +
+   every fill's cash flow − commissions − financing + position × mark × contract; the two are
+   compared after every event of engine runs (and in a property test), which is the accounting
+   identity the plan asks for.
+2. **FIFO lots for trade statistics.** A fill closes the oldest opposite lots first; each closed
+   (part of a) lot is a trade with its price P&L at fill prices (so spread and slippage are
+   inside it) and its pro-rata share of the commissions of the fills that opened and closed it
+   and of the financing charged while it was open. Open lots are reported marked at the mid.
+   The trades' P&L adds up to the change in equity.
+3. **Financing** at each rollover timer on the position held over it (fills strictly before the
+   rollover), at the mid of the last quote before it, by `CostModel.financing_usd` — a cost on
+   both sides while the cost model is provisional (ADR 0032), three times on the configured
+   weekday.
+4. **Daily frame.** Day-end snapshots become the screener's daily layout (`DAILY_COLUMNS`), with a
+   charge at a day's end counted in that day, so both tiers share the BT-003 metrics. Margin used
+   is `|position| x contract x mark x margin_rate`.

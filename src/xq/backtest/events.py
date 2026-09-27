@@ -96,7 +96,11 @@ class ExecutionBar:
 
 @dataclass(frozen=True, slots=True)
 class AccountState:
-    """What the account holds at an instant (the risk approver's view of the account)."""
+    """What the account holds at an instant (the risk approver's view of the account).
+
+    ``equity = cash + unrealized``; ``mark`` is the mid the position is valued at (NaN before the
+    first quote).
+    """
 
     ts: int
     capital: float
@@ -105,6 +109,7 @@ class AccountState:
     equity: float
     position_lots: float
     margin_used: float
+    mark: float = float("nan")
 
 
 @dataclass(frozen=True, slots=True)
