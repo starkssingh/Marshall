@@ -1,24 +1,33 @@
-"""Cost-to-volatility table and the horizon admission list (EDA-006).
+"""Cost-to-volatility table and the horizon admission list (EDA-006, ADR 0037, ADR 0040).
 
-For each candidate horizon (a bar timeframe) every adjacent close-to-close return of that timeframe
-is one holding period ``[ret_start, ret_end)``, entered at the earlier close and left at the later
-one. Its **round-trip cost** in basis points of the entry price, from the configured cost model
-(BT-001, `xq.backtest.costs.CostModel`):
+**Holding periods are TGT-002's.** Decisions are the 1m bars whose availability falls on the
+``horizons.decision_step`` grid (5 minutes). Each 1m bar contributes one quote, its closing mid and
+spread, stamped just before the bar's end (the close is the last quote of the bar). For every
+candidate horizon label h (``15m``, ``1d`` = one trading day, `market_horizon`), the move is
+computed by TGT-002's own `xq.targets.returns.compute` (mid variant) on those quotes, with the
+execution latency and allowed fill delay of the ``horizons.target_set`` target set: entry at the
+first quote at or after t + latency of market time, exit at the first at or after t + h + latency,
+no measurement for a decision taken while the market is closed or when a fill comes later than the
+allowed delay, and ``crosses_close`` when a close lies between the fills. Periods overlap (a
+decision every 5 minutes); that is fine for means, and n is reported.
 
-- **spread** — the bar's mean quoted spread over its mid close: buying at the ask and selling at
-  the bid costs half a spread each way;
-- **commission** — both sides' commission of one lot at the entry price, over its notional;
-- **slippage** — the model's slippage at entry (``ret_start``) plus at exit (the last instant of
-  the period), with sigma-hat the RMS of the last ``horizons.sigma_1m_minutes`` one-minute
-  returns completed by the entry (the median of those RMS values where none precede it);
-- **financing** — the rollovers inside the period (three on the triple weekday) at the mean of the
+Its **round-trip cost** in basis points, from the configured cost model (BT-001,
+`xq.backtest.costs.CostModel`):
+
+- **spread** — half the mean spread of the entry fill's 1m bar over its mid plus half that of the
+  exit fill's bar;
+- **commission** — both sides' commission of one lot at the entry mid, over its notional;
+- **slippage** — the model's slippage at the entry fill and at the exit fill, with sigma-hat the RMS
+  of the last ``horizons.sigma_1m_minutes`` one-minute returns completed by the entry (the median
+  of those RMS values where none precede it);
+- **financing** — the rollovers between the fills (three on the triple weekday) at the mean of the
   long and short rates (direction-neutral research).
 
-The **expected absolute move** is the mean absolute log return of the timeframe. The ratio is
-``mean cost / mean move``, per horizon over all periods and per session and overlap of
-``config/sessions.yaml`` (the session the period's bar starts in). A horizon whose overall ratio
-exceeds ``horizons.max_cost_to_vol`` (plan default 0.3) is excluded from directional research; it
-is still used for execution simulation, realized volatility and entry timing.
+The **expected absolute move** is the mean absolute log mid move. The ratio is ``mean cost / mean
+move``, per horizon over all periods and per session and overlap of ``config/sessions.yaml`` (the
+session the decision falls in). A horizon whose overall ratio exceeds ``horizons.max_cost_to_vol``
+(plan default 0.3) is excluded from directional research; it is still used for execution
+simulation, realized volatility and entry timing.
 
 While the cost model is provisional, every cost and ratio is a screening figure and carries its
 label ("screening, placeholder costs"). The admission list is written to the report
@@ -45,19 +54,35 @@ from matplotlib.figure import Figure
 from xq.backtest.costs import CostModel
 from xq.core.config import SessionsConfig
 from xq.core.errors import XQError
+from xq.core.types import PriceBasis, Timeframe
+from xq.data.calendar import MarketClock
 from xq.datasets.calendar_columns import calendar_columns
-from xq.research.eda.data import instants_ns
+from xq.research.eda.data import AVAILABLE, BAR_START, instants_ns
 from xq.research.reports import MANIFEST_FILE, RUN_FILE, new_figure
+from xq.targets.base import TargetSpec, market_horizon
+from xq.targets.returns import ForwardReturnParams
+from xq.targets.returns import compute as forward_return
 
 FloatArray = npt.NDArray[np.float64]
 ALL_SESSIONS = "all"
 ADMISSION_FILE = "admission.yaml"
 HORIZONS_CONFIG = "horizons.yaml"
 _BPS = 1e4
+PERIOD_COLUMNS = [
+    "label_start",
+    "label_end",
+    "crosses_close",
+    "move",
+    "entry_mid",
+    "exit_mid",
+    "entry_spread_mean",
+    "exit_spread_mean",
+]
 TABLE_COLUMNS = [
     "horizon",
     "session",
     "n",
+    "crosses_close_share",
     "move_bps",
     "spread_bps",
     "commission_bps",
@@ -96,6 +121,94 @@ class HorizonAdmission:
         }
 
 
+def minute_quotes(bars: pd.DataFrame, basis: PriceBasis | str = PriceBasis.MID) -> pd.DataFrame:
+    """One quote per complete 1m bar: its closing mid and spread, stamped just before its end.
+
+    `bars` are 1m bars of price `basis` (``close``, ``spread_close``, ``spread_mean``, sorted by
+    ``bar_start_utc``). The close is the last quote of the bar, so its stamp is the last instant
+    of the bar: a fill "at or after" an instant never uses a bar that ended before it.
+    """
+    starts = instants_ns(bars[BAR_START])
+    close = bars["close"].to_numpy(dtype=np.float64)
+    spread = bars["spread_close"].to_numpy(dtype=np.float64)
+    chosen = PriceBasis(basis)
+    if chosen is PriceBasis.BID:
+        mid = close + spread / 2
+    elif chosen is PriceBasis.ASK:
+        mid = close - spread / 2
+    else:
+        mid = close
+    return pd.DataFrame(
+        {
+            "ts_utc": pd.to_datetime(starts + Timeframe.M1.nanos - 1, unit="ns", utc=True),
+            "bid": mid - spread / 2,
+            "ask": mid + spread / 2,
+            "mid": mid,
+            "spread_close": spread,
+            "spread_mean": bars["spread_mean"].to_numpy(dtype=np.float64),
+        }
+    )
+
+
+def decision_times(bars: pd.DataFrame, step: pd.Timedelta) -> pd.DatetimeIndex:
+    """Availability of the 1m bars whose end lies on the `step` grid (multiples of it in UTC)."""
+    ends = instants_ns(bars[BAR_START]) + Timeframe.M1.nanos
+    on_grid = ends % step.value == 0
+    return pd.DatetimeIndex(bars.loc[on_grid, AVAILABLE], name="decision_time")
+
+
+def holding_periods(
+    bars: pd.DataFrame,
+    label: str,
+    *,
+    trading_day: pd.Timedelta,
+    params: ForwardReturnParams,
+    step: pd.Timedelta,
+    clock: MarketClock,
+    basis: PriceBasis | str = PriceBasis.MID,
+) -> pd.DataFrame:
+    """TGT-002 holding periods of horizon `label` from the 1m bars (module docstring).
+
+    Returns:
+        One row per measured decision (indexed by decision time): the fills' instants
+        (``label_start``, ``label_end``), ``crosses_close``, the log mid ``move``, and the mid and
+        mean spread of the entry and exit fills' bars.
+    """
+    quotes = minute_quotes(bars, basis)
+    decisions = decision_times(bars, step)
+    spec = TargetSpec(
+        f"eda_move_{label}",
+        market_horizon(label, trading_day),
+        "mid",
+        {
+            "execution_latency_ms": params.execution_latency_ms,
+            "max_fill_delay_s": params.max_fill_delay_s,
+            "normalized": False,
+        },
+    )
+    sigma = pd.Series(np.nan, index=decisions)
+    moves = forward_return(spec, quotes.loc[:, ["ts_utc", "bid", "ask"]], sigma, clock)
+    moves = moves.loc[moves["value"].notna()]
+    stamps = instants_ns(quotes["ts_utc"])
+    entry = np.searchsorted(stamps, instants_ns(moves["label_start"]))
+    exit_ = np.searchsorted(stamps, instants_ns(moves["label_end"]))
+    mid = quotes["mid"].to_numpy()
+    spread = quotes["spread_mean"].to_numpy()
+    return pd.DataFrame(
+        {
+            "label_start": moves["label_start"],
+            "label_end": moves["label_end"],
+            "crosses_close": moves["crosses_close"].to_numpy(dtype=bool),
+            "move": moves["value"].to_numpy(dtype=np.float64),
+            "entry_mid": mid[entry],
+            "exit_mid": mid[exit_],
+            "entry_spread_mean": spread[entry],
+            "exit_spread_mean": spread[exit_],
+        },
+        index=moves.index,
+    )
+
+
 def trailing_rms(
     ends: npt.NDArray[np.int64], values: FloatArray, at: npt.NDArray[np.int64], window: int
 ) -> FloatArray:
@@ -132,16 +245,16 @@ def rollover_weights(
 
 
 def period_costs(
-    returns: pd.DataFrame,
+    periods: pd.DataFrame,
     cost: CostModel,
     minute_returns: pd.DataFrame,
     *,
     sigma_minutes: int,
 ) -> pd.DataFrame:
     """Round-trip cost components (bps) and the absolute move of every holding period."""
-    starts = instants_ns(returns["ret_start"])
-    ends = instants_ns(returns["ret_end"])
-    price = returns["price"].to_numpy(dtype=np.float64)
+    starts = instants_ns(periods["label_start"])
+    ends = instants_ns(periods["label_end"])
+    price = periods["entry_mid"].to_numpy(dtype=np.float64)
     minute_ends = instants_ns(minute_returns["ret_end"])
     order = np.argsort(minute_ends, kind="stable")
     sigma = trailing_rms(
@@ -155,28 +268,33 @@ def period_costs(
         sigma = np.where(np.isnan(sigma), float(np.median(known)) if len(known) else 0.0, sigma)
     contract = float(cost.instrument.contract_size)
     commission = 2 * cost.commission_usd(np.ones(len(price)), price) / (contract * price) * _BPS
-    entry = pd.DatetimeIndex(returns["ret_start"])
-    exit_ = pd.DatetimeIndex(pd.to_datetime(ends - 1, unit="ns", utc=True))
-    slippage = cost.slippage_bps(entry, sigma) + cost.slippage_bps(exit_, sigma)
+    slippage = cost.slippage_bps(
+        pd.DatetimeIndex(periods["label_start"]), sigma
+    ) + cost.slippage_bps(pd.DatetimeIndex(periods["label_end"]), sigma)
     financing = cost.config.financing
     rate = (financing.long_rate_annual_pct + financing.short_rate_annual_pct) / 2
     financing_bps = rollover_weights(cost, starts, ends) * rate / 100 / financing.day_count * _BPS
-    spread = returns["spread_bps"].to_numpy(dtype=np.float64)
+    spread = (
+        periods["entry_spread_mean"].to_numpy(dtype=np.float64) / price
+        + periods["exit_spread_mean"].to_numpy(dtype=np.float64)
+        / periods["exit_mid"].to_numpy(dtype=np.float64)
+    ) * (_BPS / 2)
     return pd.DataFrame(
         {
-            "move_bps": np.abs(returns["ret"].to_numpy(dtype=np.float64)) * _BPS,
+            "move_bps": np.abs(periods["move"].to_numpy(dtype=np.float64)) * _BPS,
             "spread_bps": spread,
             "commission_bps": commission,
             "slippage_bps": slippage,
             "financing_bps": financing_bps,
             "cost_bps": spread + commission + slippage + financing_bps,
+            "crosses_close": periods["crosses_close"].to_numpy(dtype=bool),
         },
-        index=returns.index,
+        index=periods.index,
     )
 
 
 def cost_to_volatility_table(
-    returns_by_horizon: Mapping[str, pd.DataFrame],
+    periods_by_horizon: Mapping[str, pd.DataFrame],
     minute_returns: pd.DataFrame,
     cost: CostModel,
     sessions: SessionsConfig,
@@ -187,17 +305,17 @@ def cost_to_volatility_table(
     """The cost-to-volatility table by horizon and session (module docstring)."""
     rows = []
     names = [*sessions.sessions, *sessions.overlaps]
-    for horizon, returns in returns_by_horizon.items():
-        if returns.empty:
+    for horizon, periods in periods_by_horizon.items():
+        if periods.empty:
             continue
-        periods = period_costs(returns, cost, minute_returns, sigma_minutes=sigma_minutes)
-        inside = calendar_columns(pd.DatetimeIndex(returns["bar_start"]), sessions)
-        groups = {ALL_SESSIONS: np.ones(len(returns), dtype=bool)}
+        costs = period_costs(periods, cost, minute_returns, sigma_minutes=sigma_minutes)
+        inside = calendar_columns(pd.DatetimeIndex(periods.index), sessions)
+        groups = {ALL_SESSIONS: np.ones(len(periods), dtype=bool)}
         groups |= {name: inside[f"in_{name}"].to_numpy(dtype=bool) for name in names}
         for session, mask in groups.items():
             if not mask.any():
                 continue
-            chosen = periods.loc[mask]
+            chosen = costs.loc[mask]
             move = float(chosen["move_bps"].mean())
             total = float(chosen["cost_bps"].mean())
             ratio = total / move if move > 0 else math.inf
@@ -206,6 +324,7 @@ def cost_to_volatility_table(
                     "horizon": horizon,
                     "session": session,
                     "n": int(mask.sum()),
+                    "crosses_close_share": float(chosen["crosses_close"].mean()),
                     "move_bps": move,
                     "spread_bps": float(chosen["spread_bps"].mean()),
                     "commission_bps": float(chosen["commission_bps"].mean()),
@@ -296,7 +415,7 @@ def cost_to_volatility_figure(table: pd.DataFrame, max_cost_to_vol: float, title
     axes.axhline(max_cost_to_vol, linestyle="--", linewidth=1, label=f"bound {max_cost_to_vol:g}")
     axes.set_xticks(x, overall["horizon"].to_numpy())
     axes.set_yscale("log")
-    axes.set_ylabel("round-trip cost / mean |return|")
+    axes.set_ylabel("round-trip cost / mean |move|")
     axes.legend()
     figure.suptitle(title)
     return figure

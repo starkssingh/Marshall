@@ -375,6 +375,12 @@ IDs from `docs/specs/development-plan.md`.
 
 ### Changed
 
+- EDA-006 holding periods are TGT-002's (ADR 0040, owner review of PR #9): candidates are TGT-002
+  horizon labels; from every market-open decision of a 1m bar on a 5-minute grid, the move over h
+  of market time is computed by `xq.targets.returns.compute` (mid) on quotes rebuilt from the 1m
+  bars' closes, with `fwd_returns.v1`'s latency and fill delay, so trading-time horizons, the
+  closed-market rule and `crosses_close` are the targets' own; n and the share of periods crossing
+  a close are reported. `config/eda.yaml` gains `decision_step` and `target_set`.
 - BASE-005 H-0001 draft revised at the owner's request (ADR 0035, C-15), still unregistered: rule
   baselines are evaluated over the full pre-vault history after each rule's warm-up, with the
   fold-aligned version stored for comparison; they run on 1d and 1h signal bars (not 15m), so the

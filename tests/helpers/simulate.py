@@ -5,17 +5,22 @@
 - `ar1`: a stationary AR(1) with autocorrelations phi^k.
 - `hourly_returns`: a returns frame shaped like `xq.research.eda.data.bar_returns` on New York
   hours Monday to Friday, with effects injected into chosen hour-of-week buckets.
+- `minute_bars`: complete 1m mid bars on every market-open minute of the configured calendar,
+  with a given log-mid path and a spread proportional to the mid.
 """
 
 from __future__ import annotations
 
 from collections.abc import Mapping
+from datetime import date
 
 import numpy as np
 import numpy.typing as npt
 import pandas as pd
 
+from xq.core.config import SessionsConfig
 from xq.core.time import trading_days
+from xq.data.calendar import MarketClock
 
 FloatArray = npt.NDArray[np.float64]
 
@@ -93,5 +98,49 @@ def hourly_returns(
             "ret": ret / 1e4,
             "tick_count": rng.poisson(300, len(local)).astype(np.int64),
             "spread_bps": np.full(len(local), 1.5),
+        }
+    )
+
+
+def market_minutes(sessions: SessionsConfig, first: date, last: date) -> npt.NDArray[np.int64]:
+    """UTC nanosecond starts of every market-open minute of trading days `first` to `last`."""
+    clock = MarketClock.for_range(sessions, first, last)
+    minute = 60 * 1_000_000_000
+    return np.concatenate(
+        [
+            np.arange(o, c, minute, dtype=np.int64)
+            for o, c in zip(clock.opens, clock.closes, strict=True)
+        ]
+    )
+
+
+def minute_bars(
+    sessions: SessionsConfig,
+    first: date,
+    last: date,
+    *,
+    log_mid: FloatArray | None = None,
+    spread_bps: float = 1.0,
+    price: float = 2000.0,
+) -> pd.DataFrame:
+    """Complete 1m mid bars on every market-open minute of trading days `first` to `last`.
+
+    `log_mid` (one value per bar, in market-minute order) sets the closing mid
+    ``price * exp(log_mid)``; the closing and mean spreads are `spread_bps` of the mid.
+    """
+    starts = market_minutes(sessions, first, last)
+    path = np.zeros(len(starts)) if log_mid is None else np.asarray(log_mid, dtype=np.float64)
+    mid = price * np.exp(path)
+    stamps = pd.DatetimeIndex(pd.to_datetime(starts, unit="ns", utc=True))
+    return pd.DataFrame(
+        {
+            "bar_start_utc": stamps,
+            "available_at_utc": stamps + pd.Timedelta(minutes=1),
+            "close": mid,
+            "tick_count": np.full(len(starts), 60, dtype=np.int64),
+            "spread_mean": mid * spread_bps / 1e4,
+            "spread_close": mid * spread_bps / 1e4,
+            "trading_day": [d.item() for d in trading_days(stamps)],
+            "is_complete": True,
         }
     )

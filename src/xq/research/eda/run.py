@@ -36,6 +36,7 @@ from xq.core.config import config_hash
 from xq.core.seeds import derive_seed
 from xq.core.time import TimestampLike
 from xq.core.types import Timeframe
+from xq.data.calendar import regular_trading_day
 from xq.research.eda import dependence, distributions, horizons, seasonality, trend
 from xq.research.eda.bootstrap import eda_block_length
 from xq.research.eda.data import EdaInputs, bars_per_trading_day, load_eda_inputs
@@ -46,6 +47,7 @@ from xq.research.reports import (
     ReportBuilder,
     Section,
 )
+from xq.targets.returns import forward_return_params
 
 if TYPE_CHECKING:
     from xq.tracking.runs import RunContext
@@ -80,7 +82,6 @@ def run_eda(run: RunContext, dataset_id: str, *, end: TimestampLike | None = Non
     eda = cfg.eda_config()
     wanted = [
         *eda.timeframes,
-        *eda.horizons.candidates,
         eda.seasonality.intraday_timeframe,
         eda.seasonality.event_timeframe,
         eda.trend.variance_ratio_timeframe,
@@ -118,6 +119,7 @@ def run_eda(run: RunContext, dataset_id: str, *, end: TimestampLike | None = Non
     admission = _horizons(
         builder.section("horizons", "Cost to volatility and horizon admission (EDA-006)"),
         run,
+        inputs,
         returns,
         cost,
     )
@@ -433,25 +435,47 @@ def _trend(
 def _horizons(
     section: Section,
     run: RunContext,
+    inputs: EdaInputs,
     returns: dict[Timeframe, pd.DataFrame],
     cost: CostModel,
 ) -> horizons.HorizonAdmission:
     config = run.cfg.eda_config().horizons
-    candidates = [tf.value for tf in config.candidates]
+    sessions = run.cfg.sessions_config()
+    reference = config.target_set
+    definition = run.cfg.target_set(reference.name, reference.version)
+    params = forward_return_params(definition.params)
+    periods = {
+        label: horizons.holding_periods(
+            inputs.bars[Timeframe.M1],
+            label,
+            trading_day=regular_trading_day(sessions),
+            params=params,
+            step=config.decision_step.duration,
+            clock=inputs.clock,
+            basis=inputs.spec.price_basis,
+        )
+        for label in config.candidates
+    }
+    for frame in periods.values():  # the fills come from discovery bars only; check anyway
+        inputs.window.check(frame, available="label_end")
     table = horizons.cost_to_volatility_table(
-        {tf.value: returns[tf] for tf in config.candidates},
+        periods,
         returns[Timeframe.M1],
         cost,
-        run.cfg.sessions_config(),
+        sessions,
         max_cost_to_vol=config.max_cost_to_vol,
         sigma_minutes=config.sigma_1m_minutes,
     )
-    admission = horizons.admission(table, candidates, config.max_cost_to_vol)
+    admission = horizons.admission(table, list(config.candidates), config.max_cost_to_vol)
     section.text(
-        f"Costs: {cost.result_label}. Round-trip cost (spread, commission, slippage, financing) "
-        "over the mean absolute log return of each horizon, overall and per session. Horizons "
-        f"above {config.max_cost_to_vol:g} are excluded from directional research. "
-        f"Admitted: {', '.join(admission.admitted) or 'none'}; "
+        f"Costs: {cost.result_label}. Holding periods are TGT-002's ({reference.name}."
+        f"{reference.version}: latency {params.execution_latency_ms} ms, fills at most "
+        f"{params.max_fill_delay_s:g} s late) from every market-open decision on a "
+        f"{config.decision_step.value} grid of 1m bars; horizons are trading time and "
+        "overlapping periods are counted (n). Round-trip cost (spread, commission, slippage, "
+        "financing) over the mean absolute log mid move, overall and per session of the "
+        f"decision. Horizons above {config.max_cost_to_vol:g} are excluded from directional "
+        f"research. Admitted: {', '.join(admission.admitted) or 'none'}; "
         f"excluded: {', '.join(admission.excluded) or 'none'}."
     )
     section.table("cost-to-vol", table, caption=f"Cost to volatility ({cost.result_label})")

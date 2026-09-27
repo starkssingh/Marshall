@@ -43,9 +43,12 @@ trend:
   run_timeframe: 1h
 
 horizons:
-  # EDA-006: round-trip cost / expected absolute move per horizon and session. A horizon whose
-  # overall ratio exceeds `max_cost_to_vol` is excluded from directional research (plan default
-  # 0.3). Horizons are bar timeframes; the move is the mean absolute close-to-close log return.
+  # EDA-006 (ADR 0037, ADR 0040): round-trip cost / expected absolute move per horizon and session.
+  # A horizon whose overall ratio exceeds `max_cost_to_vol` is excluded from directional research
+  # (plan default 0.3). Holding periods are TGT-002's: from every market-open decision of a 1m bar
+  # on the `decision_step` grid, h of market time with the target set's latency and fill delay.
   max_cost_to_vol: 0.3
-  candidates: [1m, 5m, 15m, 1h, 4h, 1d]
+  candidates: [1m, 5m, 15m, 1h, 4h, 1d]   # TGT-002 labels: 1d = one trading day (23 market hours)
+  decision_step: 5m
+  target_set: {name: fwd_returns, version: v1}   # execution latency and allowed fill delay
   sigma_1m_minutes: 60       # slippage sigma-hat: RMS of the last 60 one-minute returns before entry

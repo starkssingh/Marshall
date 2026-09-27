@@ -1,6 +1,6 @@
 # ADR 0037 — Cost-to-volatility table and horizon admission
 
-- **Status:** accepted
+- **Status:** accepted; decisions 1–3 and 5 amended by ADR 0040
 - **Date:** 2026-09-27
 - **Tasks:** EDA-006 (on EDA-001 and BT-001)
 
