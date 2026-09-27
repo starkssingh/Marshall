@@ -52,3 +52,30 @@ on synthetic data only (ADR 0048).
 7. **Layout.** New modules: `xq/backtest/events.py` and `engine.py` (planned),
    `xq/signals/schema.py` (planned, partial), `xq/risk/placeholder.py` (temporary, removed when
    RISK-005 lands).
+
+## BT-005 — broker simulator
+
+1. **Fills.** Market orders fill at the first quote at or after arrival on the correct side (buy
+   at the ask, sell at the bid) plus the cost model's slippage (sigma-hat known at the decision,
+   as-of lookup), or expire after `max_fill_delay` (a timer at arrival + delay + 1 ns). Stop
+   orders fill at the first quote at or beyond the stop plus slippage, so a gap fills at the
+   gapped price. Limit orders fill at the limit price, never better and without slippage (the
+   pessimistic choice; a real venue may improve). Brackets are OCO legs on the whole resulting
+   position, active from the next quote after the parent's fill.
+2. **Closed market.** Nothing fills on a quote while the market is closed; working stops and
+   limits wait and gap-fill at the reopen.
+3. **Bar mode.** Market orders fill at the open of the first one-minute bar starting at or after
+   arrival (the first price certainly after it); stops and limits passed by the open fill at
+   the open; levels touched by the bar's range fill at the level (stops plus slippage). When a
+   bar touches both legs of a bracket, the stop loss fills (pessimistic) and the bar is counted
+   as ambiguous; with ticks, the quotes decide. Range fills are stamped just before the bar's
+   end and carry the bar's start.
+4. **Arrival checks.** An order is rejected if the position is no longer the one its decision
+   saw, and an order that opens, increases or flips exposure is rejected if the margin it needs
+   (`|position after| x contract x mid x margin_rate`) exceeds the equity. A rejected order
+   leaves working orders alone; an accepted one cancels the working orders of earlier intents
+   ("replaced"). Partial fills are not simulated (P3 in the plan).
+5. **Cost decomposition per fill.** `lots x (price - mid) x contract = spread_cost +
+   slippage_cost` against the reference mid, where the spread cost is the half-spread and the
+   slippage cost the rest (slippage for market and stop fills; the no-improvement cost of a limit
+   fill); commission at the mid (`CostModel.commission_usd`).

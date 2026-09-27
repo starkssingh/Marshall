@@ -479,6 +479,16 @@ IDs from `docs/specs/development-plan.md`.
   risk checks until RISK-005) come with it. Tested: queue order at equal instants, the clock,
   the data stream, schema validation, the placeholder's sizing, and a deterministic engine trace
   with stub components. ADR 0049.
+- BT-005: broker simulator (`xq.backtest.broker_sim.SimulatedBroker`) — market, limit and stop
+  orders with latency in market time; fills at the first quote at or after arrival on the correct
+  side plus slippage (never at mid), expiry after the maximum fill delay; stops fill at the first
+  quote beyond the stop (gap fills at the gapped price), limits at their price without
+  improvement; SL/TP as an OCO bracket on the whole position; no fills while the market is
+  closed; in bar mode (one-minute bars) market orders fill at the next open, and a bar touching
+  both legs of a bracket resolves to the stop loss and is counted as ambiguous; orders rejected
+  for insufficient margin or when the position changed since their decision; newer orders
+  replace working orders of earlier intents. Every fill carries its spread, slippage and
+  commission decomposition. Golden hand-computed tests cover each rule. ADR 0049.
 
 ### Changed
 
