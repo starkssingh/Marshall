@@ -178,3 +178,16 @@
    fails when a committed file differs from the models. A `RiskDecision` round-trips as data but
    comes back *not issued*, so an `OrderIntent` cannot be revived from JSON without the risk
    engine.
+
+## SIGNAL-002 — expected value
+
+1. **Units.** Take-profit, stop-loss and cost are multiples of the forecast's sigma-hat over the
+   trade's horizon, so EV is in sigma units and the plan's test "EV_net > θ·σ̂" becomes
+   `EV_net > θ` with θ in sigma units. The round-trip cost in basis points of price converts with
+   `cost_in_sigmas`.
+2. **Strict thresholds.** A candidate qualifies only if `EV_net > θ` **and** `p > p_min`; equality
+   does not qualify.
+3. **Conservative variant.** With a forecast standard error `p_se` and a quantile `z`, the lower
+   bound `max(0, p − z·p_se)` replaces p in both EV and the `p_min` test. Golden cases pin both
+   variants (p = 0.6, TP 2, SL 1, cost 0.2: gross 0.8, net 0.6; with `p_se` 0.05 and z 1.645:
+   p 0.51775, net 0.35325).

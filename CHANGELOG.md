@@ -592,6 +592,10 @@ IDs from `docs/specs/development-plan.md`.
   interfaces exported to `docs/specs/interfaces/` (`write_json_schemas`), kept in sync by a test;
   JSON round trips, and an audit-completeness test of the record against the plan's list.
   ADR 0052.
+- SIGNAL-002: expected value in sigma units (`xq.signals.ev`) — EV_gross = p·TP − (1 − p)·SL,
+  EV_net = EV_gross − round-trip cost, a candidate qualifying only if EV_net > θ and p > p_min
+  (strict); the conservative variant uses the lower bound p − z·p_se; costs in basis points
+  convert to sigma units. Golden cases for both variants and the strict thresholds. ADR 0052.
 
 ### Changed
 
