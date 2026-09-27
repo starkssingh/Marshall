@@ -43,3 +43,11 @@ a list priced with provisional (placeholder) costs unless `--allow-placeholder-c
 a list that does not say is treated as provisional. The written file records the cost basis, the
 provisional flag, `allow_placeholder_costs` and the source report and run, so a configuration
 built on screening costs is visible as such.
+
+## Decision 4 — An analytic test
+
+A Gaussian random walk of 2 bp per market minute over 26 weeks of the configured calendar, with a
+constant relative spread s and a cost model whose only cost is the spread, must give a mean
+absolute move over h market minutes of sigma * sqrt(2h / pi) (within 3 %; the realized error is
+about 1 %), a round-trip cost of exactly s, and hence the ratio s / (sigma * sqrt(2h / pi)); with
+s set 10 % below and above the 0.3 bound for 1h, admission flips accordingly.

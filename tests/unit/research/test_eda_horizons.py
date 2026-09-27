@@ -18,6 +18,7 @@ from helpers.pipeline import REPO, config
 from helpers.simulate import minute_bars
 from xq.backtest.costs import SCREENING_LABEL, CostModel
 from xq.cli.main import app
+from xq.core.config import CostModelConfig, FinancingConfig, SlippageConfig
 from xq.core.errors import ConfigError
 from xq.data.calendar import MarketClock, regular_trading_day
 from xq.research.eda.data import market_clock
@@ -247,6 +248,77 @@ def test_cost_table_and_admission() -> None:
     assert loaded["provenance"] == {"dataset_id": "ds-x"}
     assert (loaded["cost_basis"], loaded["provisional_costs"]) == (SCREENING_LABEL, True)
     assert len(cost_to_volatility_figure(table, 0.3, "t").axes) == 1
+
+
+SIGMA = 2e-4  # log mid volatility per market minute (2 bp)
+RW_FIRST, RW_LAST = date(2024, 1, 8), date(2024, 7, 5)  # 26 weeks of trading days
+
+
+def spread_only_cost() -> CostModel:
+    """A cost model whose only cost is the quoted spread (paid through the fills)."""
+    cfg = config(REPO)
+    terms = CostModelConfig(
+        venue="analytic",
+        provisional=False,
+        latency_ms=1000,
+        max_fill_delay_s=300,
+        slippage=SlippageConfig(fixed_bps=0.0, sigma_multiple=0.0),
+        financing=FinancingConfig(long_rate_annual_pct=0.0, short_rate_annual_pct=0.0),
+    )
+    return CostModel(terms, cfg.instrument("xauusd"), cfg.sessions_config())
+
+
+def random_walk_table(spread_bps: float) -> pd.DataFrame:
+    sessions = config(REPO).sessions_config()
+    count = len(minute_bars(sessions, RW_FIRST, RW_LAST))
+    steps = np.random.default_rng(20240108).standard_normal(count) * SIGMA
+    bars = minute_bars(sessions, RW_FIRST, RW_LAST, log_mid=np.cumsum(steps), spread_bps=spread_bps)
+    minute_returns = pd.DataFrame({"ret_end": bars["available_at_utc"], "ret": steps})
+    clock_ = market_clock(sessions, bars["bar_start_utc"].min(), bars["available_at_utc"].max())
+    periods = {
+        label: holding_periods(
+            bars,
+            label,
+            trading_day=regular_trading_day(sessions),
+            params=PARAMS,
+            step=STEP,
+            clock=clock_,
+        )
+        for label in ("15m", "1h")
+    }
+    return cost_to_volatility_table(
+        periods,
+        minute_returns,
+        spread_only_cost(),
+        sessions,
+        max_cost_to_vol=0.3,
+        sigma_minutes=60,
+    )
+
+
+def expected_move_bps(minutes_: float) -> float:
+    """Mean |N(0, sigma^2 h)| in bps: sigma * sqrt(2 h / pi)."""
+    return SIGMA * np.sqrt(2 * minutes_ / np.pi) * 1e4
+
+
+@pytest.mark.parametrize(("target_ratio", "admitted"), [(0.27, True), (0.33, False)])
+def test_gaussian_random_walk_matches_theory(target_ratio: float, admitted: bool) -> None:
+    # A random walk with 2 bp per market minute and a constant spread s (bps of the mid): the
+    # mean absolute move over h market minutes is sigma * sqrt(2 h / pi) and the round-trip cost
+    # is s (half at entry, half at exit), so the ratio is s / (sigma * sqrt(2 h / pi)). The spread
+    # puts the 1h ratio 10 % below or above the 0.3 bound; 15m is twice as dear either way.
+    spread_bps = target_ratio * expected_move_bps(60)
+    table = random_walk_table(spread_bps).set_index(["horizon", "session"])
+    for label, minutes_ in (("15m", 15), ("1h", 60)):
+        row = table.loc[(label, ALL_SESSIONS)]
+        assert row["n"] > 30_000
+        assert row["move_bps"] == pytest.approx(expected_move_bps(minutes_), rel=0.03)
+        assert row["cost_bps"] == pytest.approx(spread_bps, rel=1e-9)
+        analytic = spread_bps / expected_move_bps(minutes_)
+        assert row["cost_to_vol"] == pytest.approx(analytic, rel=0.03)
+    result = admission(table.reset_index(), ["15m", "1h"], 0.3, provisional_costs=False)
+    assert result.admitted == (["1h"] if admitted else [])
+    assert "15m" in result.excluded
 
 
 def test_the_target_set_must_be_a_configured_forward_return_set() -> None:
