@@ -622,6 +622,12 @@ IDs from `docs/specs/development-plan.md`.
   degradation slope. Proven on known truth (`tests/helpers/strategies.py`): a hand-computed case,
   noise families averaging 0.5, a graded genuine edge at or below the R2 limit, a single-point
   optimum on noise above it; registered in the recovery registry. ADR 0054.
+- VAL-004: White's Reality Check, Hansen's SPA and the Romano–Wolf step-down across a strategy
+  family (`xq.validation.spa.family_tests`) — one stationary bootstrap for all tests (Politis–White
+  block, at least 5 periods), SPA's consistent p-value with its lower and upper bounds, Romano–Wolf
+  adjusted p-values and survivors. Proven on known truth: about nominal size on noise-only families
+  (iid and GARCH), a graded edge detected with its best configurations surviving, SPA's power over
+  the Reality Check when poor strategies join the family. ADR 0054.
 
 ### Changed
 

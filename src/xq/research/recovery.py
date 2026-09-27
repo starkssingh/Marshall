@@ -26,6 +26,7 @@ _GARCH = "tests/unit/research/test_vol_garch.py"
 _EVALUATE = "tests/unit/research/test_vol_evaluate.py"
 _SELECTION = "tests/unit/models/test_volatility_selection.py"
 _PBO = "tests/unit/validation/test_pbo.py"
+_SPA = "tests/unit/validation/test_spa.py"
 
 RECOVERY_TESTS: Mapping[str, tuple[str, ...]] = {
     "ADF": (
@@ -133,6 +134,12 @@ RECOVERY_TESTS: Mapping[str, tuple[str, ...]] = {
         f"{_PBO}::test_noise_families_have_a_pbo_near_one_half",
         f"{_PBO}::test_a_graded_genuine_edge_passes",
         f"{_PBO}::test_a_single_point_optimum_on_noise_fails",
+    ),
+    "reality_check_spa_romano_wolf": (
+        f"{_SPA}::test_a_noise_only_family_is_rejected_at_about_the_nominal_rate",
+        f"{_SPA}::test_volatility_clustering_keeps_the_size_near_nominal",
+        f"{_SPA}::test_a_genuine_edge_is_detected_and_its_survivors_named",
+        f"{_SPA}::test_spa_keeps_its_power_when_poor_strategies_join_the_family",
     ),
 }
 

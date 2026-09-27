@@ -35,3 +35,24 @@ simulations (`tests/helpers/strategies.py`) are:
    below 5 %. The single-point optimum on noise exceeds 0.20. The degradation slope is reported
    but not tested: the two halves are complementary, so it tends to be negative even for a
    genuine edge.
+
+## VAL-004 — Reality Check, SPA and Romano–Wolf
+
+1. **Differentials against a benchmark.** The input is the per-period net returns of every
+   strategy in the tested family minus the benchmark's (cash, zero, unless a baseline is given).
+   The family-wide null is that none beats the benchmark.
+2. **One bootstrap for all tests.** A stationary bootstrap of the periods, with the same indices
+   for every strategy. The mean block length follows the gates' convention: Politis–White on the
+   family's average differential, at least 5 periods. Studentization uses each strategy's
+   bootstrap standard deviation (Hansen). p-values are `(1 + #{bootstrap ≥ observed}) / (1 + B)`.
+3. **The R2 gate reads Hansen's consistent SPA p-value.** The lower and upper bounds and White's
+   Reality Check are reported with it. Romano–Wolf adjusted p-values (step-down, made monotone)
+   name the **survivors** at a level.
+4. **Known truth and a limitation.** On noise-only families the rejection rates at 10 % are close
+   to nominal: in 1,500-replication checks, iid and GARCH, the Reality Check rejects at 9.8–10.3 %,
+   SPA at 11–12 % (slightly liberal, as is known for it) and Romano–Wolf at 10.6–11.7 %. The unit
+   tests use smaller replications with wider bands. Strongly autocorrelated returns in short
+   samples over-reject: with AR(1) φ = 0.4 and 400 periods, the Reality Check rejects at 15 % and
+   SPA at 20 %, even with longer blocks. Daily strategy returns are usually far less
+   autocorrelated, but a family with strong serial dependence (for example, overlapping holding
+   periods) should be tested on non-overlapping periods. Recorded as a known issue.
