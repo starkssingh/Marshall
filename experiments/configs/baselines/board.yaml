@@ -1,0 +1,50 @@
+# The baseline board (BASE-005, ADR 0033): `xq baselines run --dataset <id>`.
+#
+# Every parameter here is fixed in advance from the standard literature choices and is NEVER tuned:
+# baselines are benchmarks, not candidates (Phase 10 failure condition). Changing this file after a
+# board result exists needs an ADR. Statistics follow config/gates.yaml (daily net returns, 252
+# periods, stationary bootstrap with a Politis-White block length of at least 5 days, one-sided
+# p-values). Net results are screening results while the cost model is provisional.
+
+# Direction-neutral mid returns (the research variant of TGT-002) at every default horizon.
+targets: [fwd_ret_mid_15m, fwd_ret_mid_1h, fwd_ret_mid_4h, fwd_ret_mid_1d]
+
+# The candidates' folds (Phase 11 defaults): expanding training from the dataset start with at
+# least 3 years, 3-month test folds, embargo of one day (purging by label_end removes overlap).
+# No validation window: baselines select nothing.
+walk_forward:
+  mode: expanding
+  min_train: 1095D
+  test_len: 91D
+  embargo: 1D
+
+forecast_baselines: [zero_return, random_walk, historical_mean, climatology]
+
+# Rules run on the daily context bars (17:00 New York roll), traded at the first decision after
+# the reopen. Lookbacks count daily bars.
+signal_timeframe: 1d
+rules:
+  buy_and_hold:
+    rule: buy_and_hold
+  tsmom_252:
+    rule: time_series_momentum
+    params: {lookback: 252}          # 12-month time-series momentum
+  zscore_20:
+    rule: zscore_reversion
+    params: {lookback: 20, entry: 2.0, exit: 0.0}
+  ma_20_50:
+    rule: ma_crossover
+    params: {fast: 20, slow: 50}
+  ma_50_200:
+    rule: ma_crossover
+    params: {fast: 50, slow: 200}
+  donchian_20_10:
+    rule: donchian_breakout
+    params: {entry: 20, exit: 10, atr_window: 20, atr_stop: 2.0}
+
+# Every rule also runs volatility-targeted as <name>_vol.
+vol_target: {annual_vol: 0.10, lookback: 20, max_exposure: 2.0}
+
+# Random-entry null per strategy (the plan's 1,000 seeds).
+random_entry_seeds: 1000
+ci_level: 0.95

@@ -42,6 +42,7 @@ uv run xq validate --source mt5_primary       # data-quality checks (pre-vault) 
 uv run xq dataset build experiments/configs/ds_base.yaml   # versioned dataset with targets
 uv run xq exp register experiments/hypotheses/H-XXXX.yaml  # pre-register (copy TEMPLATE.yaml)
 uv run xq exp trials                          # trial counts for multiple-testing corrections
+uv run xq baselines run --dataset <ds-id>     # baseline board in reports/baselines/ (screening)
 uv run xq verify-raw                          # re-hash every raw file against the manifest
 uv run xq config show                         # resolved configuration, secrets masked
 ```
@@ -50,8 +51,9 @@ The committed fixtures are sparse (one tick every ~90 s), so `xq validate` repor
 missing-minute failures on them; that is the checks working, not a bug. For the same reason
 `xq dataset build experiments/configs/ds_base.yaml` stops at the quality gate (DQ-007), listing
 every failing fixture day and check: a meaningful base dataset needs real broker history for the
-four years before the vault. The dataset, hypothesis and trial commands are exercised end to end
-on dense synthetic weeks in `tests/integration/`.
+four years before the vault. The dataset, hypothesis, trial and baseline-board commands are
+exercised end to end on dense synthetic weeks in `tests/integration/`. The board's net figures
+are screening results while the cost model is a provisional placeholder (ADR 0032).
 
 Or in Docker (research profile; `data/`, `logs/` and `reports/` are mounted from the host):
 

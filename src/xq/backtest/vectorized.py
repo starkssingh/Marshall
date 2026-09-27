@@ -26,6 +26,11 @@ into fills, daily P&L and trades:
 - **Trades** are holding episodes: from leaving flat (or flipping side) to returning to flat (or
   flipping), with their net P&L including costs and financing. An episode still open at the end is
   marked at the last mid and flagged.
+
+`required_quotes` picks the only quotes a screen of given decision times can read — the first
+quote at or after each intended fill time, the last quote before every trading-day end and every
+rollover, and the last quote — so long histories can be screened from a small subset with
+exactly the same result (tested).
 """
 
 from __future__ import annotations
@@ -155,6 +160,38 @@ def run_vectorized(
         contract,
         costs.result_label,
     )
+
+
+def required_quotes(
+    quotes: pd.DataFrame,
+    decisions: pd.DatetimeIndex,
+    costs: CostModel,
+    clock: MarketClock,
+) -> IntArray:
+    """Sorted row positions of the quotes `run_vectorized` can read for `decisions`.
+
+    Screening any positions on these decision times with only these rows gives the same result as
+    with all of `quotes`: every lookup the screener makes (the first quote at or after a time, the
+    last one before a time) lands on a row kept here.
+    """
+    if len(quotes) == 0:
+        return np.array([], dtype=np.int64)
+    ts = _ns(pd.DatetimeIndex(quotes["ts_utc"]))
+    keep = [np.array([len(ts) - 1], dtype=np.int64)]
+    t = _ns(pd.DatetimeIndex(decisions))
+    if len(t):
+        intended = clock.advance(t, costs.latency.value)
+        intended = intended[intended != NAT_NS]
+        first = np.searchsorted(ts, intended, side="left")
+        keep.append(first[first < len(ts)])
+    days = np.unique(trading_days(pd.DatetimeIndex(quotes["ts_utc"])))
+    ends = np.array([trading_day_bounds(d.item())[1].value for d in days], dtype=np.int64)
+    first_quote = pd.Timestamp(int(ts[0]), tz="UTC")
+    last_quote = pd.Timestamp(int(ts[-1]), tz="UTC") + pd.Timedelta(1, "ns")
+    rolls = _ns(pd.DatetimeIndex(costs.rollovers(first_quote, last_quote).index))
+    before = np.searchsorted(ts, np.concatenate([ends, rolls]), side="left") - 1
+    keep.append(before[before >= 0])
+    return np.unique(np.concatenate(keep)).astype(np.int64)
 
 
 def _fills(

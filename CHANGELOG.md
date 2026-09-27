@@ -310,6 +310,19 @@ IDs from `docs/specs/development-plan.md`.
   times, exposure paths and sides — and randomizes their timing uniformly. Hand-built series give
   known positions and screened trades; every rule passes the leakage harness, which catches a
   planted bar-start placement. ADR 0033.
+- BASE-005: baseline board (`xq.models.board.run_baseline_board`, `xq baselines run --dataset <id>
+  [--target ...] [--config ...] [--exploratory]`, `experiments/configs/baselines/board.yaml`) —
+  forecast baselines through walk-forward per target (losses with bootstrap intervals and a
+  one-sided Diebold–Mariano test against `zero_return`), forecast-sign and rule strategies (plain
+  and volatility-targeted) screened with the cost model on identical folds; daily net returns on
+  every out-of-sample trading day with the gate conventions: Sharpe with bootstrap interval,
+  one-sided p-value, three standard errors, PSR, DSR with the family's effective trial count,
+  MinTRL and the random-entry null p-value, plus bootstrap intervals for annual return,
+  volatility, Sortino and maximum drawdown; every strategy recorded as a trial; report
+  `reports/baselines/<dataset>/<run>/` (`board.md`, `board.json`, `returns.parquet`) with every
+  net figure marked "screening, placeholder costs". BT-002 gains `required_quotes` (the quotes a
+  screen can read; identical results from the subset) and DS-005 `usable_quotes` (shared quote
+  filter). Draft pre-registration `experiments/hypotheses/H-0001.yaml` (not registered). ADR 0034.
 
 ### Changed
 

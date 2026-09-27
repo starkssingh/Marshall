@@ -8,9 +8,10 @@ import pandas as pd
 import pytest
 
 from helpers.pipeline import REPO
+from helpers.ticks import dense_ticks
 from xq.backtest.costs import CostModel
 from xq.backtest.metrics import performance_metrics
-from xq.backtest.vectorized import BacktestResult, run_vectorized
+from xq.backtest.vectorized import BacktestResult, required_quotes, run_vectorized
 from xq.core.config import CostModelConfig, load_config
 from xq.core.errors import NaiveTimestampError
 from xq.data.calendar import MarketClock
@@ -230,3 +231,32 @@ def test_performance_metrics_of_a_screened_round_trip() -> None:
     assert metrics["turnover"] == pytest.approx(turnover)
     assert metrics["gross_profit"] - metrics["total_costs"] == pytest.approx(net)
     assert metrics["cagr"] == pytest.approx((1 + net / CAPITAL) ** (252 / 2) - 1)
+
+
+@pytest.mark.parametrize("seed", [1, 2, 3])
+def test_required_quotes_give_the_same_screen_as_all_quotes(seed: int) -> None:
+    ticks = dense_ticks("2024-03-11 00:00", "2024-03-16 00:00", seed=seed, mean_interval_s=20)
+    full = pd.DataFrame(
+        {
+            "ts_utc": pd.to_datetime(ticks["ts_utc"], unit="ns", utc=True),
+            "bid": ticks["bid"],
+            "ask": ticks["ask"],
+        }
+    )
+    rng = np.random.default_rng(seed)
+    # decisions every 15 minutes, market closed ones included, with sparse position changes
+    decisions = pd.date_range("2024-03-11 00:00", "2024-03-15 23:45", freq="15min", tz="UTC")
+    changes = rng.random(len(decisions)) < 0.05
+    levels = rng.choice([-1.0, -0.5, 0.0, 0.5, 1.0], size=len(decisions))
+    pos = pd.Series(np.where(changes, levels, np.nan), index=decisions).ffill().fillna(0.0)
+    keep = required_quotes(full, decisions, COSTS, CLOCK)
+    assert len(keep) < len(full) / 10
+    a = screen(pos, full)
+    b = screen(pos, full.iloc[keep].reset_index(drop=True))
+    pd.testing.assert_frame_equal(a.fills, b.fills)
+    pd.testing.assert_frame_equal(a.daily, b.daily)
+    pd.testing.assert_frame_equal(a.trades, b.trades)
+    pd.testing.assert_series_equal(a.financing, b.financing)
+    assert a.missed.equals(b.missed)
+    assert a.closed.equals(b.closed)
+    assert len(a.fills) > 5
