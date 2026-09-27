@@ -36,6 +36,7 @@ _SLICING = "tests/integration/robustness/test_slicing.py"
 _DELAY = "tests/unit/robustness/test_delay.py"
 _MONTE_CARLO = "tests/unit/robustness/test_montecarlo.py"
 _NOISE = "tests/unit/robustness/test_noise.py"
+_REPORT = "tests/unit/robustness/test_report.py"
 
 RECOVERY_TESTS: Mapping[str, tuple[str, ...]] = {
     "ADF": (
@@ -202,6 +203,11 @@ RECOVERY_TESTS: Mapping[str, tuple[str, ...]] = {
         f"{_NOISE}::test_feature_noise_is_causal_and_scaled_by_the_feature_sigma",
         f"{_NOISE}::test_an_edge_at_the_scale_of_the_spread_collapses_under_spread_sized_noise",
         f"{_NOISE}::test_a_genuine_trend_edge_degrades_smoothly",
+    ),
+    "robustness_report": (
+        f"{_REPORT}::test_a_genuine_edge_passes_every_robustness_gate",
+        f"{_REPORT}::test_a_single_point_optimum_on_noise_fails",
+        f"{_REPORT}::test_a_gate_that_cannot_be_evaluated_makes_the_verdict_incomplete",
     ),
 }
 

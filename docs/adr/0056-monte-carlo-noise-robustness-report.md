@@ -83,3 +83,76 @@ data.
    - A trend edge on daily drift keeps more than 80 % at five spreads.
    - Under feature noise on its t-statistic the trend edge degrades without a cliff, keeping more
      than 70 % at 0.25 sigma and more than 30 % at one sigma.
+
+## ROB-008 — the robustness report and score
+
+1. **One subject interface.** A `StrategySubject` carries what the reports need about a strategy:
+   - its daily net returns, closed trades and walk-forward folds;
+   - the family of configurations it was selected from;
+   - its trial counts;
+   - functions that re-evaluate it at another parameter point, under stressed costs, with
+     delayed orders or with noisy inputs;
+   - the slices its hypothesis declared.
+
+   Adapters build it for each kind of source, so every strategy is judged by the same code
+   against the same gates.
+2. **What is judged.** Seven R2 gates are robustness gates:
+   - `parameter_neighbourhood`: the full grid (ADR 0055);
+   - `stressed_costs`;
+   - `monte_carlo_drawdown`;
+   - `max_single_year_pnl_share`;
+   - `execution_delay`;
+   - `positive_folds_share_min`: walk-forward test folds with positive net P&L;
+   - `oos_max_drawdown_max`: the evaluated period's drawdown, capital as the first peak.
+
+   Reported without a gate: the bootstrap intervals and trade permutation (ROB-003), the noise
+   curves (ROB-005), the slice tables (ROB-006; volatility terciles "descriptive, cut ex post")
+   and the one-at-a-time sensitivity table.
+3. **Score and verdict.**
+   - The **robustness score** is the share of the evaluated robustness gates that pass.
+   - The **verdict** is `pass` only when all seven are evaluated and pass, and `fail` when any
+     fails.
+   - It is `incomplete` when none fails but one could not be evaluated, with the reason: a
+     strategy without tunable parameters has no neighbourhood, and one without closed trades has
+     nothing to resample. A gate is never passed by default.
+   - **Open point for the owner:** a strategy with no tunable parameters (buy and hold, or a
+     forecast-sign strategy with fixed models) therefore never reaches `pass`. The alternative is
+     to treat its neighbourhood as vacuously satisfied.
+4. **The plan's `robustness_results` rows.** Every measure is also a `RobustnessResult` (test id,
+   parameters, metrics, pass or None), stored by `xq validate-strategy`.
+5. **Settings.** Every measure's settings are in `config/validation.yaml`: perturbation levels,
+   Monte Carlo paths, noise levels and draws. The bootstrap uses the gates' convention (10,000
+   resamples, Politis–White, at least 5 days).
+
+## Simulated strategies with known truth (`xq.robustness.simulated`)
+
+The reports must tell a genuine edge from an overfit one before any real candidate meets them.
+The simulations of ADR 0054 were helpers in the tests and produced returns only. The reports
+need strategies they can re-evaluate: at another parameter point, with its costs stressed,
+delayed or with noisy inputs. Two such strategies now live in the library, marked synthetic
+everywhere they appear.
+
+- **Market.** Each trades one synthetic asset on 20 years of daily bars, with positions of −1, 0
+  or +1 times the capital. Costs per unit of turnover are half a 1.5 bp spread, 0.5 bp of
+  slippage and 0.35 bp of commission, plus 0.15 bp a day of financing on the position.
+- **genuine.** Returns carry a persistent drift: an AR(1) mean with persistence 0.99 and a
+  standard deviation of 6 bp, plus 40 bp of daily noise. The strategy is a trend rule over 6
+  lookbacks times 3 deadbands, and the candidate is the in-sample best of the 18. Its net Sharpe
+  ratio is typically 1.0–1.7, a plausible edge and far below the "too good" line of CLAUDE.md.
+- **overfit.** Returns are pure noise. Every one of 50 parameter points holds random ±1 spells
+  from a generator seeded by the point, so each configuration is independent noise. The candidate
+  is the in-sample best: a single-point optimum on noise.
+- A `SimulationSpec` (truth, seed, length, costs) defines each strategy completely, so a
+  simulated run can be rebuilt exactly from its recorded configuration.
+
+**Known truth.**
+
+- For seeds 0, 1 and 2 (100 Monte Carlo paths and 3 noise draws in the test, for speed), the
+  genuine edge passes all seven robustness gates: score 1.0, verdict `pass`.
+- For the same seeds the overfit strategy fails, always on the neighbourhood gate.
+- Over seeds 0–5 during development, every genuine seed passed and every overfit seed failed.
+- Removing the genuine strategy's parameters makes the verdict `incomplete`, with a score of 1.0
+  over six gates.
+- The subjects rebuild identically from their spec. The candidate is the family's best. The
+  re-evaluation functions reproduce the recorded returns at level 0, delay 0 and the nominal
+  parameters. The overfit configurations are uncorrelated.

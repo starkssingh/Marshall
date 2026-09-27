@@ -708,6 +708,19 @@ IDs from `docs/specs/development-plan.md`.
   Settings are in `config/validation.yaml` (`noise`). Proven on known truth: a bid-ask-bounce
   edge collapses under spread-sized noise, while a trend edge keeps its Sharpe ratio under price
   noise and degrades smoothly under feature noise. ADR 0056.
+- ROB-008: the robustness report and score (`xq.robustness.report`). `robustness_report` runs
+  ROB-001 … ROB-007, the positive-fold share and the evaluated period's drawdown on a
+  `StrategySubject` (`xq.robustness.subject`), and judges the seven R2 robustness gates.
+  - The score is the share of evaluated gates passed.
+  - The verdict is `pass` only when all seven are evaluated and pass, `fail` when any fails, and
+    `incomplete` (with the reason) when one cannot be evaluated.
+  - Every measure is a `RobustnessResult` row, and the report renders as Markdown.
+
+  Also added: known-truth simulated strategies as subjects (`xq.robustness.simulated`: a genuine
+  trend edge and a single-point optimum on noise, synthetic, rebuilt from a `SimulationSpec`).
+  Proven: the genuine edge passes every robustness gate and the overfit strategy fails. ADR 0056.
+  The risk state tracker caches the trading day of an instant (a pure function) so Monte Carlo
+  replays do not recompute it.
 
 ### Changed
 
