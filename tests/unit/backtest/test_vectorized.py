@@ -82,6 +82,7 @@ def test_a_long_round_trip_matches_a_hand_computation() -> None:
     trade = result.trades.iloc[0]
     assert (trade["side"], trade["open"]) == (1.0, False)
     assert trade["pnl"] == pytest.approx(expected)
+    assert result.cost_basis == "screening, placeholder costs"  # a provisional cost model
 
 
 def test_a_short_held_over_the_triple_rollover_pays_four_nights() -> None:

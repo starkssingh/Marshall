@@ -64,7 +64,8 @@ class BacktestResult:
     """Fills, skipped decisions, daily P&L and trades of one screened position series.
 
     `missed`: decisions whose fill would have come too late; `closed`: decisions taken while the
-    market was closed, which place no order.
+    market was closed, which place no order. `cost_basis` is the cost model's label for net
+    results ("screening, placeholder costs" while it is provisional); reports print it.
     """
 
     fills: pd.DataFrame
@@ -75,6 +76,7 @@ class BacktestResult:
     financing: pd.Series
     capital: float
     contract_size: float
+    cost_basis: str
 
 
 def run_vectorized(
@@ -143,7 +145,15 @@ def run_vectorized(
     daily = _daily(fills, financing, ts, bid, ask, capital, contract)
     trades = _trades(fills, financing, bid, ask, contract)
     return BacktestResult(
-        fills, decisions[missed], decisions[closed], daily, trades, financing, capital, contract
+        fills,
+        decisions[missed],
+        decisions[closed],
+        daily,
+        trades,
+        financing,
+        capital,
+        contract,
+        costs.result_label,
     )
 
 

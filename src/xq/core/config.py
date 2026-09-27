@@ -573,7 +573,11 @@ class FinancingConfig(FrozenModel):
 
 
 class CostModelConfig(FrozenModel):
-    """A venue's cost model (``config/costs/<name>.yaml``, BT-001)."""
+    """A venue's cost model (``config/costs/<name>.yaml``, BT-001).
+
+    A provisional model (placeholder values, no broker terms) must charge financing on both sides:
+    long and short rates strictly positive (ADR 0032). Only broker terms may credit a side.
+    """
 
     venue: str
     provisional: bool
@@ -583,6 +587,19 @@ class CostModelConfig(FrozenModel):
     commission: CommissionConfig = CommissionConfig()
     slippage: SlippageConfig
     financing: FinancingConfig
+
+    @model_validator(mode="after")
+    def _provisional_financing_is_a_cost(self) -> CostModelConfig:
+        financing = self.financing
+        if (
+            self.provisional
+            and min(financing.long_rate_annual_pct, financing.short_rate_annual_pct) <= 0
+        ):
+            raise ValueError(
+                "a provisional cost model must charge financing on longs and shorts (both rates "
+                "> 0) until broker terms replace it (ADR 0032)"
+            )
+        return self
 
 
 class BacktestConfig(FrozenModel):

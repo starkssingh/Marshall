@@ -299,6 +299,11 @@ IDs from `docs/specs/development-plan.md`.
 
 ### Changed
 
+- BT-001 costs stay provisional, and financing is a cost on both sides until broker terms replace
+  it (ADR 0032): a `provisional: true` cost model must have strictly positive long and short
+  financing rates (only a non-provisional model may credit a side). Net results carry the cost
+  model's label — `SCREENING_LABEL`, "screening, placeholder costs", while it is provisional —
+  as `CostModel.result_label` and `BacktestResult.cost_basis`, for every report to print.
 - TGT-002 and BT-002: decisions taken while the market is closed (the 17:00 close itself, the
   daily break, weekends, holidays) get no target label and place no order (ADR 0032), instead of
   being entered at the reopen; decisions taken while open keep their label across a close with

@@ -1,7 +1,8 @@
 # PROVISIONAL placeholder cost model (BT-001, ADR 0029). The execution broker is not yet named, so
 # NONE of these values is a broker fact: they are deliberately conservative retail-level
 # assumptions, to be replaced by the broker's published terms and by paper-trading measurements.
-# A result computed with this model is a screening result, never evidence of net profitability.
+# A result computed with this model is a screening result, never evidence of net profitability:
+# every net result is labelled "screening, placeholder costs" (ADR 0032).
 venue: placeholder
 provisional: true
 latency_ms: 1000              # decision to order arrival, counted in market time (as fwd_returns.v1)
@@ -19,6 +20,6 @@ slippage:
     us_data_release_window: 2.0
 financing:
   long_rate_annual_pct: 6.0   # on long notional, per night held over the 17:00 New York rollover
-  short_rate_annual_pct: 2.0  # shorts also pay (conservative: some brokers credit them)
+  short_rate_annual_pct: 2.0  # shorts also pay: a cost on both sides until broker terms (ADR 0032)
   day_count: 360
   triple_weekday: wed         # Wednesday's rollover is charged three times (the weekend)
