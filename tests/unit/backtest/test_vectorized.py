@@ -9,6 +9,7 @@ import pytest
 
 from helpers.pipeline import REPO
 from xq.backtest.costs import CostModel
+from xq.backtest.metrics import performance_metrics
 from xq.backtest.vectorized import BacktestResult, run_vectorized
 from xq.core.config import CostModelConfig, load_config
 from xq.core.errors import NaiveTimestampError
@@ -178,3 +179,23 @@ def test_inputs_are_validated() -> None:
     assert empty.fills.empty
     assert empty.trades.empty
     assert (empty.daily["net_pnl"] == 0).all()
+
+
+def test_performance_metrics_of_a_screened_round_trip() -> None:
+    q = quotes(
+        ("2024-03-12 14:00:02", 1999.9, 2000.1),
+        ("2024-03-12 16:00:01.5", 2009.9, 2010.1),
+        ("2024-03-13 14:00:00", 2009.9, 2010.1),  # a second, flat day
+    )
+    result = screen(positions(("2024-03-12 14:00", 1.0), ("2024-03-12 16:00", 0.0)), q)
+    metrics = performance_metrics(result, 252)
+    net = result.daily["net_pnl"].sum()
+    assert metrics["net_profit"] == pytest.approx(net)
+    assert metrics["days"] == 2
+    assert metrics["trade_count"] == 1
+    assert metrics["win_rate"] == 1.0
+    assert metrics["time_in_market"] == 0.0  # flat at both day ends
+    turnover = (0.5 * 2000.0 + 0.5 * 2010.0) * 100 / CAPITAL * 252 / 2
+    assert metrics["turnover"] == pytest.approx(turnover)
+    assert metrics["gross_profit"] - metrics["total_costs"] == pytest.approx(net)
+    assert metrics["cagr"] == pytest.approx((1 + net / CAPITAL) ** (252 / 2) - 1)

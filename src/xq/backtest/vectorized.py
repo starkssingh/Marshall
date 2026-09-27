@@ -65,6 +65,7 @@ class BacktestResult:
     trades: pd.DataFrame
     financing: pd.Series
     capital: float
+    contract_size: float
 
 
 def run_vectorized(
@@ -127,7 +128,7 @@ def run_vectorized(
     financing = _financing(fills, ts, bid, ask, costs)
     daily = _daily(fills, financing, ts, bid, ask, capital, contract)
     trades = _trades(fills, financing, bid, ask, contract)
-    return BacktestResult(fills, decisions[missed], daily, trades, financing, capital)
+    return BacktestResult(fills, decisions[missed], daily, trades, financing, capital, contract)
 
 
 def _fills(

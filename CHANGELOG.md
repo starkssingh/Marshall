@@ -262,6 +262,11 @@ IDs from `docs/specs/development-plan.md`.
   net` exactly, financing at each rollover; holding-episode trades with net P&L. Golden tests
   include a hand-computed round trip, four nights over the triple rollover, a Friday-close
   decision filled at the Sunday reopen and a side flip. ADR 0030.
+- BT-003: performance metrics (`xq.backtest.metrics`) — annual return, CAGR, volatility, Sharpe and
+  Sortino on daily returns (252 periods, zero risk-free rate), maximum drawdown (fraction and USD)
+  and its duration, Calmar, recovery factor, CVaR 95/99, worst day, time in market, average
+  exposure, turnover, trade count, win rate, average win and loss, expectancy and profit factor;
+  hand-computed tests and independent pandas cross-checks. ADR 0030.
 
 ### Changed
 

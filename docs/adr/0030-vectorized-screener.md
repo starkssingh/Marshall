@@ -2,7 +2,7 @@
 
 - **Status:** accepted
 - **Date:** 2026-09-27
-- **Tasks:** BT-002 (on BT-001; used by BASE-002, BASE-005)
+- **Tasks:** BT-002, BT-003 (on BT-001; used by BASE-002, BASE-005, VAL-001)
 
 ## Context
 
@@ -33,6 +33,14 @@ the signal bar's close, mid-price fills, ignored financing.
    flipping. A flip splits its fill between the two episodes by lots. An episode's P&L includes
    its commission and the financing of rollovers it held over. An episode still open at the end
    is marked at the last mid and flagged `open`.
+
+5. **Metrics (BT-003)** are computed on daily trading-day returns with
+   `backtest.periods_per_year` = 252 and a zero risk-free rate (financing is already in the P&L).
+   Sharpe and Sortino use the arithmetic mean. Sortino's downside deviation is taken over all
+   days, with target 0. The drawdown is a fraction of the running equity peak, and its duration is
+   in trading days until the peak is regained. CVaR is the mean of the worst `ceil(N(1 − q))`
+   daily returns, reported as a positive loss. Trade statistics use closed episodes only. The
+   module docstring holds the exact formula for every metric.
 
 ## Consequences
 
