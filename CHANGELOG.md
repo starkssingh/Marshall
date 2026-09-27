@@ -426,6 +426,13 @@ IDs from `docs/specs/development-plan.md`.
   computations; hourly RVs add up to the daily RV; bipower separates simulated jumps up to its
   known finite-sample contamination; an injected pattern is recovered; perturbing test data leaves
   the factor unchanged while a full-sample fit moves. ADR 0044.
+- VOL-003: volatility benchmarks (`xq.research.volatility.benchmarks`) and the `VolForecaster`
+  interface (`xq.models.volatility`: `fit`, `predict_variance`, `predict` on a periods frame
+  indexed by decision time) — `rolling_22`, `ewma_0.94`, `ewma_0.97` (RiskMetrics) and `har` (one
+  OLS per horizon on training rows whose future is training, floored), deseasonalized on hourly
+  periods with the train-only diurnal factor. EWMA and rolling RV match hand computations; HAR
+  recovers the coefficients of a simulated HAR process; every benchmark is causal; the diurnal
+  adjustment is fitted on training periods only. ADR 0044.
 
 ### Changed
 

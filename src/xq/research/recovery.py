@@ -17,6 +17,7 @@ _VARIANCE_RATIO = "tests/unit/research/test_stats_variance_ratio.py"
 _ARIMA = "tests/unit/research/test_stats_arima.py"
 _ESTIMATORS = "tests/unit/research/test_vol_estimators.py"
 _REALIZED = "tests/unit/research/test_vol_realized.py"
+_BENCHMARKS = "tests/unit/research/test_vol_benchmarks.py"
 
 RECOVERY_TESTS: Mapping[str, tuple[str, ...]] = {
     "ADF": (
@@ -79,6 +80,23 @@ RECOVERY_TESTS: Mapping[str, tuple[str, ...]] = {
     "diurnal_factor": (
         f"{_REALIZED}::test_the_diurnal_factor_recovers_an_injected_pattern",
         f"{_REALIZED}::test_the_diurnal_factor_is_fitted_on_training_rows_only",
+    ),
+    "rolling_rv": (
+        f"{_BENCHMARKS}::test_rolling_rv_by_hand",
+        f"{_BENCHMARKS}::test_benchmarks_are_causal",
+    ),
+    "ewma": (
+        f"{_BENCHMARKS}::test_ewma_by_hand",
+        f"{_BENCHMARKS}::test_benchmarks_are_causal",
+    ),
+    "har": (
+        f"{_BENCHMARKS}::test_har_recovers_its_coefficients",
+        f"{_BENCHMARKS}::test_har_is_fitted_on_training_rows_whose_future_is_training",
+        f"{_BENCHMARKS}::test_benchmarks_are_causal",
+    ),
+    "deseasonalized": (
+        f"{_BENCHMARKS}::test_the_diurnal_adjustment_is_fitted_on_training_periods_only",
+        f"{_BENCHMARKS}::test_the_diurnal_adjustment_scales_forecasts_by_the_next_hours",
     ),
 }
 

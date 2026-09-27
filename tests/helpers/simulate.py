@@ -255,3 +255,52 @@ def completed_block_columns(frame: pd.DataFrame, bars: int, prefix: str) -> pd.D
     opened = np.where(known, frame["open"].to_numpy()[first], np.nan)
     closed = np.where(known, frame["close"].to_numpy()[last], np.nan)
     return pd.DataFrame({f"{prefix}open": opened, f"{prefix}close": closed}, index=frame.index)
+
+
+def garch_periods(
+    n: int,
+    *,
+    omega: float,
+    alpha: float,
+    beta: float,
+    gamma: float = 0.0,
+    intraday: int = 48,
+    seed: int,
+    start: str = "2012-01-02 22:00",
+    freq: str = "D",
+) -> tuple[pd.DataFrame, FloatArray]:
+    """A periods frame (`xq.research.volatility.realized`) driven by a GJR-GARCH(1,1).
+
+    Each period's `intraday` returns are normal with variance ``h_t / intraday``; ``ret`` is their
+    sum (which follows the GARCH) and ``rv`` / ``bv`` their realized variance and bipower. Rows are
+    indexed by decision time every `freq` from `start`. Returns the frame and the true h.
+    """
+    rng = np.random.default_rng(seed)
+    burn = 500
+    z = rng.standard_normal((n + burn, intraday)) / np.sqrt(intraday)
+    h = np.empty(n + burn)
+    ret = np.empty(n + burn)
+    h[0] = omega / (1 - alpha - gamma / 2 - beta)
+    for t in range(n + burn):
+        if t:
+            shock = ret[t - 1] ** 2
+            h[t] = omega + (alpha + gamma * (ret[t - 1] < 0)) * shock + beta * h[t - 1]
+        ret[t] = np.sqrt(h[t]) * z[t].sum()
+    intra = np.sqrt(h)[:, None] * z
+    rv = (intra**2).sum(axis=1)
+    bv = (
+        np.pi / 2 * intraday / (intraday - 1) * np.sum(np.abs(intra[:, 1:] * intra[:, :-1]), axis=1)
+    )
+    index = pd.date_range(start, periods=n, freq=freq, tz="UTC", name="decision_time")
+    step = index[1] - index[0] if n > 1 else pd.Timedelta(days=1)
+    frame = pd.DataFrame(
+        {
+            "period_start": index - step,
+            "n": intraday,
+            "ret": ret[burn:],
+            "rv": rv[burn:],
+            "bv": bv[burn:],
+        },
+        index=index,
+    )
+    return frame, h[burn:]

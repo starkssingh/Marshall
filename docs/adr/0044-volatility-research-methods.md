@@ -35,3 +35,16 @@ before any real result; changing one afterwards needs an ADR.
    `train_end` and reads only rows available by then, so rows after it may be passed and are
    ignored; a test perturbs the test rows and finds the factor unchanged, while a full-sample fit
    moves.
+4. **The `VolForecaster` interface** (`xq.models.volatility`, the VOL-006 file) works on a
+   periods frame (hours or trading days from VOL-002) indexed by decision time:
+   `fit(periods_train)`, `predict_variance(periods_upto_t, h)` — the variance of the next h
+   periods' summed return, i.e. of `rv_{t+1} + ... + rv_{t+h}` — and `predict` (sigma-hat, its
+   square root). Every forecaster is causal: a test perturbs later rows.
+5. **VOL-003 benchmarks**, never tuned: `rolling_22` (mean RV), `ewma_0.94` and `ewma_0.97`
+   (RiskMetrics on squared period returns, started at the training mean) and `har` (one OLS per
+   horizon on training rows whose h future periods are also training rows; components 1, 5, 22
+   trading days, or 1, 23, 115 hours on hourly periods; floored at 1 % of the mean training RV
+   because a linear HAR can go negative). On hourly periods every benchmark is wrapped in
+   `Deseasonalized`: the diurnal factor fitted on the training periods' RV, the inner model fitted
+   on adjusted data, and its forecast turned back into raw variance with the factors of the next h
+   buckets of the trading day's cycle (known from the calendar, never read from future rows).
