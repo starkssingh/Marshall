@@ -40,6 +40,7 @@ from typing import Literal, Protocol
 import numpy as np
 import pandas as pd
 
+from xq.backtest.broker_sim import BracketRecord, SimulatedBroker
 from xq.backtest.costs import CostModel
 from xq.backtest.events import (
     AccountState,
@@ -58,11 +59,15 @@ from xq.backtest.events import (
     TickEvent,
     TimerEvent,
 )
+from xq.backtest.ledger import Ledger
+from xq.backtest.portfolio import Portfolio, daily_frame, fills_frame
+from xq.backtest.vectorized import BacktestResult
 from xq.core.errors import NaiveTimestampError
 from xq.core.time import from_ns, trading_day_bounds, trading_days
-from xq.core.types import Timeframe
+from xq.core.types import Side, Timeframe
 from xq.data.bars import build_bars
 from xq.data.calendar import NAT_NS, MarketClock
+from xq.risk.placeholder import PassThroughRiskApprover
 from xq.signals.schema import OrderIntent, RiskDecision, TradeIntent
 
 #: Execution bars in bar mode are one-minute bars (the plan keeps 1m data for execution).
@@ -421,11 +426,7 @@ class Recorder(Protocol):
         ...
 
     def order(self, order: OrderIntent, *, submitted_at: int, arrival: int | None) -> None:
-        """An order was sent to the broker."""
-        ...
-
-    def fill(self, fill: Fill) -> None:
-        """A fill was booked."""
+        """An order was sent to the broker (the broker records what happens to it)."""
         ...
 
 
@@ -440,12 +441,20 @@ class Constraints(Protocol):
         """Instants in ``[start, end]`` at which every position is closed (flat before weekend)."""
         ...
 
+    def entry_blackout(self, ts: int) -> str | None:
+        """Why no entry may fill at `ts`, or None (the broker asks at arrival and at fills)."""
+        ...
+
 
 class NoConstraints:
     """No session constraints (only the closed-market rule, which the engine always applies)."""
 
     def refuse(self, intent: TradeIntent, now: int, position_lots: float) -> str | None:
         """Nothing is refused."""
+        return None
+
+    def entry_blackout(self, ts: int) -> str | None:
+        """No blackouts."""
         return None
 
     def flat_times(self, start: int, end: int) -> list[int]:
@@ -596,7 +605,6 @@ class EventEngine:
 
     def _on_fill(self, fill: Fill) -> None:
         self.account.book(fill)
-        self.recorder.fill(fill)
         self.output.fills.append(fill)
         order = self._orders.get(fill.order_id)
         if order is not None:  # an order the engine sent (not a bracket leg)
@@ -681,3 +689,217 @@ class EventEngine:
     def _context(self) -> StrategyContext:
         now = self.clock.now
         return StrategyContext(now, self.account.state(now), self.last_quote)
+
+
+# --- running a backtest -------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class EventBacktestResult(BacktestResult):
+    """An event backtest: the screener's result layout plus the event tier's records.
+
+    `fills`, `daily`, `trades` (FIFO) and `financing` share the screener's columns where they mean
+    the same, so the BT-003 metrics apply to both tiers. `missed` are the decision times of orders
+    that expired unfilled and `closed` those refused because the market was closed. `ledger` is the
+    decision ledger (BT-007) and `link_problems` its broken links (empty when every order is backed
+    by an approved risk decision). `equity` has the account at every signal bar; `ambiguity`
+    reports how often a bar touched both legs of a bracket (resolved by ticks in tick mode, by the
+    pessimistic rule in bar mode). `risk_label` names the risk approver — the Sprint 11 placeholder
+    says it performs no risk checks.
+    """
+
+    ledger: pd.DataFrame
+    ledger_summary: pd.DataFrame
+    link_problems: tuple[str, ...]
+    equity: pd.DataFrame
+    brackets: pd.DataFrame
+    ambiguity: dict[str, float | str]
+    refusals: pd.DataFrame
+    mode: str
+    risk_label: str
+    strategy_id: str
+    strategy_version: str
+    events: int
+
+
+def run_event_backtest(
+    strategy: Strategy,
+    data: MarketData,
+    costs: CostModel,
+    clock: MarketClock,
+    *,
+    capital: float,
+    margin_rate: float,
+    risk: RiskApprover | None = None,
+    constraints: Constraints | None = None,
+    sigma_1m_bps: pd.Series | None = None,
+    observer: Callable[[Event, int], None] | None = None,
+) -> EventBacktestResult:
+    """Run `strategy` on `data` through the simulated broker, portfolio and ledger.
+
+    Args:
+        strategy: The strategy (it only emits intents).
+        data: Tick-mode or bar-mode market data.
+        costs: The cost model (fills, slippage, commission, financing, latency).
+        clock: Market clock covering the data's trading days and a week after them.
+        capital: Starting capital (USD).
+        margin_rate: Margin per unit of notional (`backtest.event.margin_rate`).
+        risk: The risk approver; default the Sprint 11 PLACEHOLDER pass-through approver.
+        constraints: Session constraints (BT-008); default none beyond the closed-market rule.
+        sigma_1m_bps: Sigma-hat of one-minute returns in bps, known at each instant (slippage).
+        observer: Called after every event with the event and the clock.
+    """
+    portfolio = Portfolio(costs, capital=capital, margin_rate=margin_rate)
+    ledger = Ledger()
+    rules: Constraints = constraints if constraints is not None else NoConstraints()
+    broker = SimulatedBroker(
+        costs,
+        clock,
+        recorder=ledger,
+        margin_rate=margin_rate,
+        equity=lambda ts: portfolio.equity,
+        entry_blackout=rules.entry_blackout,
+        sigma_1m_bps=sigma_1m_bps,
+    )
+    approver = risk if risk is not None else PassThroughRiskApprover(costs.instrument, capital)
+    engine = EventEngine(
+        strategy,
+        data,
+        broker=broker,
+        risk=approver,
+        account=portfolio,
+        recorder=ledger,
+        costs=costs,
+        clock=clock,
+        constraints=rules,
+        observer=observer,
+    )
+    output = engine.run()
+    fills = fills_frame(output.fills)
+    financing = portfolio.financing_series()
+    contract = float(costs.instrument.contract_size)
+    daily = daily_frame(
+        [(snapshot.day, snapshot.state) for snapshot in output.day_states],
+        fills,
+        financing,
+        capital=capital,
+        contract=contract,
+    )
+    frame = ledger.frame()
+    refusals = pd.DataFrame(
+        output.refused, columns=["decision_time", "intent_id", "reason"]
+    ).astype({"decision_time": "int64"})
+    refusals["decision_time"] = pd.to_datetime(refusals["decision_time"], unit="ns", utc=True)
+    closed = refusals.loc[refusals["reason"].str.startswith("market closed"), "decision_time"]
+    return EventBacktestResult(
+        fills=fills,
+        missed=_expired_decisions(frame),
+        closed=pd.DatetimeIndex(closed),
+        daily=daily,
+        trades=portfolio.trades_frame(),
+        financing=financing,
+        capital=float(capital),
+        contract_size=contract,
+        cost_basis=costs.result_label,
+        ledger=frame,
+        ledger_summary=ledger.summary(),
+        link_problems=tuple(ledger.check_links()),
+        equity=_equity_frame(output.bar_states),
+        brackets=_brackets_frame(broker.brackets),
+        ambiguity=_ambiguity(broker, data),
+        refusals=refusals,
+        mode=data.mode,
+        risk_label=approver.label,
+        strategy_id=strategy.strategy_id,
+        strategy_version=strategy.version,
+        events=output.events,
+    )
+
+
+def _expired_decisions(ledger: pd.DataFrame) -> pd.DatetimeIndex:
+    expired = ledger.loc[ledger["kind"] == "order_expired", "intent_id"]
+    intents = ledger.loc[ledger["kind"] == "intent"].set_index("intent_id")["ts"]
+    times = [intents[i] for i in expired if i in intents.index]
+    return pd.DatetimeIndex(times, tz="UTC") if times else pd.DatetimeIndex([], tz="UTC")
+
+
+def _equity_frame(states: list[AccountState]) -> pd.DataFrame:
+    frame = pd.DataFrame(
+        {
+            "time": pd.to_datetime([s.ts for s in states], unit="ns", utc=True),
+            "cash": [s.cash for s in states],
+            "unrealized": [s.unrealized for s in states],
+            "equity": [s.equity for s in states],
+            "position_lots": [s.position_lots for s in states],
+            "margin_used": [s.margin_used for s in states],
+            "mark": [s.mark for s in states],
+        }
+    )
+    return frame
+
+
+def _brackets_frame(brackets: list[BracketRecord]) -> pd.DataFrame:
+    columns = [
+        "parent_order_id",
+        "side",
+        "stop",
+        "target",
+        "activated_at",
+        "closed_at",
+        "exit_role",
+        "ambiguous",
+    ]
+    rows = [
+        {
+            "parent_order_id": b.parent_order_id,
+            "side": b.side.value,
+            "stop": b.stop,
+            "target": b.target,
+            "activated_at": from_ns(b.activated_at),
+            "closed_at": pd.NaT if b.closed_at is None else from_ns(b.closed_at),
+            "exit_role": b.exit_role,
+            "ambiguous": b.ambiguous,
+        }
+        for b in brackets
+    ]
+    return pd.DataFrame(rows, columns=columns)
+
+
+def _ambiguity(broker: SimulatedBroker, data: MarketData) -> dict[str, float | str]:
+    """How often one bar touched both legs of a bracket (the share the plan asks every report for).
+
+    Bar mode: the broker's own count, each resolved to the stop loss. Tick mode: the one-minute
+    bars in which a bracket ended and whose range reached both its stop and its target — bars
+    alone could not have told which came first; the ticks did.
+    """
+    exits = sum(b.exit_role in ("stop_loss", "take_profit") for b in broker.brackets)
+    if data.mode == "bars":
+        bars, ambiguous = broker.bracket_bars, broker.ambiguous_bars
+        resolution = "pessimistic: the stop loss is assumed first"
+    else:
+        minute = data.minute_bars
+        starts = minute["bar_start_utc"].to_numpy(np.int64)
+        bars = ambiguous = 0
+        for bracket in broker.brackets:
+            end = bracket.closed_at if bracket.closed_at is not None else data.end
+            first = max(int(np.searchsorted(starts, bracket.activated_at, side="right")) - 1, 0)
+            last = int(np.searchsorted(starts, end, side="right")) - 1
+            if last < first:
+                continue
+            bars += last - first + 1
+            if bracket.exit_role is None or bracket.stop is None or bracket.target is None:
+                continue
+            row = minute.iloc[last]
+            if bracket.side is Side.BUY:  # a long: sell legs against the bid
+                both = row["bid_low"] <= bracket.stop and row["bid_high"] >= bracket.target
+            else:
+                both = row["ask_high"] >= bracket.stop and row["ask_low"] <= bracket.target
+            ambiguous += int(both)
+        resolution = "ticks"
+    return {
+        "resolution": resolution,
+        "bracket_bars": float(bars),
+        "ambiguous_bars": float(ambiguous),
+        "ambiguous_share": ambiguous / bars if bars else float("nan"),
+        "bracket_exits": float(exits),
+    }

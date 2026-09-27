@@ -19,7 +19,9 @@ and the brackets, and turns market data into fills. The rules:
   gap through the stop fills at the gapped price, not at the stop.
 - **Limit orders** trigger when the bid (sell limit) reaches or exceeds, or the ask (buy limit)
   reaches or falls below, the limit, and fill at the limit price: never better (no price
-  improvement, the pessimistic choice) and without slippage.
+  improvement, the pessimistic choice) and without slippage. Their reference quote is the limit
+  on the order's side with the triggering quote's spread, so the fill pays the half-spread and
+  nothing else.
 - **Brackets.** An order with a stop and/or target gets an OCO bracket on the whole resulting
   position once it fills: a stop order (stop loss) and a limit order (take profit) on the closing
   side, active from the next quote. When one leg fills the other is cancelled.
@@ -70,6 +72,10 @@ _BPS = 1e-4
 
 class BrokerRecorder(Protocol):
     """The part of the decision ledger the broker writes (BT-007)."""
+
+    def fill(self, fill: Fill) -> None:
+        """An execution, recorded when it happens (before the brackets or cancels it causes)."""
+        ...
 
     def order_rejected(self, order_id: str, ts: int, reason: str) -> None:
         """An order was refused on arrival."""
@@ -307,10 +313,10 @@ class SimulatedBroker:
                     continue
                 if order.role == "entry" and self._blackout(tick.ts) is not None:
                     continue  # entries wait out a blackout
-                if order.order_type == "stop":
-                    fill_price, slip = self._slipped(order, side_price, tick.ts, tick.ts)
-                else:
-                    fill_price, slip = order.price, 0.0
+                if order.order_type == "limit":
+                    fills.append(self._limit_fill(order, tick.ts, tick.ask - tick.bid))
+                    continue
+                fill_price, slip = self._slipped(order, side_price, tick.ts, tick.ts)
             fills.append(
                 self._fill(order, tick.ts, side_price, fill_price, tick.bid, tick.ask, slip)
             )
@@ -338,10 +344,11 @@ class SimulatedBroker:
                     continue
                 if order.role == "entry" and self._blackout(ts) is not None:
                     continue
-                if order.order_type == "stop":  # the open gapped through the stop
-                    fill_price, slip = self._slipped(order, side_price, ts, ts)
-                else:
-                    fill_price, slip = order.price, 0.0
+                if order.order_type == "limit":
+                    spread = bar.ask_open - bar.bid_open
+                    fills.append(self._limit_fill(order, ts, spread, bar.start))
+                    continue
+                fill_price, slip = self._slipped(order, side_price, ts, ts)  # a gap
             fill = self._fill(
                 order, ts, side_price, fill_price, bar.bid_open, bar.ask_open, slip, bar.start
             )
@@ -371,17 +378,14 @@ class SimulatedBroker:
             if order.role == "entry" and self._blackout(ts) is not None:
                 continue
             assert order.price is not None
-            level = order.price
-            half = bar.spread / 2
-            bid, ask = (
-                (level, level + 2 * half) if order.side is Side.SELL else (level - 2 * half, level)
-            )
-            if order.order_type == "stop":
-                fill_price, slip = self._slipped(order, level, ts, ts)
-            else:
-                fill_price, slip = level, 0.0
             if order.parent_order_id in ambiguous_parents:
                 self._bracket_of(order).ambiguous = True
+            if order.order_type == "limit":
+                fills.append(self._limit_fill(order, ts, bar.spread, bar.start))
+                continue
+            level = order.price
+            bid, ask = _quote_at(order.side, level, bar.spread)
+            fill_price, slip = self._slipped(order, level, ts, ts)
             fills.append(self._fill(order, ts, level, fill_price, bid, ask, slip, bar.start))
         return fills
 
@@ -422,6 +426,14 @@ class SimulatedBroker:
         sign = order.side.sign
         return side_price * (1 + sign * slip * _BPS), slip
 
+    def _limit_fill(
+        self, order: WorkingOrder, ts: int, spread: float, bar_start: int | None = None
+    ) -> Fill:
+        """A limit order fills at its price: its side of a quote at the level, no slippage."""
+        assert order.price is not None
+        bid, ask = _quote_at(order.side, order.price, spread)
+        return self._fill(order, ts, order.price, order.price, bid, ask, 0.0, bar_start)
+
     def _fill(
         self,
         order: WorkingOrder,
@@ -459,6 +471,7 @@ class SimulatedBroker:
             position_after=self.position,
             bar_start=bar_start,
         )
+        self.recorder.fill(fill)
         if order.is_bracket:
             self._leg_filled(order, ts)
         elif self.position == 0:
@@ -546,6 +559,11 @@ class SimulatedBroker:
 def _increases(before: float, after: float) -> bool:
     """True if moving from `before` to `after` opens, increases or flips exposure."""
     return abs(after) > abs(before) or (after != 0 and np.sign(after) != np.sign(before))
+
+
+def _quote_at(side: Side, level: float, spread: float) -> tuple[float, float]:
+    """The bid and ask of a quote whose `side` price (bid for a sell, ask for a buy) is `level`."""
+    return (level, level + spread) if side is Side.SELL else (level - spread, level)
 
 
 def _triggered(order: WorkingOrder, bid: float, ask: float) -> bool:

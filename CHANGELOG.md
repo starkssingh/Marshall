@@ -498,6 +498,17 @@ IDs from `docs/specs/development-plan.md`.
   property test; `daily_frame` gives the screener's daily layout for the BT-003 metrics. Tested:
   a hand-computed FIFO case, a flip, financing over the triple rollover on longs and shorts.
   ADR 0049.
+- BT-007: decision ledger (`xq.backtest.ledger.Ledger`) — every intent, refusal, risk decision
+  (with rejections and reasons), order, bracket leg, fill, rejection, cancel and expiry in order,
+  linked by intent, decision, order and fill ids; `check_links` lists every broken link (above
+  all an order without an approved decision); Parquet ledger plus a summary by kind and reason.
+  `run_event_backtest` wires strategy, placeholder risk approver, broker, portfolio and ledger
+  and returns an `EventBacktestResult` (the screener's result layout plus the ledger, equity per
+  signal bar, brackets and the ambiguous-bar share). Tested: a golden hand-computed run
+  (`tests/fixtures/golden_trades/`), every order linked to an approved decision across random
+  runs, planted broken links detected, the placeholder named on every decision, Parquet round
+  trip, determinism. The broker now records fills as they happen, and a limit fill's reference
+  quote is its limit on its side (half-spread, no slippage). ADR 0049.
 
 ### Changed
 

@@ -45,6 +45,9 @@ class Recorder:
     def __init__(self) -> None:
         self.rows: list[tuple[str, str, str]] = []
 
+    def fill(self, fill: Fill) -> None:
+        self.rows.append(("fill", fill.order_id, fill.role))
+
     def order_rejected(self, order_id: str, ts: int, reason: str) -> None:
         self.rows.append(("rejected", order_id, reason))
 
@@ -317,7 +320,9 @@ def test_limit_and_stop_entries_trigger_on_the_correct_side() -> None:
     assert tick(broker, "2024-03-12 14:01", 1994.9, 1995.1) == []  # the bid is below, not the ask
     [limit] = tick(broker, "2024-03-12 14:02", 1994.3, 1994.5)
     assert limit.price == 1995.0  # no price improvement
-    assert limit.slippage_cost == pytest.approx(0.5 * (1995.0 - 1994.5) * 100)
+    assert (limit.bid, limit.ask) == (pytest.approx(1994.8), 1995.0)  # its quote at the level
+    assert limit.slippage_cost == 0.0
+    assert limit.spread_cost == pytest.approx(0.5 * 0.1 * 100)
     send(
         broker,
         order(Side.SELL, 1.0, n=2, kind="stop", price=1990.0, expected=0.5),

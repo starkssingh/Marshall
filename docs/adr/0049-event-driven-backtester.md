@@ -77,8 +77,9 @@ on synthetic data only (ADR 0048).
    ("replaced"). Partial fills are not simulated (P3 in the plan).
 5. **Cost decomposition per fill.** `lots x (price - mid) x contract = spread_cost +
    slippage_cost` against the reference mid, where the spread cost is the half-spread and the
-   slippage cost the rest (slippage for market and stop fills; the no-improvement cost of a limit
-   fill); commission at the mid (`CostModel.commission_usd`).
+   slippage cost the rest; commission at the mid (`CostModel.commission_usd`). A limit fill's
+   reference quote is its limit on the order's side with the triggering quote's spread (as for
+   a level touched inside a bar), so it pays the half-spread and no slippage.
 
 ## BT-006 — portfolio accounting
 
@@ -100,3 +101,26 @@ on synthetic data only (ADR 0048).
 4. **Daily frame.** Day-end snapshots become the screener's daily layout (`DAILY_COLUMNS`), with a
    charge at a day's end counted in that day, so both tiers share the BT-003 metrics. Margin used
    is `|position| x contract x mark x margin_rate`.
+
+## BT-007 — decision ledger
+
+1. **One row per step, in order**, with linking ids: `intent` (decision time), `refusal` (reason,
+   before the risk decision), `decision` (approved or not, size, reasons, approver version),
+   `order` (its decision and intent; bracket legs also their parent), `order_rejected`,
+   `order_cancelled`, `order_expired` (reason) and `fill`. The broker records fills, legs,
+   cancels, rejections and expiries when they happen, so a fill precedes the bracket it opens
+   and the OCO cancel it causes.
+2. **Bracket legs carry their parent's decision**: that decision approved the stop and target.
+   Engine-generated exits (time stop, weekend exit) are intents with their own decisions.
+3. **`Ledger.check_links`** lists every broken link — an order without a decision or with a
+   rejected one, a fill or cancel of an unknown order, a decision without its intent. Every event
+   result carries that list (`link_problems`); tests require it to be empty and show it catches
+   planted breaks.
+4. **Storage.** `ledger.parquet` plus `ledger_summary.parquet` (row counts by kind and reason).
+   Ids are deterministic counters, so the same inputs give byte-identical ledgers.
+5. **Result.** `run_event_backtest` returns an `EventBacktestResult`, a `BacktestResult` with the
+   screener's columns where they mean the same (the BT-003 metrics apply unchanged) plus the
+   ledger, the equity at every signal bar, the brackets and the ambiguous-bar share: in bar mode
+   the broker's count of bars touching both legs (resolved to the stop); in tick mode the
+   one-minute bars in which a bracket ended and whose range reached both levels (resolved by the
+   ticks), over the one-minute bars during which a bracket was active.
