@@ -286,6 +286,16 @@ IDs from `docs/specs/development-plan.md`.
   Harvey–Leybourne–Newbold correction, Giacomini–White conditional predictive ability test and
   the Model Confidence Set (T_max, stationary bootstrap, MCS p-values). Size checked on simulated
   nulls and power on simulated alternatives. ADR 0031.
+- VAL-007: evidence policy (`config/gates.yaml`, approved by the owner) loaded as
+  `AppConfig.gates` — conventions (daily net returns, annualization by
+  `backtest.periods_per_year`, effective trial count with a raw/effective review flag, one-sided
+  tests, stationary bootstrap with 10,000 resamples and a Politis–White block length of at least 5
+  days) and gates R1–R4, validated strictly; only `gates.yaml` may set them (base, profile,
+  `XQ_GATES__*` and `--set` are refused); `GatesConfig.criteria()` fixes every threshold's boundary
+  rule; `gates_hash`. VAL-001 gains `politis_white_block_length` (matches `arch` 8.0.0 to 1e-9,
+  recovers the AR(1) optimum), `gate_block_length`, `bootstrap_distribution` and
+  `bootstrap_sharpe` (percentile interval and null-centred one-sided p-value, nominal size on
+  zero-mean AR(1) returns). ADR 0032.
 
 ### Changed
 
