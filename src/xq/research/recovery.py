@@ -147,6 +147,10 @@ RECOVERY_TESTS: Mapping[str, tuple[str, ...]] = {
         f"{_SPA}::test_a_genuine_edge_is_detected_and_its_survivors_named",
         f"{_SPA}::test_spa_keeps_its_power_when_poor_strategies_join_the_family",
     ),
+    "spa_size_check": (
+        f"{_SPA}::test_strong_serial_dependence_still_over_rejects_under_the_gates_block_convention",
+        f"{_SPA}::test_the_size_check_warns_on_a_dependent_short_sample_and_not_on_an_iid_one",
+    ),
     "holm_bh": (
         f"{_MULTIPLE}::test_hand_computed_reference_values",
         f"{_MULTIPLE}::test_the_adjustments_match_statsmodels",

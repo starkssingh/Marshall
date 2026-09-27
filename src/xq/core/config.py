@@ -4,7 +4,8 @@ Layers, from lowest to highest precedence:
 
 1. ``config/base.yaml`` plus the section files next to it (``instruments/<id>.yaml``,
    ``costs/<model>.yaml``, ``risk/<profile>.yaml``, ``sessions.yaml``, ``quality.yaml``,
-   ``targets.yaml``, ``gates.yaml``, ``eda.yaml``, ``stats.yaml``, ``volatility.yaml``)
+   ``targets.yaml``, ``gates.yaml``, ``eda.yaml``, ``stats.yaml``, ``volatility.yaml``,
+   ``validation.yaml``)
 2. ``config/<profile>.yaml`` (for example ``dev``, ``research``, ``paper``, ``prod``)
 3. environment variables prefixed ``XQ_``; nested keys are separated by ``__``,
    e.g. ``XQ_LOGGING__LEVEL=DEBUG``
@@ -73,6 +74,7 @@ FRAGMENT_FILES = {
     "eda": "eda.yaml",
     "stats": "stats.yaml",
     "volatility": "volatility.yaml",
+    "validation": "validation.yaml",
 }
 #: Sections that only their own file may set: no base.yaml key, profile, environment variable or
 #: override may change them (evidence gates are fixed before results are seen, ADR 0032).
@@ -862,6 +864,29 @@ class VolatilityConfig(FrozenModel):
         return self
 
 
+class SpaSizeCheckConfig(FrozenModel):
+    """The per-sample size check of SPA and the Reality Check (VAL-004, C-24, ADR 0055)."""
+
+    #: Simulated null families per check.
+    n_sim: int = Field(ge=50)
+    #: Bootstrap resamples per simulated family.
+    n_boot: int = Field(ge=99)
+    #: Highest AR order of the sieve fitted to each strategy's differentials (chosen by AIC).
+    max_ar_order: int = Field(ge=0, le=20)
+    #: A gate result that uses SPA or the Reality Check carries a warning when the simulated
+    #: rejection rate exceeds this multiple of the gate's level.
+    warn_ratio: float = Field(gt=1)
+
+
+class ValidationConfig(FrozenModel):
+    """Validation and robustness procedures (``config/validation.yaml``, Phases 16 and 17).
+
+    Pass/fail thresholds are not here: they are in ``config/gates.yaml``.
+    """
+
+    spa_size_check: SpaSizeCheckConfig
+
+
 class SpreadCostConfig(FrozenModel):
     """Spread fallback when quotes carry no bid/ask (BT-001)."""
 
@@ -1119,17 +1144,23 @@ class GateCriterion:
             return value < self.threshold
         return value <= self.threshold
 
-    def check(self, value: float) -> GateCheck:
-        """The criterion applied to a measured `value`."""
-        return GateCheck(self, float(value))
+    def check(self, value: float, warnings: tuple[str, ...] = ()) -> GateCheck:
+        """The criterion applied to a measured `value`, with any `warnings` about the evidence."""
+        return GateCheck(self, float(value), tuple(warnings))
 
 
 @dataclass(frozen=True)
 class GateCheck:
-    """A gate criterion applied to a measured value (robustness and validation evidence)."""
+    """A gate criterion applied to a measured value (robustness and validation evidence).
+
+    `warnings` qualify the evidence without changing the outcome: a threshold is never moved,
+    but a reader must see, next to the result, when the test behind it is known to be unreliable
+    on the sample (for example SPA over-rejecting under strong serial dependence, ADR 0055).
+    """
 
     criterion: GateCriterion
     value: float
+    warnings: tuple[str, ...] = ()
 
     @property
     def passed(self) -> bool:
@@ -1140,9 +1171,10 @@ class GateCheck:
         """One line: the measure, its value, the rule and the outcome."""
         c = self.criterion
         outcome = "pass" if self.passed else "FAIL"
-        return (
+        line = (
             f"{c.gate} {c.key}: {c.measure} = {self.value:.4g} ({c.op} {c.threshold:g}) {outcome}"
         )
+        return "".join([line, *(f"; WARNING: {w}" for w in self.warnings)])
 
 
 class GateBootstrapConfig(FrozenModel):
@@ -1501,6 +1533,7 @@ class AppConfig(BaseSettings):
     eda: EdaConfig | None = None
     stats: StatsConfig | None = None
     volatility: VolatilityConfig | None = None
+    validation: ValidationConfig | None = None
     secrets: SecretsConfig = SecretsConfig()
 
     @classmethod
@@ -1693,6 +1726,12 @@ class AppConfig(BaseSettings):
         if self.volatility is None:
             raise ConfigError("no volatility research configuration (config/volatility.yaml)")
         return self.volatility
+
+    def validation_config(self) -> ValidationConfig:
+        """Return the validation and robustness settings (``config/validation.yaml``), or raise."""
+        if self.validation is None:
+            raise ConfigError("no validation configuration (config/validation.yaml)")
+        return self.validation
 
     def datasets_config(self) -> DatasetsConfig:
         """Return the dataset builder settings; raise if they are not configured."""

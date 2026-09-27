@@ -685,6 +685,17 @@ IDs from `docs/specs/development-plan.md`.
 
 ### Changed
 
+- C-24 (1) (owner's decision, ADR 0055), VAL-004: SPA and the Reality Check always take their
+  block length from the gates' bootstrap convention (`family_tests(..., bootstrap=...)`, no block
+  argument). The size simulation was re-run under it: with AR(1) φ = 0.4, 400 periods and 8
+  strategies, 2,000 replications reject at 15.4 % (Reality Check) and 18.5 % (SPA) at a 10 % level.
+  That is still above 1.5 times nominal, so `size_check` now measures the size on each sample. It
+  simulates null families with the sample's serial dependence (AR sieve by AIC, residual rows
+  resampled together). `FamilyTest.gate_check(gates, size)` requires it, and the R2 SPA result
+  carries "test over-rejects on this sample" when the simulated size exceeds 1.5 times the level.
+  `GateCheck` gains `warnings`, shown by `describe()`. The settings are in the new
+  `config/validation.yaml` (`ValidationConfig`). Tested: the over-rejection under the convention,
+  the warning on a dependent sample, and no warning on an iid one.
 - C-22 (owner's decision, ADR 0053): position sizing scales on the edge per unit of risk instead
   of the raw calibrated probability — `ev_r = p_lcb x TP/SL - (1 - p_lcb) - round_trip_cost/SL`
   with `p_lcb` the probability's lower confidence bound, and the multiplier
