@@ -326,6 +326,11 @@ IDs from `docs/specs/development-plan.md`.
 
 ### Changed
 
+- BASE-005 H-0001 draft revised at the owner's request (ADR 0035, C-15), still unregistered: rule
+  baselines are evaluated over the full pre-vault history after each rule's warm-up, with the
+  fold-aligned version stored for comparison; they run on 1d and 1h signal bars (not 15m), so the
+  trial budget is 36; the discovery and evaluation windows are "set from the real data's depth at
+  registration" (registration is refused until then); descriptive slices by year and session.
 - ARCH-007/ARCH-008 Docker verification (ADR 0032, C-6): `docker/Dockerfile` has `base`, `test`
   (dev dependencies, `git`, `tzdata`, the test suite; runs as the non-root user under
   `TZ=Asia/Tokyo`) and `runtime` (still the default and the compose target) stages; CI gains a
