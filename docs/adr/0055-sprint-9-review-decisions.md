@@ -145,3 +145,25 @@ along the diagonal, must fail.
   grid and distinct, the nominal point is left out, and the same seed gives the same sample while
   another seed gives another. Five parameters are evaluated in full.
 - The single-point optimum on noise and the genuine trend edge keep their ADR 0054 results.
+
+## 4. Slice names are validated at registration; volatility terciles are labelled
+
+**Decision.** Slice names are checked when a hypothesis is registered. Volatility-tercile slices
+are labelled "descriptive, cut ex post".
+
+**Implementation.**
+
+- The vocabulary moved to the tracking layer, `xq.tracking.slices`, so registration can use it
+  without importing the robustness code. `xq.robustness.slicing` re-exports it.
+- `HypothesisDoc` checks every declared name against it. `xq exp register` refuses an unknown
+  name ("unknown slice 'weekday'") before the text is locked, so a typo no longer needs a new
+  hypothesis version to fix.
+- The text is locked as written: the check canonicalizes only to compare. Aliases (`volatility
+  tercile`, `vol_tercile`) and regime slices (legitimate declarations, refused when computed until
+  REG-007) still register.
+- Loading a registered version's slices checks the names again, for a version locked before this
+  change.
+- `SliceReport.label(name)` gives the label every table carries in a report: "descriptive" for
+  each slice, and "descriptive, cut ex post" for volatility terciles, because their cut points use
+  the sliced period itself.
+- The hypothesis template's comment says so.

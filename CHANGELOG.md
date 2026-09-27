@@ -711,6 +711,13 @@ IDs from `docs/specs/development-plan.md`.
   (`perturbation`), which must include the gate's level. Tested: a ridge optimum (good only along
   the diagonal, two or three parameters) fails, and a six-parameter grid is sampled
   deterministically.
+- C-24 (4) (owner's decision, ADR 0055), ROB-006 / EXP-002: slice names are validated when a
+  hypothesis is registered. The vocabulary moved to `xq.tracking.slices` and `HypothesisDoc`
+  refuses an unknown name before the text is locked. Loading still checks the names, for versions
+  locked before this change. Volatility-tercile tables are labelled "descriptive, cut ex post"
+  (`SliceReport.label`); every other slice is "descriptive". Tested: an unknown name is refused at
+  registration, vocabulary names and aliases register, and an old version with an unknown name is
+  still refused when loaded.
 - C-22 (owner's decision, ADR 0053): position sizing scales on the edge per unit of risk instead
   of the raw calibrated probability — `ev_r = p_lcb x TP/SL - (1 - p_lcb) - round_trip_cost/SL`
   with `p_lcb` the probability's lower confidence bound, and the multiplier

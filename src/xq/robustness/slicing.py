@@ -14,7 +14,7 @@ underscores):
 - ``volatility_tercile`` (also ``volatility tercile``, ``vol_tercile``): the tercile (low, mid,
   high) of the daily sigma-hat known at the start of each trading day, cut at the 1/3 and 2/3
   quantiles of the sliced days' sigma-hat. This is an after-the-fact grouping for reporting; it
-  never feeds a decision;
+  never feeds a decision, and its table is labelled "descriptive, cut ex post" (C-24);
 - ``session``: closed trades by the session they were entered in, per ``config/sessions.yaml``
   converted to UTC per date (DST by construction): a configured overlap's name when the entry lies
   in exactly its sessions, the session's name when in one, ``+``-joined names for any other
@@ -23,7 +23,8 @@ underscores):
   declaration, refused when the slices are computed until a causal regime model exists
   (REG-007).
 
-A name outside the vocabulary is refused when the slices are loaded.
+The vocabulary is `xq.tracking.slices`: a name outside it is refused when the hypothesis is
+registered (C-24, ADR 0055), and again when a registered version's slices are loaded.
 
 Per slice: days (or trades), net P&L, its share of the total net P&L (NaN unless the total is
 positive), and the annualized Sharpe ratio and share of positive days (or the mean trade and
@@ -37,7 +38,6 @@ gate itself is pre-registered (``config/gates.yaml``); NaN (a fail) unless the t
 from __future__ import annotations
 
 import math
-import re
 from dataclasses import dataclass, field
 
 import numpy as np
@@ -48,38 +48,40 @@ from sqlalchemy import Engine
 from xq.core.config import GateCheck, GatesConfig, SessionsConfig
 from xq.datasets.calendar_columns import calendar_columns
 from xq.tracking.registry import get_experiment, get_hypothesis, get_run, hypothesis_text
+from xq.tracking.slices import (
+    SESSION,
+    VOCABULARY,
+    VOLATILITY,
+    YEAR,
+    SliceError,
+    canonical_slice,
+    is_regime_slice,
+    slice_label,
+)
 
-YEAR = "year"
-VOLATILITY = "volatility_tercile"
-SESSION = "session"
-VOCABULARY = (YEAR, VOLATILITY, SESSION)
-_ALIASES = {"vol_tercile": VOLATILITY, "volatility": VOLATILITY}
+__all__ = [
+    "SESSION",
+    "VOCABULARY",
+    "VOLATILITY",
+    "YEAR",
+    "DeclaredSlices",
+    "SliceError",
+    "SliceReport",
+    "canonical_slice",
+    "declared_slices",
+    "is_regime_slice",
+    "max_single_year_share",
+    "run_slices",
+    "session_buckets",
+    "slice_label",
+    "slice_pnl",
+    "volatility_terciles",
+    "year_slices",
+]
+
 TERCILES = ("low", "mid", "high")
 OFF_SESSION = "off_session"
 _ISSUED = object()
-
-
-class SliceError(ValueError):
-    """A declared slice that is unknown or cannot be computed yet."""
-
-
-def canonical_slice(name: str) -> str:
-    """The vocabulary name of a declared slice.
-
-    Raises:
-        SliceError: for a name outside the vocabulary (a regime slice is kept: it is declared
-            legitimately and refused only when computed, until REG-007).
-    """
-    key = re.sub(r"[\s\-/]+", "_", name.strip().lower())
-    key = _ALIASES.get(key, key)
-    if key not in VOCABULARY and not is_regime_slice(key):
-        raise SliceError(f"unknown slice {name!r}; the vocabulary is {list(VOCABULARY)}")
-    return key
-
-
-def is_regime_slice(name: str) -> bool:
-    """Whether a (canonical) slice needs a regime model."""
-    return "regime" in name
 
 
 @dataclass(frozen=True)
@@ -168,6 +170,11 @@ class SliceReport:
     #: Slice name -> one row per bucket.
     tables: dict[str, pd.DataFrame]
     max_year_share: float
+
+    def label(self, name: str) -> str:
+        """How the slice's table is labelled: "descriptive", and volatility terciles
+        "descriptive, cut ex post"."""
+        return slice_label(name)
 
     def gate_check(self, gates: GatesConfig) -> GateCheck:
         """R2 ``max_single_year_pnl_share``."""

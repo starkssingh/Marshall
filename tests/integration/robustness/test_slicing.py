@@ -1,6 +1,7 @@
 """ROB-006: pre-registered slicing — slices come from the registered, locked hypothesis version a
-run tested (never from the caller), unknown slices are refused and regime slices wait for
-REG-007; on planted edges the slices find where the P&L is, sessions follow DST, and an edge
+run tested (never from the caller), unknown slices are refused at registration (C-24) and when
+loaded, regime slices wait for REG-007, volatility terciles are labelled "descriptive, cut ex
+post"; on planted edges the slices find where the P&L is, sessions follow DST, and an edge
 earned in one year fails the R2 single-year gate."""
 
 from collections.abc import Iterator
@@ -17,6 +18,7 @@ from helpers.event_backtest import CAPITAL, CLOCK, exact_costs, random_quotes
 from helpers.pipeline import REPO, config
 from xq.backtest.vectorized import run_vectorized
 from xq.core.config import AppConfig
+from xq.core.errors import ConfigError
 from xq.robustness.slicing import (
     DeclaredSlices,
     SliceError,
@@ -28,7 +30,7 @@ from xq.robustness.slicing import (
 )
 from xq.tracking.db import create_db_engine, upgrade_to_head
 from xq.tracking.hypotheses import register_hypothesis
-from xq.tracking.registry import create_experiment, start_run
+from xq.tracking.registry import add_hypothesis_version, create_experiment, start_run
 
 TEMPLATE = REPO / "experiments" / "hypotheses" / "TEMPLATE.yaml"
 
@@ -106,7 +108,14 @@ def test_unknown_slices_are_refused_and_regime_slices_wait_for_reg_007(
             periods_per_year=252,
             sessions=cfg.sessions_config(),
         )
-    register(cfg, engine, tmp_path, ["weekday"])
+    with pytest.raises(ConfigError, match="unknown slice 'weekday'"):  # refused at registration
+        register(cfg, engine, tmp_path, ["weekday"])
+    # a version locked before registration checked the names is still refused when loaded
+    data = yaml.safe_load(TEMPLATE.read_text())
+    data.update({"id": "H-0001", "slices": ["weekday"]})
+    add_hypothesis_version(
+        engine, "H-0001", title="t", family_id="momentum", yaml_text=yaml.safe_dump(data)
+    )
     with pytest.raises(SliceError, match="unknown slice"):
         declared_slices(engine, "H-0001")
 
@@ -152,7 +161,7 @@ def test_volatility_terciles_find_an_edge_that_lives_in_high_volatility(
     high = sigma > sigma.quantile(2 / 3)
     pnl = pd.Series(np.where(high, 60.0, 0.0) + rng.normal(0.0, 40.0, len(days)), index=days)
     slices = declared(cfg, engine, tmp_path, ["volatility tercile"])
-    table = slice_pnl(
+    report = slice_pnl(
         slices,
         pnl,
         pd.DataFrame(),
@@ -160,7 +169,10 @@ def test_volatility_terciles_find_an_edge_that_lives_in_high_volatility(
         periods_per_year=252,
         sessions=cfg.sessions_config(),
         sigma=sigma,
-    ).tables["volatility_tercile"]
+    )
+    table = report.tables["volatility_tercile"]
+    assert report.label("volatility_tercile") == "descriptive, cut ex post"  # C-24 (4)
+    assert report.label("year") == "descriptive"
     assert list(table.index) == ["low", "mid", "high"]
     assert (table["days"] - len(days) / 3).abs().max() <= 1
     assert table.loc["high", "pnl_share"] > 0.8
