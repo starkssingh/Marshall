@@ -26,7 +26,7 @@ from xq.tracking import registry
 HYPOTHESIS = "H-0900"
 #: A trading-day start inside the synthetic data: the discovery window of the enforcement tests.
 DISCOVERY_END = "2024-03-12T21:00:00Z"
-SECTIONS = ["overview", "horizons"]
+SECTIONS = ["overview", "distributions", "horizons"]
 
 
 @pytest.fixture(scope="module")
@@ -134,6 +134,8 @@ def test_report_has_every_section_and_its_provenance(
     assert {"git_sha", "app_config_hash", "eda_config_hash", "seed"} <= set(metadata)
     horizons = (first / "horizons.md").read_text()
     assert "screening, placeholder costs" in horizons
+    timeframes = ("1m", "5m", "15m", "1h", "4h", "1d")
+    assert all((first / "figures" / f"distributions-qq-{tf}.png").is_file() for tf in timeframes)
 
 
 def test_every_report_file_is_a_run_artifact(reports: tuple[Path, Path], engine: Engine) -> None:

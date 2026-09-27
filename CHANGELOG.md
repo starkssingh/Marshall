@@ -343,6 +343,12 @@ IDs from `docs/specs/development-plan.md`.
   "screening, placeholder costs"; the report's `admission.yaml` reaches `config/horizons.yaml`
   only from a confirmatory, unaltered report. No values are written to `config/horizons.yaml`
   (ADR 0035). ADR 0037.
+- EDA-002: return distributions (`xq.research.eda.distributions`, `xq.research.eda.bootstrap`) —
+  per timeframe mean, standard deviation, skewness and excess kurtosis with stationary-bootstrap
+  intervals (one resample at a time; mean block the Politis–White length of squared returns, at
+  least five trading days of bars, at most a tenth of the series), Jarque–Bera, Student-t fit with
+  QQ plots against the normal and the t, Hill tail indices and moments by year. Tested against
+  scipy, a Pareto tail, a t sample and an AR(1). ADR 0038.
 
 ### Changed
 

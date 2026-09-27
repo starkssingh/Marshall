@@ -5,7 +5,7 @@ window (`xq.research.eda.data`), computes the sections below and writes one repo
 `xq.research.reports.ReportBuilder` under ``reports/eda/<dataset_id>/<run_id>/``:
 
 - ``overview`` — the discovery window, the bars and returns per timeframe, the excluded days;
-- ``horizons`` (EDA-006), with its tables and figures;
+- ``distributions`` (EDA-002) and ``horizons`` (EDA-006), each with its tables and figures;
 - ``admission.yaml`` — the horizon admission list (copied to ``config/horizons.yaml`` only by
   ``xq research admit-horizons``);
 - ``run.json`` — the run id, experiment, confirmatory flag, git sha and seed (outside the
@@ -14,8 +14,8 @@ window (`xq.research.eda.data`), computes the sections below and writes one repo
 Every file of the report is recorded as a run artifact; the admission ratios are also logged as
 metrics.
 
-The same dataset, configuration, commit and seed reproduce the same report files. Nothing is a
-trial: EDA evaluates no trading rule.
+Bootstrap seeds derive from the run's seed, so the same dataset, configuration, commit and seed
+reproduce the same report files. Nothing is a trial: EDA evaluates no trading rule.
 """
 
 from __future__ import annotations
@@ -27,14 +27,17 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+import numpy as np
 import pandas as pd
 
 from xq.backtest.costs import CostModel
 from xq.core.config import config_hash
+from xq.core.seeds import derive_seed
 from xq.core.time import TimestampLike
 from xq.core.types import Timeframe
-from xq.research.eda import horizons
-from xq.research.eda.data import EdaInputs, load_eda_inputs
+from xq.research.eda import distributions, horizons
+from xq.research.eda.bootstrap import eda_block_length
+from xq.research.eda.data import EdaInputs, bars_per_trading_day, load_eda_inputs
 from xq.research.reports import (
     MANIFEST_FILE,
     RUN_FILE,
@@ -104,6 +107,7 @@ def run_eda(run: RunContext, dataset_id: str, *, end: TimestampLike | None = Non
     }
     builder = ReportBuilder(TITLE, metadata=metadata)
     _overview(builder.section("overview", "Data and discovery window"), inputs, returns)
+    _distributions(builder.section("distributions", "Return distributions (EDA-002)"), run, returns)
     admission = _horizons(
         builder.section("horizons", "Cost to volatility and horizon admission (EDA-006)"),
         run,
@@ -161,6 +165,68 @@ def _overview(section: Section, inputs: EdaInputs, returns: dict[Timeframe, pd.D
             }
         )
     section.table("coverage", pd.DataFrame(rows), caption="Bars and returns per timeframe")
+
+
+def _distributions(
+    section: Section, run: RunContext, returns: dict[Timeframe, pd.DataFrame]
+) -> None:
+    eda = run.cfg.eda_config()
+    sessions = run.cfg.sessions_config()
+    boot = eda.bootstrap
+    section.text(
+        "Log returns in basis points. Intervals: stationary bootstrap "
+        f"({boot.n_boot} resamples, {boot.ci_level:.0%}; mean block the Politis-White length of "
+        f"squared returns, at least {boot.min_block_days} trading days of bars). Skewness and "
+        "kurtosis are moment estimators (kurtosis in excess of the normal's). Hill indices use "
+        f"the largest {eda.distributions.hill_tail_fraction:.0%} of each tail."
+    )
+    rows: dict[str, dict[str, float]] = {}
+    yearly = []
+    for tf in eda.timeframes:
+        r = returns[tf]["ret"].to_numpy(dtype=np.float64)
+        if len(r) < 3:
+            continue
+        block = eda_block_length(r, boot.min_block_days * bars_per_trading_day(tf, sessions))
+        row = distributions.distribution_row(
+            r,
+            hill_fraction=eda.distributions.hill_tail_fraction,
+            n_boot=boot.n_boot,
+            mean_block=min(block, float(len(r))),
+            level=boot.ci_level,
+            seed=derive_seed(run.run.seed, "eda", "distributions", tf.value),
+        )
+        rows[tf.value] = row
+        years = distributions.yearly_moments(returns[tf])
+        years.insert(0, "timeframe", tf.value)
+        yearly.append(years)
+        t_params = (row["t_df"], row["t_loc"], row["t_scale"])
+        section.figure(
+            f"qq-{tf.value}",
+            distributions.qq_figure(r, t_params, f"{tf.value} returns"),
+            caption=f"QQ plots of {tf.value} returns against the fitted normal and Student-t",
+        )
+    summary = distributions.distribution_summary(rows)
+    moment_columns = [
+        "timeframe",
+        "n",
+        *(f"{m}{part}" for m in distributions.MOMENTS for part in ("", "_ci_low", "_ci_high")),
+        "block_length",
+    ]
+    tail_columns = [c for c in summary.columns if c not in moment_columns or c == "timeframe"]
+    section.table(
+        "moments",
+        summary[[c for c in moment_columns if c in summary.columns]],
+        caption="Moments per timeframe with bootstrap intervals (bps)",
+    )
+    section.table(
+        "tails",
+        summary[tail_columns],
+        caption="Normality, tail indices and the Student-t fit per timeframe (bps)",
+    )
+    if yearly:
+        section.table(
+            "by-year", pd.concat(yearly, ignore_index=True), caption="Moments per year (bps)"
+        )
 
 
 def _horizons(
