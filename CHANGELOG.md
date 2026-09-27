@@ -323,6 +323,18 @@ IDs from `docs/specs/development-plan.md`.
   net figure marked "screening, placeholder costs". BT-002 gains `required_quotes` (the quotes a
   screen can read; identical results from the subset) and DS-005 `usable_quotes` (shared quote
   filter). Draft pre-registration `experiments/hypotheses/H-0001.yaml` (not registered). ADR 0034.
+- EDA-001: research report framework and discovery window (`xq.research.reports`,
+  `xq.research.eda.data`, `config/eda.yaml` loaded as `AppConfig.eda`, `xq research eda --dataset
+  <id> --hypothesis <H> [--end ...] [--exploratory]`) — `ReportBuilder` writes Markdown sections,
+  full-precision CSV tables, PNG figures without software or time metadata, `metadata.json`
+  (dataset, discovery window, git sha, `uv.lock` hash, seed, configuration hashes) and a SHA-256
+  manifest, byte-identical for the same dataset, configuration, commit, lockfile and seed; every
+  file is a run artifact under `reports/eda/<dataset>/<run>/`. The discovery window is the first
+  `discovery.fraction` (0.5, provisional) of the span from the dataset's start to `vault.start`,
+  ending at a trading-day start, or everything before a fixed `discovery.end`; bars available
+  after it are refused (never cut silently), also for an explicit `--end`; returns are kept only
+  between bars adjacent in market time. EDA runs record no trials. Synthetic data only (ADR 0035).
+  ADR 0036.
 
 ### Changed
 

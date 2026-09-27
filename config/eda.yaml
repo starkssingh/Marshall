@@ -1,0 +1,51 @@
+# Exploratory research (Phase 4: EDA-001 ... EDA-006, ADR 0036 to ADR 0038). EDA describes; it does
+# not search for strategies. Every parameter here is fixed before any EDA result exists on real
+# data; changing one afterwards needs an ADR. Sprint 5 is build-only (ADR 0035): nothing here has
+# been run on real data yet.
+
+discovery:
+  # EDA reads only the discovery window: the first `fraction` of the non-vault span, from the
+  # dataset's start to vault.start, ending at a trading-day start (plan: the first 50-60 %).
+  # `end` (a UTC instant) replaces the fraction once it is fixed from the real data's depth.
+  fraction: 0.5
+  end: null
+
+# Bar timeframes described (EDA-002, EDA-003, EDA-005).
+timeframes: [1m, 5m, 15m, 1h, 4h, 1d]
+
+bootstrap:
+  n_boot: 1000               # stationary-bootstrap resamples for moment intervals
+  ci_level: 0.95
+  min_block_days: 5          # mean block length at least this many trading days of bars
+
+distributions:
+  hill_tail_fraction: 0.05   # the largest 5 % of |r| in each tail estimate the Hill tail index
+
+dependence:
+  # Lags up to one trading day of bars (23 market hours), and never fewer than `min_lags`.
+  min_lags: 20
+  ci_level: 0.95             # pointwise bands, heteroskedasticity-robust (not +-1.96/sqrt(N))
+
+seasonality:
+  intraday_timeframe: 1h     # hour of week, sessions
+  event_timeframe: 5m        # auction and release windows
+  alpha: 0.05                # family-wise level: Bonferroni over the buckets of each family
+  # Event windows around anchors of config/sessions.yaml, in minutes. The US release window is the
+  # dataset's own (config/sessions.yaml event_windows); these add the LBMA auctions.
+  event_windows:
+    lbma_am: {before_min: 5, after_min: 30}
+    lbma_pm: {before_min: 5, after_min: 30}
+
+trend:
+  # Variance ratios VR(q) of 1-bar returns over q bars (descriptive only).
+  variance_ratio_timeframe: 15m
+  variance_ratio_q: [2, 4, 16, 92]      # 30 min, 1 h, 4 h, one trading day of 15m bars
+  run_timeframe: 1h
+
+horizons:
+  # EDA-006: round-trip cost / expected absolute move per horizon and session. A horizon whose
+  # overall ratio exceeds `max_cost_to_vol` is excluded from directional research (plan default
+  # 0.3). Horizons are bar timeframes; the move is the mean absolute close-to-close log return.
+  max_cost_to_vol: 0.3
+  candidates: [1m, 5m, 15m, 1h, 4h, 1d]
+  sigma_1m_minutes: 60       # slippage sigma-hat: RMS of the last 60 one-minute returns before entry

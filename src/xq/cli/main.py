@@ -15,6 +15,7 @@ from functools import cached_property
 from pathlib import Path
 from typing import Annotated, Literal
 
+import pandas as pd
 import typer
 import yaml
 from sqlalchemy import Engine
@@ -24,6 +25,7 @@ from xq.core.config import AppConfig, config_as_dict, config_hash, load_config, 
 from xq.core.errors import XQError
 from xq.core.ids import git_sha, new_ulid
 from xq.core.logging import configure_logging, shutdown_logging
+from xq.core.time import ensure_utc
 from xq.data.bars import build_bar_sets
 from xq.data.clean import build_clean
 from xq.data.raw_store import ingest, rebuild_mirror, verify_raw_store
@@ -32,6 +34,7 @@ from xq.datasets.builder import build_dataset, verify_dataset
 from xq.datasets.spec import load_spec
 from xq.models.board import load_board_config, run_baseline_board
 from xq.quality.validate import validate_source
+from xq.research.eda.run import run_eda
 from xq.tracking.db import current_revision, engine_for, head_revision, upgrade_to_head
 from xq.tracking.hypotheses import register_hypothesis
 from xq.tracking.registry import list_hypotheses
@@ -480,6 +483,54 @@ def baselines_run(
     typer.echo(f"report: {result.report_dir}")
 
 
+research_app = typer.Typer(
+    help="Exploratory research on the discovery window (EDA-001..006).", no_args_is_help=True
+)
+app.add_typer(research_app, name="research")
+
+
+@research_app.command("eda")
+def research_eda(
+    ctx: typer.Context,
+    dataset: Annotated[str, typer.Option("--dataset", help="Dataset id (ds-...).")],
+    hypothesis: Annotated[
+        str, typer.Option("--hypothesis", help="Registered hypothesis the run belongs to.")
+    ],
+    seed: Annotated[int, typer.Option("--seed", help="Run seed (bootstrap resamples).")] = 0,
+    end: Annotated[
+        str | None,
+        typer.Option(
+            "--end",
+            help="Stop before the discovery window ends (tz-aware ISO instant); never after it.",
+        ),
+    ] = None,
+    exploratory: Annotated[
+        bool,
+        typer.Option(
+            "--exploratory", help="Allow a dirty git tree; the run is then not confirmatory."
+        ),
+    ] = False,
+) -> None:
+    """Write the EDA report of a dataset's discovery window."""
+    with pipeline_run(ctx.obj) as run:
+        stop = ensure_utc(pd.Timestamp(end)) if end is not None else None
+        with experiment_run(
+            run.cfg,
+            run.engine,
+            hypothesis,
+            {"eda": run.cfg.eda_config().model_dump(mode="json"), "end": str(stop)},
+            kind="eda",
+            seed=seed,
+            dataset_id=dataset,
+            exploratory=exploratory,
+        ) as context:
+            result = run_eda(context, dataset, end=stop)
+    typer.echo(
+        f"EDA of {dataset} on the discovery window {result.window.start} to {result.window.end}"
+    )
+    typer.echo(f"report: {result.report_dir}")
+
+
 db_app = typer.Typer(help="Metadata database migrations.", no_args_is_help=True)
 app.add_typer(db_app, name="db")
 
@@ -516,7 +567,6 @@ def db_current(ctx: typer.Context) -> None:
 # Command groups for later phases. Each is registered now so the CLI surface is stable; the
 # commands arrive in the sprint named in the help text.
 _PLANNED_GROUPS = {
-    "research": "Exploratory, statistical and volatility research (Sprints 5-8).",
     "robustness": "Robustness stress tests (Sprint 9: ROB-001..008).",
     "registry": "Model registry and strategy bundles (Sprint 13: MREG-001..005).",
     "gate": "Evidence gates and vault evaluation (Sprint 13: GATE-001..003).",
