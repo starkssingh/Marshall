@@ -47,8 +47,9 @@ TABLES = {
     "artifacts",
     "target_sets",
     "fold_results",
+    "conclusions",
 }
-LATEST = "0007"
+LATEST = "0008"
 NOW = pd.Timestamp("2026-09-26 01:00:00.123456789", tz="UTC")
 
 

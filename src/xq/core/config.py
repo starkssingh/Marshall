@@ -3,7 +3,8 @@
 Layers, from lowest to highest precedence:
 
 1. ``config/base.yaml`` plus the section files next to it (``instruments/<id>.yaml``,
-   ``costs/<model>.yaml``, ``sessions.yaml``, ``quality.yaml``, ``targets.yaml``, ``gates.yaml``)
+   ``costs/<model>.yaml``, ``sessions.yaml``, ``quality.yaml``, ``targets.yaml``, ``gates.yaml``,
+   ``eda.yaml``)
 2. ``config/<profile>.yaml`` (for example ``dev``, ``research``, ``paper``, ``prod``)
 3. environment variables prefixed ``XQ_``; nested keys are separated by ``__``,
    e.g. ``XQ_LOGGING__LEVEL=DEBUG``
@@ -53,6 +54,7 @@ from pydantic_settings import (
 
 from xq.core.errors import ClockConventionError, ConfigError
 from xq.core.time import ClockConvention
+from xq.core.types import Timeframe
 
 ENV_PREFIX = "XQ_"
 ENV_NESTED_DELIMITER = "__"
@@ -68,6 +70,7 @@ FRAGMENT_FILES = {
     "quality": "quality.yaml",
     "targets": "targets.yaml",
     "gates": "gates.yaml",
+    "eda": "eda.yaml",
 }
 #: Sections that only their own file may set: no base.yaml key, profile, environment variable or
 #: override may change them (evidence gates are fixed before results are seen, ADR 0032).
@@ -128,6 +131,8 @@ class PathsConfig(FrozenModel):
     reports_dir: Path = Path("reports")
     logs_dir: Path = Path("logs")
     migrations_dir: Path = Path("migrations")
+    #: Research log: one entry appended per closed experiment (EXP-005).
+    research_log: Path = Path("docs/research/log.md")
 
     def resolve(self, path: Path) -> Path:
         """Return `path` as an absolute path, interpreting relative paths against `root`."""
@@ -523,6 +528,101 @@ class DatasetsConfig(FrozenModel):
 
     #: Target builds report the labels with a fill later than this after its intended time.
     fill_delay_report_s: float = Field(gt=0)
+
+
+class DiscoveryConfig(FrozenModel):
+    """The discovery window EDA may read (EDA-001, ADR 0036).
+
+    The first `fraction` of the non-vault span, from a dataset's start to ``vault.start``, ending at
+    a trading-day start; or, once it is fixed from the real data's depth, everything before `end`.
+    """
+
+    fraction: float = Field(gt=0, lt=1)
+    end: AwareDatetime | None = None
+
+    @field_validator("end")
+    @classmethod
+    def _to_utc(cls, value: datetime | None) -> datetime | None:
+        return None if value is None else value.astimezone(UTC)
+
+
+class EdaBootstrapConfig(FrozenModel):
+    """Stationary-bootstrap intervals of descriptive statistics (EDA-002)."""
+
+    n_boot: int = Field(ge=100)
+    ci_level: float = Field(gt=0, lt=1)
+    #: The mean block length covers at least this many trading days of bars.
+    min_block_days: int = Field(ge=1)
+
+
+class DistributionsConfig(FrozenModel):
+    """Return distributions (EDA-002)."""
+
+    hill_tail_fraction: float = Field(gt=0, lt=0.5)
+
+
+class DependenceConfig(FrozenModel):
+    """Autocorrelation analysis (EDA-003): one trading day of lags, at least `min_lags`."""
+
+    min_lags: int = Field(ge=1)
+    ci_level: float = Field(gt=0, lt=1)
+
+
+class SeasonalityConfig(FrozenModel):
+    """Seasonality and session effects (EDA-004).
+
+    `event_windows` add windows around event anchors of ``config/sessions.yaml`` to the dataset's
+    own event windows (which EDA always uses).
+    """
+
+    intraday_timeframe: Timeframe
+    event_timeframe: Timeframe
+    alpha: float = Field(gt=0, lt=1)
+    event_windows: dict[str, EventWindow] = {}
+
+
+class TrendConfig(FrozenModel):
+    """Trend and reversion descriptives (EDA-005)."""
+
+    variance_ratio_timeframe: Timeframe
+    variance_ratio_q: list[int] = Field(min_length=1)
+    run_timeframe: Timeframe
+
+    @field_validator("variance_ratio_q")
+    @classmethod
+    def _check_q(cls, value: list[int]) -> list[int]:
+        if any(q < 2 for q in value) or len(set(value)) != len(value):
+            raise ValueError("variance-ratio horizons must be unique and at least 2 bars")
+        return sorted(value)
+
+
+class HorizonAdmissionConfig(FrozenModel):
+    """Cost-to-volatility horizon admission (EDA-006)."""
+
+    max_cost_to_vol: float = Field(gt=0)
+    candidates: list[Timeframe] = Field(min_length=1)
+    #: Slippage uses sigma-hat of 1-minute returns: their RMS over this many minutes before entry.
+    sigma_1m_minutes: int = Field(ge=1)
+
+    @field_validator("candidates")
+    @classmethod
+    def _unique(cls, value: list[Timeframe]) -> list[Timeframe]:
+        if len(set(value)) != len(value):
+            raise ValueError("candidate horizons must be unique")
+        return value
+
+
+class EdaConfig(FrozenModel):
+    """Exploratory research settings (``config/eda.yaml``, EDA-001 ... EDA-006)."""
+
+    discovery: DiscoveryConfig
+    timeframes: list[Timeframe] = Field(min_length=1)
+    bootstrap: EdaBootstrapConfig
+    distributions: DistributionsConfig
+    dependence: DependenceConfig
+    seasonality: SeasonalityConfig
+    trend: TrendConfig
+    horizons: HorizonAdmissionConfig
 
 
 class SpreadCostConfig(FrozenModel):
@@ -987,6 +1087,7 @@ class AppConfig(BaseSettings):
     backtest: BacktestConfig | None = None
     targets: dict[str, dict[str, TargetSetConfig]] = {}
     gates: GatesConfig | None = None
+    eda: EdaConfig | None = None
     secrets: SecretsConfig = SecretsConfig()
 
     @classmethod
@@ -1114,6 +1215,27 @@ class AppConfig(BaseSettings):
         if annualization == PERIODS_PER_YEAR_REF:
             return self.backtest_config().periods_per_year
         return int(annualization)
+
+    @model_validator(mode="after")
+    def _check_eda(self) -> AppConfig:
+        if self.eda is None:
+            return self
+        end = self.eda.discovery.end
+        if end is not None and end > self.vault.start:
+            raise ValueError(f"eda.discovery.end {end} is after vault.start {self.vault.start}")
+        windows = self.eda.seasonality.event_windows
+        if windows:
+            anchors = set(self.sessions.event_anchors) if self.sessions is not None else set()
+            unknown = sorted(set(windows) - anchors)
+            if unknown:
+                raise ValueError(f"eda.seasonality.event_windows for unknown anchors: {unknown}")
+        return self
+
+    def eda_config(self) -> EdaConfig:
+        """Return the exploratory research settings; raise if ``config/eda.yaml`` was not loaded."""
+        if self.eda is None:
+            raise ConfigError("no exploratory research configuration (config/eda.yaml) was loaded")
+        return self.eda
 
     def datasets_config(self) -> DatasetsConfig:
         """Return the dataset builder settings; raise if they are not configured."""

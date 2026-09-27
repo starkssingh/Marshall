@@ -15,15 +15,24 @@ from functools import cached_property
 from pathlib import Path
 from typing import Annotated, Literal
 
+import pandas as pd
 import typer
 import yaml
 from sqlalchemy import Engine
 
 import xq
-from xq.core.config import AppConfig, config_as_dict, config_hash, load_config, parse_override
+from xq.core.config import (
+    DEFAULT_CONFIG_DIR,
+    AppConfig,
+    config_as_dict,
+    config_hash,
+    load_config,
+    parse_override,
+)
 from xq.core.errors import XQError
 from xq.core.ids import git_sha, new_ulid
 from xq.core.logging import configure_logging, shutdown_logging
+from xq.core.time import ensure_utc
 from xq.data.bars import build_bar_sets
 from xq.data.clean import build_clean
 from xq.data.raw_store import ingest, rebuild_mirror, verify_raw_store
@@ -32,6 +41,9 @@ from xq.datasets.builder import build_dataset, verify_dataset
 from xq.datasets.spec import load_spec
 from xq.models.board import load_board_config, run_baseline_board
 from xq.quality.validate import validate_source
+from xq.research.eda.horizons import write_admission
+from xq.research.eda.run import run_eda
+from xq.tracking.conclusions import close_experiment, load_conclusion, unconcluded_experiments
 from xq.tracking.db import current_revision, engine_for, head_revision, upgrade_to_head
 from xq.tracking.hypotheses import register_hypothesis
 from xq.tracking.registry import list_hypotheses
@@ -367,7 +379,8 @@ def dataset_show(
 
 
 exp_app = typer.Typer(
-    help="Hypotheses, experiment runs and trial counts (EXP-001..004).", no_args_is_help=True
+    help="Hypotheses, experiment runs, trial counts and conclusions (EXP-001..005).",
+    no_args_is_help=True,
 )
 app.add_typer(exp_app, name="exp")
 
@@ -413,6 +426,39 @@ def exp_trials(
         f"{stats.n_test_evaluations} evaluated on test folds, "
         f"{stats.effective_n} effectively independent; Sharpe variance {variance}"
     )
+
+
+@exp_app.command("close")
+def exp_close(
+    ctx: typer.Context,
+    experiment_id: Annotated[str, typer.Argument(help="Experiment id.")],
+    conclusion_path: Annotated[
+        Path,
+        typer.Option(
+            "--conclusion",
+            help="Conclusion YAML (verdict and the five fields; experiments/conclusions/).",
+        ),
+    ],
+) -> None:
+    """Close an experiment with its conclusion and append it to the research log (EXP-005)."""
+    with pipeline_run(ctx.obj) as run:
+        record = close_experiment(
+            run.cfg, run.engine, experiment_id, load_conclusion(conclusion_path)
+        )
+        log = run.cfg.paths.resolve(run.cfg.paths.research_log)
+    typer.echo(f"experiment {experiment_id} closed: {record.verdict}; research log {log}")
+
+
+@exp_app.command("audit")
+def exp_audit(ctx: typer.Context) -> None:
+    """List experiments without a conclusion; exit 1 if any (none may remain at a sprint end)."""
+    with pipeline_run(ctx.obj) as run:
+        open_experiments = unconcluded_experiments(run.engine)
+    for e in open_experiments:
+        typer.echo(f"{e.experiment_id}\t{e.hypothesis_id} v{e.hypothesis_version}\t{e.title}")
+    typer.echo(f"{len(open_experiments)} experiment(s) without a conclusion")
+    if open_experiments:
+        raise typer.Exit(1)
 
 
 baselines_app = typer.Typer(
@@ -480,6 +526,71 @@ def baselines_run(
     typer.echo(f"report: {result.report_dir}")
 
 
+research_app = typer.Typer(
+    help="Exploratory research on the discovery window (EDA-001..006).", no_args_is_help=True
+)
+app.add_typer(research_app, name="research")
+
+
+@research_app.command("eda")
+def research_eda(
+    ctx: typer.Context,
+    dataset: Annotated[str, typer.Option("--dataset", help="Dataset id (ds-...).")],
+    hypothesis: Annotated[
+        str, typer.Option("--hypothesis", help="Registered hypothesis the run belongs to.")
+    ],
+    seed: Annotated[int, typer.Option("--seed", help="Run seed (bootstrap resamples).")] = 0,
+    end: Annotated[
+        str | None,
+        typer.Option(
+            "--end",
+            help="Stop before the discovery window ends (tz-aware ISO instant); never after it.",
+        ),
+    ] = None,
+    exploratory: Annotated[
+        bool,
+        typer.Option(
+            "--exploratory", help="Allow a dirty git tree; the run is then not confirmatory."
+        ),
+    ] = False,
+) -> None:
+    """Write the EDA report of a dataset's discovery window (distributions, dependence,
+    seasonality, trend, cost to volatility and the horizon admission list)."""
+    with pipeline_run(ctx.obj) as run:
+        stop = ensure_utc(pd.Timestamp(end)) if end is not None else None
+        with experiment_run(
+            run.cfg,
+            run.engine,
+            hypothesis,
+            {"eda": run.cfg.eda_config().model_dump(mode="json"), "end": str(stop)},
+            kind="eda",
+            seed=seed,
+            dataset_id=dataset,
+            exploratory=exploratory,
+        ) as context:
+            result = run_eda(context, dataset, end=stop)
+    admission = result.admission
+    typer.echo(
+        f"EDA of {dataset} on the discovery window {result.window.start} to {result.window.end}; "
+        f"horizons admitted ({admission.cost_basis}): {', '.join(admission.admitted) or 'none'}; "
+        f"excluded: {', '.join(admission.excluded) or 'none'}"
+    )
+    typer.echo(f"report: {result.report_dir}")
+
+
+@research_app.command("admit-horizons")
+def research_admit_horizons(
+    ctx: typer.Context,
+    report: Annotated[Path, typer.Option("--report", help="EDA report directory.")],
+) -> None:
+    """Copy a confirmatory EDA report's horizon admission list to config/horizons.yaml."""
+    state: CliContext = ctx.obj
+    with cli_errors():
+        state.config  # noqa: B018 - validate the configuration directory before writing into it
+        target = write_admission(report, state.config_dir or DEFAULT_CONFIG_DIR)
+    typer.echo(f"horizon admission list written to {target}")
+
+
 db_app = typer.Typer(help="Metadata database migrations.", no_args_is_help=True)
 app.add_typer(db_app, name="db")
 
@@ -516,7 +627,6 @@ def db_current(ctx: typer.Context) -> None:
 # Command groups for later phases. Each is registered now so the CLI surface is stable; the
 # commands arrive in the sprint named in the help text.
 _PLANNED_GROUPS = {
-    "research": "Exploratory, statistical and volatility research (Sprints 5-8).",
     "robustness": "Robustness stress tests (Sprint 9: ROB-001..008).",
     "registry": "Model registry and strategy bundles (Sprint 13: MREG-001..005).",
     "gate": "Evidence gates and vault evaluation (Sprint 13: GATE-001..003).",

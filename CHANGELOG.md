@@ -323,9 +323,63 @@ IDs from `docs/specs/development-plan.md`.
   net figure marked "screening, placeholder costs". BT-002 gains `required_quotes` (the quotes a
   screen can read; identical results from the subset) and DS-005 `usable_quotes` (shared quote
   filter). Draft pre-registration `experiments/hypotheses/H-0001.yaml` (not registered). ADR 0034.
+- EDA-001: research report framework and discovery window (`xq.research.reports`,
+  `xq.research.eda.data`, `config/eda.yaml` loaded as `AppConfig.eda`, `xq research eda --dataset
+  <id> --hypothesis <H> [--end ...] [--exploratory]`) — `ReportBuilder` writes Markdown sections,
+  full-precision CSV tables, PNG figures without software or time metadata, `metadata.json`
+  (dataset, discovery window, git sha, `uv.lock` hash, seed, configuration hashes) and a SHA-256
+  manifest, byte-identical for the same dataset, configuration, commit, lockfile and seed; every
+  file is a run artifact under `reports/eda/<dataset>/<run>/`. The discovery window is the first
+  `discovery.fraction` (0.5, provisional) of the span from the dataset's start to `vault.start`,
+  ending at a trading-day start, or everything before a fixed `discovery.end`; bars available
+  after it are refused (never cut silently), also for an explicit `--end`; returns are kept only
+  between bars adjacent in market time. EDA runs record no trials. Synthetic data only (ADR 0035).
+  ADR 0036.
+- EDA-006: cost-to-volatility table and horizon admission (`xq.research.eda.horizons`,
+  `xq research admit-horizons --report <dir>`) — round-trip cost of every holding period from the
+  BT-001 cost model (spread, commission, slippage with a trailing one-minute sigma-hat, financing
+  at the mean of the long and short rates) over the mean absolute log return, per horizon (1m to
+  1d) and session; horizons with an overall ratio above 0.3 are excluded; every figure is labelled
+  "screening, placeholder costs"; the report's `admission.yaml` reaches `config/horizons.yaml`
+  only from a confirmatory, unaltered report. No values are written to `config/horizons.yaml`
+  (ADR 0035). ADR 0037.
+- EDA-002: return distributions (`xq.research.eda.distributions`, `xq.research.eda.bootstrap`) —
+  per timeframe mean, standard deviation, skewness and excess kurtosis with stationary-bootstrap
+  intervals (one resample at a time; mean block the Politis–White length of squared returns, at
+  least five trading days of bars, at most a tenth of the series), Jarque–Bera, Student-t fit with
+  QQ plots against the normal and the t, Hill tail indices and moments by year. Tested against
+  scipy, a Pareto tail, a t sample and an AR(1). ADR 0038.
+- EDA-003: dependence (`xq.research.eda.dependence`) — ACF by FFT and PACF by Durbin–Levinson of
+  returns, absolute and squared returns up to one trading day of lags, with i.i.d. and
+  heteroskedasticity-robust bands; lags are flagged against the robust band. Matches statsmodels;
+  the robust band is wider than the i.i.d. one on a GARCH(1,1) simulation and equal on i.i.d.
+  data. Adds `statsmodels` as a development dependency (the reference in tests only). ADR 0038.
+- EDA-004: seasonality (`xq.research.eda.seasonality`) — hour of week (New York), day of week,
+  month, sessions and event windows (the dataset's US-release and rollover windows plus the LBMA
+  auctions) for return, absolute return, tick count and spread: effect sizes, cluster-robust
+  standard errors (trading week; month), Bonferroni-corrected Student-t intervals and split-half
+  stability labels. Injected hour-of-week effects are found and stable; an effect that stops
+  half-way is unstable; noise stays within the family-wise error rate. ADR 0038.
+- EDA-005: trend and reversion descriptives (`xq.research.eda.trend`) — Lo–MacKinlay variance
+  ratios with the heteroskedasticity-robust z*, sign runs with run-length counts against
+  independent signs, and buy-and-hold drawdown episodes, time under water and the longest
+  underwater spell. Variance ratios match AR(1) theory. ADR 0038.
+- EXP-005: experiment conclusions and the research log (`xq.tracking.conclusions`, migration
+  `0008` with table `conclusions`, `xq exp close <experiment> --conclusion <yaml>`, `xq exp
+  audit`, `experiments/conclusions/TEMPLATE.yaml`, `docs/research/log.md`, `paths.research_log`) —
+  an experiment closes only with a verdict (supported, rejected, inconclusive) and non-empty
+  Observed / Evidence / Interpretation / Limitations / Action; closing is refused while a run is
+  running, and "supported" needs a finished confirmatory run; the entry is appended to the
+  research log before the database commit; `xq exp audit` lists experiments still without a
+  conclusion and exits 1 if any. ADR 0039.
 
 ### Changed
 
+- BASE-005 H-0001 draft revised at the owner's request (ADR 0035, C-15), still unregistered: rule
+  baselines are evaluated over the full pre-vault history after each rule's warm-up, with the
+  fold-aligned version stored for comparison; they run on 1d and 1h signal bars (not 15m), so the
+  trial budget is 36; the discovery and evaluation windows are "set from the real data's depth at
+  registration" (registration is refused until then); descriptive slices by year and session.
 - ARCH-007/ARCH-008 Docker verification (ADR 0032, C-6): `docker/Dockerfile` has `base`, `test`
   (dev dependencies, `git`, `tzdata`, the test suite; runs as the non-root user under
   `TZ=Asia/Tokyo`) and `runtime` (still the default and the compose target) stages; CI gains a

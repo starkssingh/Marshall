@@ -5,26 +5,34 @@ sprint and whenever a decision or carry-over item changes; anything decided in c
 recorded in an ADR and here in the same session. If a memory of an earlier conversation conflicts
 with the repository, the repository wins.
 
-- **Last updated:** 2026-09-27, end of Sprint 4
-- **Merged to `main`:** Sprints 1–3 (PRs #2, #3, #6) and the first part of Sprint 4, WF-001 to
-  VAL-005 (PR #7). The rest of Sprint 4 (VAL-007, the owner's hold-point answers, BASE-001,
-  BASE-002, BASE-005) is on branch `claude/blissful-cori-1wvkn4`, in a pull request to `main`
-  awaiting the owner's review.
+- **Last updated:** 2026-09-27, end of Sprint 5 (build-only)
+- **Merged to `main`:** Sprints 1–4 (PRs #2, #3, #6, #7, #8). Sprint 5 and the revised H-0001
+  draft are on branch `claude/wonderful-euler-v8orf5`, in a pull request to `main` awaiting the
+  owner's review.
 
 ## Current sprint
 
-- **Sprint:** 4 — evaluation spine — **complete**: all 15 tasks implemented and tested on
-  synthetic data (WF-001, WF-006, WF-002, WF-003, BT-001, BT-002, BT-003, BASE-006, VAL-001,
-  VAL-002, VAL-005, VAL-007, BASE-001, BASE-002, BASE-005). Nothing is validated on real data.
-- **Working system:** `xq baselines run --dataset <id>` produces a walk-forward, net-of-cost
-  baseline board with Sharpe intervals and DSR using the registered trial count (ADR 0034),
-  demonstrated end to end on a synthetic three-week dataset only.
-- **Next:** the owner reviews the Sprint 4 pull request and the H-0001 draft (C-14). Then
-  Sprint 5 (EDA-001, EDA-006, EDA-002 … EDA-005, EXP-005, DATA-013). Its research tasks run on the
-  discovery window of real data, so they are blocked on C-8; its engineering parts can be built
-  and tested on synthetic data.
-- **Not allowed yet:** running H-0001 (or any board) on real data before the owner has reviewed
-  and registered H-0001; pushing to `main`.
+- **Sprint:** 5 — exploratory research and horizon admission — **build-only, complete** (owner's
+  instruction, ADR 0035): EDA-001, EDA-006, EDA-002, EDA-003, EDA-004, EDA-005 and EXP-005 are
+  implemented and tested on synthetic data and on simulated processes with known properties
+  (GARCH(1,1), AR(1), injected hour-of-week effects). DATA-013 is deferred until the owner decides
+  whether a secondary feed is needed. The research half of the sprint — the EDA report on the
+  discovery window of real data, the admission list in `config/horizons.yaml`, the hypotheses
+  backlog and its pre-registrations — waits for real data (C-16). Nothing is validated on real
+  data.
+- **Working system:** `xq research eda --dataset <id> --hypothesis <H>` writes a deterministic EDA
+  report (distributions, dependence, seasonality, trend and reversion, cost to volatility and the
+  horizon admission list) on the discovery window only (ADR 0036–0038); `xq exp close` closes an
+  experiment only with a written conclusion and appends it to `docs/research/log.md`, and
+  `xq exp audit` lists experiments without one (ADR 0039). Demonstrated end to end on a synthetic
+  three-week dataset only.
+- **Next:** the owner reviews the Sprint 5 pull request and the revised H-0001 draft (C-15). With
+  real data (C-8): the research half of Sprint 5 (C-16). Then Sprint 6 (STAT-001, STAT-002,
+  STAT-003, STAT-006, STAT-008, VOL-001 … VOL-006, BASE-003), whose methods can likewise be built
+  and simulation-tested first.
+- **Not allowed yet:** running H-0001 (or any board) on real data before the owner has approved
+  and registered it; generating an EDA report on real or pseudo-real data, or writing values to
+  `config/horizons.yaml`, before the owner allows it (ADR 0035); pushing to `main`.
 
 ## Carry-over items from reviews
 
@@ -43,14 +51,20 @@ with the repository, the repository wins.
 | C-11 | No label and no entry for decisions taken while the market is closed; open decisions crossing a close keep their label (`crosses_close`) | Sprint 4 hold point | Claude | `d9aa756` |
 | C-12 | Financing a cost on long and short while costs are placeholders; every net result marked "screening, placeholder costs" | Sprint 4 hold point | Claude | `71711e3` (cost model), `4a71cae` (the board prints it) |
 | C-13 | CI job that builds the image's test stage and runs the suite in it | Sprint 4 hold point | Claude | `0b84ca7` |
-| C-14 | Review the draft `experiments/hypotheses/H-0001.yaml` (the baseline board), then register it before any real-data run | Sprint 4 | Owner | open |
+| C-14 | Review the draft `experiments/hypotheses/H-0001.yaml` (the baseline board), then register it before any real-data run | Sprint 4 | Owner | reviewed at the start of Sprint 5: revision requested (ADR 0035), continued as C-15 |
+| C-15 | H-0001 draft revised as the owner asked (ADR 0035), still **unregistered**: rule baselines over the full pre-vault history after each rule's warm-up, with the fold-aligned version stored for comparison; rules on 1d and 1h signal bars (not 15m); trial budget 36 (24 rule + 12 forecast-sign strategies); discovery and evaluation windows "set from the real data's depth at registration" (registration is refused until they are); descriptive slices by year and by session (reported, not tested). Owner: review the revision, including two readings of Claude's (lookbacks count bars of the signal timeframe; the fold-aligned version is not a separate trial). Then Claude implements it in the board runner, and H-0001 is registered with windows from the real data | Sprint 5 start | Owner (review), then Claude (board runner) | open |
+| C-16 | Research half of Sprint 5, after real data (C-8): fix `eda.discovery.end` from the data's depth; pre-register the hypothesis EDA runs belong to (`xq research eda` needs one); run the EDA confirmatory; review it; write `config/horizons.yaml` with `xq research admit-horizons`; write `docs/research/hypotheses-backlog.md` and pre-register its top items | Sprint 5 (build-only) | Owner (data, window, approval), then Claude | open — blocked on C-8 and the owner's go-ahead |
+| C-17 | DATA-013 secondary long-history adapter: build only if the owner decides a secondary feed is needed (depends on the broker's history depth) | Sprint 5 start | Owner (decision) | open |
 
 ## Open owner decisions
 
 | Question | Options | Default in use |
 | --- | --- | --- |
 | Execution broker, venue and primary feed | MT5 broker (to be named), OANDA, cTrader | `mt5_primary` placeholder (ADR 0004): MT5 tick export, server clock `NY+7` |
-| Secondary long-history feed if broker history is short (DATA-013) | Dukascopy, none | none |
+| Secondary long-history feed if broker history is short (DATA-013, C-17) | Dukascopy, none | none; DATA-013 deferred until the owner decides (ADR 0035) |
+| Discovery window (EDA-001) | the first 50–60 % of non-vault data (plan); a fixed end date | first 50 % of the span from the dataset's start to `vault.start`, at a trading-day start; to be fixed as `eda.discovery.end` from the real data's depth (C-16) |
+| Hypothesis that EDA runs belong to | a dedicated EDA pre-registration, other | none yet: `xq research eda` requires `--hypothesis` (C-16) |
+| The revised H-0001 draft (C-15) | approve, revise again | draft unregistered; nothing runs on real data |
 | Broker cost terms (commission, financing rates, triple day, holiday financing) | broker's published terms | placeholder cost model (ADR 0029), financing a cost on both sides (ADR 0032) |
 | Annualization of daily statistics (gates: "252, provisional") | 252; the calendar's open trading days (257–259 a year in 2022–2025) | 252 (`backtest.periods_per_year`) |
 | Boundary rule of each gate threshold (`>` vs `>=`) | as tabled in ADR 0032 (plan wording where it states one; otherwise `_min` at least, `_max` at most, Sharpe floors strict) | ADR 0032 table |
@@ -61,6 +75,9 @@ with the repository, the repository wins.
 
 Decided at the Sprint 4 hold point (ADR 0032): the evidence gates, the meaning of `1d`, decisions
 taken while the market is closed, financing on both sides, and verifying the Docker image in CI.
+Decided at the start of Sprint 5 (ADR 0035): the H-0001 revision (kept unregistered), a
+build-only Sprint 5 with no EDA report on real or pseudo-real data and no `config/horizons.yaml`
+values, and DATA-013 deferred.
 
 ## Provisional assumptions not yet confirmed
 
@@ -81,11 +98,21 @@ taken while the market is closed, financing on both sides, and verifying the Doc
 | `ds_base.yaml` start | 2021-09-26 | `experiments/configs/ds_base.yaml` | broker history depth |
 | Baseline board | fixed parameters (daily-bar rules, MA 20/50 and 50/200, 10 % vol target, 1,000 random-entry seeds); folds: expanding, ≥ 3 years training, 91-day tests, 1-day embargo | `experiments/configs/baselines/board.yaml`, ADR 0033, ADR 0034 | fixed before results; changes need an ADR |
 | Random-walk forecast baseline | persistence of the latest completed bar return of the horizon's timeframe (`zero_return` covers the price random walk) | ADR 0033 | owner review of Sprint 4 |
+| H-0001 readings | rule lookbacks count bars of the signal timeframe (1d and 1h); a rule's fold-aligned version is not a separate trial (budget 36) | `experiments/hypotheses/H-0001.yaml`, ADR 0035 | owner review of the revision (C-15) |
+| EDA parameters | bootstrap 1,000 resamples, block ≥ 5 trading days of bars and ≤ n/10; Hill tails 5 %; ≥ 20 lags (one trading day); Bonferroni family-wise 0.05 with cluster-robust Student-t intervals; LBMA windows −5/+30 min; VR q = 2, 4, 16, 92 on 15m; runs on 1h | `config/eda.yaml`, ADR 0038 | fixed before results; changes need an ADR |
+| Horizon admission | cost-to-volatility bound 0.3 (plan default); horizons are bar timeframes 1m–1d; slippage sigma-hat from the last 60 one-minute returns; financing at the mean of the long and short rates | `config/eda.yaml`, ADR 0037 | owner review of the first real EDA; broker costs |
+| EDA and trials | EDA runs evaluate no trading configuration, so they record no trials; descriptive multiplicity is corrected inside the report | ADR 0036 | owner review of Sprint 5 |
 
 ## Known issues and technical debt
 
-- No real market data exists. Sprints 2–4 are tested only on synthetic data; nothing is
-  validated on real data (C-8).
+- No real market data exists. Sprints 2–5 are tested only on synthetic data (Sprint 5 also on
+  simulated processes); nothing is validated on real data (C-8).
+- The board runner does not yet implement the revised H-0001 (full-history rule evaluation with a
+  fold-aligned view, 1d and 1h signal bars in one board, year and session slices): C-15.
+- `config/horizons.yaml` does not exist, and nothing reads it yet: the target sets still emit all
+  four default horizons until the admission list exists (ADR 0037).
+- EDA speed on real minute data is unmeasured: the bootstrap draws 1,000 resamples of about 700k
+  one-minute returns one at a time, and the Student-t fit uses the full series.
 - The `SPREAD_OUTLIER` cleaning flag fires on rollover widening, and spread statistics use
   hourly buckets that blur short spikes; to be revisited in the DQ-008 review (ADR 0013).
 - `base.v1` is an interim feature set (bar values, context bars, calendar columns) until FEAT-001
@@ -104,8 +131,8 @@ taken while the market is closed, financing on both sides, and verifying the Doc
   grows with re-runs; the review flag fires when raw / effective exceeds 10.
 - Undefined walk-forward metrics (NaN) are kept in results but not logged to the registry
   (`ef9bbd9`).
-- Not started, deferred by plan: EXP-005 (conclusions table and research log), EXP-006
-  (reproduce), DQ-005 (feed consistency), DATA-011 to DATA-013, BASE-003, BASE-004.
+- Not started, deferred by plan: EXP-006 (reproduce), DQ-005 (feed consistency), DATA-011,
+  DATA-012, BASE-003, BASE-004, EDA-007 (Sprint 8); DATA-013 deferred by the owner (C-17).
 - The raw-file permission test is skipped when the suite runs as root (it runs in CI, and in the
   Docker test stage, which runs as the non-root user).
 
@@ -117,10 +144,11 @@ taken while the market is closed, financing on both sides, and verifying the Doc
 | 1 Market data | DATA-001 … DATA-010 | yes | yes | no |
 | 2 Data quality | DQ-001 … DQ-004, DQ-006, DQ-007 (DQ-005, DQ-008 open) | yes | yes | no |
 | 3 Datasets | DS-001 … DS-007 | yes | yes | no |
+| 4 Exploratory research | EDA-001 … EDA-006 (EDA-007 in Sprint 8) | yes | yes (synthetic data, simulated processes) | no (no report on real data yet, C-16) |
 | 9 Targets | TGT-001, TGT-002 (TGT-003 … TGT-006 later) | yes | yes | no |
 | 10 Baselines | BASE-001, BASE-002, BASE-005, BASE-006 (BASE-003, BASE-004 later) | yes | yes | no |
 | 12 Walk-forward | WF-001, WF-002, WF-003, WF-006 (WF-004, WF-005 later) | yes | yes | no |
 | 13 Backtesting | BT-001, BT-002, BT-003 (BT-004 … BT-010 later) | yes | yes | no |
 | 17 Statistical validation | VAL-001, VAL-002, VAL-005, VAL-007 (VAL-003, VAL-004, VAL-006 later) | yes | yes | no |
-| 18 Experiment tracking | EXP-001 … EXP-004 (EXP-005, EXP-006 later) | yes | yes | not applicable until real research runs |
+| 18 Experiment tracking | EXP-001 … EXP-005 (EXP-006 later) | yes | yes | not applicable until real research runs |
 | All other phases | not started | no | no | no |

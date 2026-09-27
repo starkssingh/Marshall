@@ -11,6 +11,7 @@ paths:
   reports_dir: reports
   logs_dir: logs
   migrations_dir: migrations
+  research_log: docs/research/log.md   # EXP-005: an entry is appended when an experiment closes
 
 database:
   url: null            # null = SQLite at <data_dir>/metadata.sqlite (research tier)

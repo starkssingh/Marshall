@@ -18,6 +18,7 @@ from helpers.ticks import dense_ticks, write_mt5
 from xq.backtest.costs import SCREENING_LABEL
 from xq.cli.main import app
 from xq.core.config import AppConfig
+from xq.core.errors import ConfigError
 from xq.datasets.builder import DatasetRef, build_dataset
 from xq.models.board import load_board_config
 from xq.tracking import registry
@@ -236,9 +237,37 @@ def test_repository_board_is_the_plan_s_fixed_baselines() -> None:
     assert np.isclose(board.ci_level, 0.95)
 
 
-def test_h0001_draft_is_a_valid_preregistration() -> None:
-    doc, _ = load_hypothesis(REPO / "experiments" / "hypotheses" / "H-0001.yaml", config(REPO))
+#: The revised H-0001 draft (ADR 0035): rule baselines on 1d and 1h signal bars. The board runs one
+#: signal timeframe until the runner implements the revision (C-15).
+H0001_RULE_TIMEFRAMES = ("1d", "1h")
+H0001 = REPO / "experiments" / "hypotheses" / "H-0001.yaml"
+PENDING_WINDOW = "set from the real data's depth at registration"
+
+
+def test_h0001_draft_cannot_be_registered_until_its_windows_are_set() -> None:
+    # The windows are set from the real data's depth at registration (ADR 0035); until then the
+    # draft must not validate, so `xq exp register` refuses it.
+    with pytest.raises(ConfigError, match="discovery_window"):
+        load_hypothesis(H0001, config(REPO))
+
+
+def test_h0001_draft_is_a_valid_preregistration_once_its_windows_are_set(tmp_path: Path) -> None:
+    text = H0001.read_text(encoding="utf-8")
+    assert text.count(PENDING_WINDOW) == 2
+    filled = text.replace(
+        f"discovery_window: {PENDING_WINDOW}",
+        'discovery_window: {start: "2021-09-26T21:00:00Z", end: "2024-09-25T21:00:00Z"}',
+    ).replace(
+        f"evaluation_window: {PENDING_WINDOW}",
+        'evaluation_window: {start: "2024-09-25T21:00:00Z", end: "2025-09-25T21:00:00Z"}',
+    )
+    path = tmp_path / "H-0001.yaml"
+    path.write_text(filled, encoding="utf-8")
+    doc, _ = load_hypothesis(path, config(REPO))
     assert (doc.id, doc.family) == ("H-0001", "baselines")
+    assert doc.slices == ["year", "session"]
     board = load_board_config(REPO / "experiments" / "configs" / "baselines" / "board.yaml")
+    assert board.signal_timeframe in H0001_RULE_TIMEFRAMES
+    rule_strategies = len(board.strategies()) * len(H0001_RULE_TIMEFRAMES)
     forecast_strategies = len(board.targets) * (len(board.forecast_baselines) - 1)
-    assert doc.trial_budget == len(board.strategies()) + forecast_strategies
+    assert doc.trial_budget == rule_strategies + forecast_strategies
