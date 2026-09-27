@@ -21,7 +21,14 @@ import yaml
 from sqlalchemy import Engine
 
 import xq
-from xq.core.config import AppConfig, config_as_dict, config_hash, load_config, parse_override
+from xq.core.config import (
+    DEFAULT_CONFIG_DIR,
+    AppConfig,
+    config_as_dict,
+    config_hash,
+    load_config,
+    parse_override,
+)
 from xq.core.errors import XQError
 from xq.core.ids import git_sha, new_ulid
 from xq.core.logging import configure_logging, shutdown_logging
@@ -34,6 +41,7 @@ from xq.datasets.builder import build_dataset, verify_dataset
 from xq.datasets.spec import load_spec
 from xq.models.board import load_board_config, run_baseline_board
 from xq.quality.validate import validate_source
+from xq.research.eda.horizons import write_admission
 from xq.research.eda.run import run_eda
 from xq.tracking.db import current_revision, engine_for, head_revision, upgrade_to_head
 from xq.tracking.hypotheses import register_hypothesis
@@ -525,10 +533,26 @@ def research_eda(
             exploratory=exploratory,
         ) as context:
             result = run_eda(context, dataset, end=stop)
+    admission = result.admission
     typer.echo(
-        f"EDA of {dataset} on the discovery window {result.window.start} to {result.window.end}"
+        f"EDA of {dataset} on the discovery window {result.window.start} to {result.window.end}; "
+        f"horizons admitted ({admission.cost_basis}): {', '.join(admission.admitted) or 'none'}; "
+        f"excluded: {', '.join(admission.excluded) or 'none'}"
     )
     typer.echo(f"report: {result.report_dir}")
+
+
+@research_app.command("admit-horizons")
+def research_admit_horizons(
+    ctx: typer.Context,
+    report: Annotated[Path, typer.Option("--report", help="EDA report directory.")],
+) -> None:
+    """Copy a confirmatory EDA report's horizon admission list to config/horizons.yaml."""
+    state: CliContext = ctx.obj
+    with cli_errors():
+        state.config  # noqa: B018 - validate the configuration directory before writing into it
+        target = write_admission(report, state.config_dir or DEFAULT_CONFIG_DIR)
+    typer.echo(f"horizon admission list written to {target}")
 
 
 db_app = typer.Typer(help="Metadata database migrations.", no_args_is_help=True)

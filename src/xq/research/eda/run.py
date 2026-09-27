@@ -5,26 +5,35 @@ window (`xq.research.eda.data`), computes the sections below and writes one repo
 `xq.research.reports.ReportBuilder` under ``reports/eda/<dataset_id>/<run_id>/``:
 
 - ``overview`` — the discovery window, the bars and returns per timeframe, the excluded days;
+- ``horizons`` (EDA-006), with its tables and figures;
+- ``admission.yaml`` — the horizon admission list (copied to ``config/horizons.yaml`` only by
+  ``xq research admit-horizons``);
 - ``run.json`` — the run id, experiment, confirmatory flag, git sha and seed (outside the
   deterministic files and the manifest).
 
-Every file of the report is recorded as a run artifact. The same dataset, configuration, commit
-and seed reproduce the same report files. Nothing is a trial: EDA evaluates no trading rule.
+Every file of the report is recorded as a run artifact; the admission ratios are also logged as
+metrics.
+
+The same dataset, configuration, commit and seed reproduce the same report files. Nothing is a
+trial: EDA evaluates no trading rule.
 """
 
 from __future__ import annotations
 
 import hashlib
 import json
+import math
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import pandas as pd
 
+from xq.backtest.costs import CostModel
 from xq.core.config import config_hash
 from xq.core.time import TimestampLike
 from xq.core.types import Timeframe
+from xq.research.eda import horizons
 from xq.research.eda.data import EdaInputs, load_eda_inputs
 from xq.research.reports import (
     MANIFEST_FILE,
@@ -47,6 +56,7 @@ class EdaResult:
 
     report_dir: Path
     window: DiscoveryWindow
+    admission: horizons.HorizonAdmission
     files: dict[str, str]
 
 
@@ -74,6 +84,7 @@ def run_eda(run: RunContext, dataset_id: str, *, end: TimestampLike | None = Non
     timeframes = sorted(set(wanted), key=lambda tf: tf.nanos)
     inputs = load_eda_inputs(cfg, dataset_id, timeframes, end=end)
     returns = {tf: inputs.returns(tf) for tf in timeframes}
+    cost = CostModel.from_config(cfg, inputs.spec.instrument)
     eda_json = eda.model_dump(mode="json")
     metadata: dict[str, Any] = {
         "dataset_id": dataset_id,
@@ -89,9 +100,23 @@ def run_eda(run: RunContext, dataset_id: str, *, end: TimestampLike | None = Non
         "app_config_hash": config_hash(cfg),
         "eda_config_hash": _hash(eda_json),
         "eda_config": eda_json,
+        "cost_basis": cost.result_label,
     }
     builder = ReportBuilder(TITLE, metadata=metadata)
     _overview(builder.section("overview", "Data and discovery window"), inputs, returns)
+    admission = _horizons(
+        builder.section("horizons", "Cost to volatility and horizon admission (EDA-006)"),
+        run,
+        returns,
+        cost,
+    )
+    provenance = {
+        "dataset_id": dataset_id,
+        "discovery_window": inputs.window.as_dict(),
+        "git_sha": run.run.git_sha,
+        "eda_config_hash": metadata["eda_config_hash"],
+    }
+    builder.attach(horizons.ADMISSION_FILE, horizons.admission_yaml(admission, provenance).encode())
 
     directory = cfg.paths.resolve(cfg.paths.reports_dir) / REPORT_DIR / dataset_id / run.run_id
     directory.mkdir(parents=True, exist_ok=False)
@@ -107,7 +132,10 @@ def run_eda(run: RunContext, dataset_id: str, *, end: TimestampLike | None = Non
     (directory / RUN_FILE).write_text(json.dumps(record, indent=2) + "\n")
     for relative in [*sorted(files), MANIFEST_FILE, RUN_FILE]:
         run.log_artifact(directory / relative, kind="eda_report")
-    return EdaResult(directory, inputs.window, files)
+    for horizon, ratio in admission.ratios.items():
+        if math.isfinite(ratio):
+            run.log_metric(f"eda/horizons/{horizon}/cost_to_vol", ratio)
+    return EdaResult(directory, inputs.window, admission, files)
 
 
 def _overview(section: Section, inputs: EdaInputs, returns: dict[Timeframe, pd.DataFrame]) -> None:
@@ -133,6 +161,42 @@ def _overview(section: Section, inputs: EdaInputs, returns: dict[Timeframe, pd.D
             }
         )
     section.table("coverage", pd.DataFrame(rows), caption="Bars and returns per timeframe")
+
+
+def _horizons(
+    section: Section,
+    run: RunContext,
+    returns: dict[Timeframe, pd.DataFrame],
+    cost: CostModel,
+) -> horizons.HorizonAdmission:
+    config = run.cfg.eda_config().horizons
+    candidates = [tf.value for tf in config.candidates]
+    table = horizons.cost_to_volatility_table(
+        {tf.value: returns[tf] for tf in config.candidates},
+        returns[Timeframe.M1],
+        cost,
+        run.cfg.sessions_config(),
+        max_cost_to_vol=config.max_cost_to_vol,
+        sigma_minutes=config.sigma_1m_minutes,
+    )
+    admission = horizons.admission(table, candidates, config.max_cost_to_vol)
+    section.text(
+        f"Costs: {cost.result_label}. Round-trip cost (spread, commission, slippage, financing) "
+        "over the mean absolute log return of each horizon, overall and per session. Horizons "
+        f"above {config.max_cost_to_vol:g} are excluded from directional research. "
+        f"Admitted: {', '.join(admission.admitted) or 'none'}; "
+        f"excluded: {', '.join(admission.excluded) or 'none'}."
+    )
+    section.table("cost-to-vol", table, caption=f"Cost to volatility ({cost.result_label})")
+    if len(table):
+        section.figure(
+            "cost-to-vol",
+            horizons.cost_to_volatility_figure(
+                table, config.max_cost_to_vol, f"Cost to volatility ({cost.result_label})"
+            ),
+            caption="Overall cost-to-volatility ratio per horizon against the admission bound",
+        )
+    return admission
 
 
 def _hash(value: Any) -> str:

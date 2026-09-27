@@ -335,6 +335,14 @@ IDs from `docs/specs/development-plan.md`.
   after it are refused (never cut silently), also for an explicit `--end`; returns are kept only
   between bars adjacent in market time. EDA runs record no trials. Synthetic data only (ADR 0035).
   ADR 0036.
+- EDA-006: cost-to-volatility table and horizon admission (`xq.research.eda.horizons`,
+  `xq research admit-horizons --report <dir>`) — round-trip cost of every holding period from the
+  BT-001 cost model (spread, commission, slippage with a trailing one-minute sigma-hat, financing
+  at the mean of the long and short rates) over the mean absolute log return, per horizon (1m to
+  1d) and session; horizons with an overall ratio above 0.3 are excluded; every figure is labelled
+  "screening, placeholder costs"; the report's `admission.yaml` reaches `config/horizons.yaml`
+  only from a confirmatory, unaltered report. No values are written to `config/horizons.yaml`
+  (ADR 0035). ADR 0037.
 
 ### Changed
 

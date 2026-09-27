@@ -1,6 +1,6 @@
 """`xq research eda` end to end on a synthetic dataset: the report is deterministic, every file is
-a run artifact, and the discovery window is enforced.
-Synthetic data only (ADR 0035): no EDA report is ever
+a run artifact, the discovery window is enforced, and the admission list reaches a configuration
+directory only from a confirmatory run. Synthetic data only (ADR 0035): no EDA report is ever
 generated here on real or pseudo-real data."""
 
 import json
@@ -26,7 +26,7 @@ from xq.tracking import registry
 HYPOTHESIS = "H-0900"
 #: A trading-day start inside the synthetic data: the discovery window of the enforcement tests.
 DISCOVERY_END = "2024-03-12T21:00:00Z"
-SECTIONS = ["overview"]
+SECTIONS = ["overview", "horizons"]
 
 
 @pytest.fixture(scope="module")
@@ -126,10 +126,14 @@ def test_report_has_every_section_and_its_provenance(
     first = reports[0]
     manifest = json.loads((first / "manifest.json").read_text())["files"]
     assert {f"{s}.md" for s in SECTIONS} <= set(manifest)
+    assert "admission.yaml" in manifest
     metadata = json.loads((first / "metadata.json").read_text())
     assert metadata["dataset_id"] == dataset.dataset_id
     assert metadata["discovery_window"]["start"] == "2024-03-05 00:00:00+00:00"
+    assert metadata["cost_basis"] == "screening, placeholder costs"
     assert {"git_sha", "app_config_hash", "eda_config_hash", "seed"} <= set(metadata)
+    horizons = (first / "horizons.md").read_text()
+    assert "screening, placeholder costs" in horizons
 
 
 def test_every_report_file_is_a_run_artifact(reports: tuple[Path, Path], engine: Engine) -> None:
@@ -139,6 +143,8 @@ def test_every_report_file_is_a_run_artifact(reports: tuple[Path, Path], engine:
     paths = {Path(a.path).relative_to(first).as_posix() for a in artifacts}
     assert paths == {*manifest, "manifest.json", "run.json"}
     assert {a.kind for a in artifacts} == {"eda_report"}
+    metrics = {m.name for m in registry.get_metrics(engine, first.name)}
+    assert "eda/horizons/1d/cost_to_vol" in metrics
     run = registry.get_run(engine, first.name)
     assert (run.kind, run.confirmatory, run.dataset_id) == ("eda", False, first.parent.name)
 
@@ -177,3 +183,31 @@ def test_cli_refuses_post_discovery_data(root: Path, dataset: DatasetRef, engine
     coverage = pd.read_csv(report / "tables" / "overview-coverage.csv")
     last = pd.to_datetime(coverage["last_bar"], utc=True)
     assert (last < pd.Timestamp(DISCOVERY_END)).all()
+
+
+def test_admission_is_refused_from_an_exploratory_run(
+    root: Path, reports: tuple[Path, Path], tmp_path: Path
+) -> None:
+    config_dir = tmp_path / "config"
+    config_dir.mkdir()
+    for path in (REPO / "config").rglob("*.yaml"):
+        target = config_dir / path.relative_to(REPO / "config")
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(path.read_bytes())
+    result = CliRunner().invoke(
+        app,
+        [
+            "--config-dir",
+            str(config_dir),
+            "--set",
+            f"paths.root={root}",
+            "research",
+            "admit-horizons",
+            "--report",
+            str(reports[0]),
+        ],
+    )
+    assert result.exit_code == 2
+    assert "exploratory" in result.output
+    assert not (config_dir / "horizons.yaml").exists()
+    assert not (REPO / "config" / "horizons.yaml").exists()
