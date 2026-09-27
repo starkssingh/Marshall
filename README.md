@@ -11,14 +11,19 @@ follow are in [`CLAUDE.md`](CLAUDE.md), and decisions are recorded in [`docs/adr
 
 ## Status
 
-Sprints 1 and 2 are merged. Sprint 2 (clean ticks, bars and data quality) is implemented and
-tested on synthetic data but **not validated**: its quality report must first run on at least one
-year of real broker ticks, followed by the human review (DQ-008); the owner's decisions on its open
+Sprints 1 to 4 are merged. Sprint 2 (clean ticks, bars and data quality) is implemented and tested
+on synthetic data but **not validated**: its quality report must first run on at least one year of
+real broker ticks, followed by the human review (DQ-008); the owner's decisions on its open
 questions are in ADR 0013. Sprint 3 (datasets, leakage harness, experiment registry, forward-return
 targets) and Sprint 4 (walk-forward, cost model and screener, Sharpe inference, DSR, forecast
 comparison, the evidence gates in `config/gates.yaml`, and the baseline board) are implemented and
-tested on synthetic data only. See [`CHANGELOG.md`](CHANGELOG.md) for completed backlog tasks and
-[`docs/STATUS.md`](docs/STATUS.md) for the current sprint, open decisions and carry-over items.
+tested on synthetic data only. Sprint 5 is build-only because no real broker data exists: the
+exploratory-research report (distributions, dependence, seasonality, trend and reversion, cost to
+volatility and horizon admission, all on the discovery window) and experiment conclusions are
+implemented and tested on synthetic data and simulated processes; no EDA report has been generated
+on real data and `config/horizons.yaml` does not exist yet. See [`CHANGELOG.md`](CHANGELOG.md) for
+completed backlog tasks and [`docs/STATUS.md`](docs/STATUS.md) for the current sprint, open
+decisions and carry-over items.
 
 Open owner decisions (development plan, section 1): the execution broker, its data feed and its
 cost terms. The source `mt5_primary` in `config/base.yaml` is a provisional placeholder (ADR 0004),
@@ -46,6 +51,9 @@ uv run xq dataset build experiments/configs/ds_base.yaml   # versioned dataset w
 uv run xq exp register experiments/hypotheses/H-XXXX.yaml  # pre-register (copy TEMPLATE.yaml)
 uv run xq exp trials                          # trial counts for multiple-testing corrections
 uv run xq baselines run --dataset <ds-id>     # baseline board in reports/baselines/ (screening)
+uv run xq research eda --dataset <ds-id> --hypothesis <H>  # EDA report on the discovery window
+uv run xq exp close <experiment-id> --conclusion <yaml>    # close with a verdict (research log)
+uv run xq exp audit                           # experiments still without a conclusion
 uv run xq verify-raw                          # re-hash every raw file against the manifest
 uv run xq config show                         # resolved configuration, secrets masked
 ```
@@ -54,9 +62,9 @@ The committed fixtures are sparse (one tick every ~90 s), so `xq validate` repor
 missing-minute failures on them; that is the checks working, not a bug. For the same reason
 `xq dataset build experiments/configs/ds_base.yaml` stops at the quality gate (DQ-007), listing
 every failing fixture day and check: a meaningful base dataset needs real broker history for the
-four years before the vault. The dataset, hypothesis, trial and baseline-board commands are
-exercised end to end on dense synthetic weeks in `tests/integration/`. The board's net figures
-are screening results while the cost model is a provisional placeholder (ADR 0032).
+four years before the vault. The dataset, hypothesis, trial, baseline-board, EDA and conclusion
+commands are exercised end to end on dense synthetic weeks in `tests/integration/`. The board's net
+figures are screening results while the cost model is a provisional placeholder (ADR 0032).
 
 Or in Docker (research profile; `data/`, `logs/` and `reports/` are mounted from the host):
 
