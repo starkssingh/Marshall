@@ -226,6 +226,11 @@ IDs from `docs/specs/development-plan.md`.
   late (daily break, weekend, excluded day, end of data); `_vol` variants divide by the interim
   EWMA sigma-hat (span 96 bars) scaled to the horizon; horizons 15m, 1h, 4h, 1d (24 targets).
   Every target passes the leakage bound checks; `ds_base.yaml` includes the set. ADR 0025.
+- WF-001: splitters (`xq.validation.splitters`) — `WalkForwardSplitter` (expanding or rolling,
+  calendar-span windows, validation before test, `step >= test_len`), `PurgedKFold` and
+  `CombinatorialPurgedCV`; training and validation labels purged by `label_end` with the embargo as
+  a gap before the next window; `Fold.train_end` is the information cutoff; unlabelled samples are
+  predicted but never trained on. ADR 0027.
 
 ### Changed
 

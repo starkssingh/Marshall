@@ -11,7 +11,7 @@ with the repository, the repository wins.
 ## Current sprint
 
 - **Sprint:** 4 — evaluation spine (branch `sprint-4`, from `main` at `b64f059`).
-- **Next task:** the Sprint 3 review carry-overs below C-7, then WF-001 (C-6 blocked, see below).
+- **Next task:** WF-006 (C-6 blocked, see below).
 - **Sprint 4 order:** WF-001, WF-006, WF-002, WF-003, BT-001, BT-002, BT-003, BASE-006, VAL-001,
   VAL-002, VAL-005, VAL-007, BASE-001, BASE-002, BASE-005 — synthetic data only.
 - **Hold point:** before VAL-007, the proposed `config/gates.yaml` goes to the owner, and work waits
@@ -28,7 +28,7 @@ with the repository, the repository wins.
 | C-4 | Trial clustering: keep ρ 0.7, require 60 common daily points | Sprint 3 review | Claude | `f15ef30` |
 | C-5 | Trading-time horizons (market-open minutes only) and a `crosses_close` target column; leakage tests and `label_end` checks updated | Sprint 3 review | Claude | `523821d` |
 | C-6 | Rebuild the Docker image and run the suite inside it (`scipy` added unchecked) | Sprint 3 review | Claude, then owner | open — blocked: image builds in the Claude sandbox need the session proxy's CA inside the build, which is not permitted; owner to choose a route (see open decisions) |
-| C-7 | `resample_causal` must respect availability (latency argument, test with latency > 0) | Sprint 3 review | Claude | open |
+| C-7 | `resample_causal` must respect availability (latency argument, test with latency > 0) | Sprint 3 review | Claude | `157a78c` |
 | C-8 | Run `xq validate` on ≥ 1 year of real broker ticks, then the DQ-008 human review | Sprint 2 | Owner (data), then Claude | open — blocked on real data |
 
 ## Open owner decisions
