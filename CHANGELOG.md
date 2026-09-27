@@ -670,6 +670,12 @@ IDs from `docs/specs/development-plan.md`.
 
 ### Fixed
 
+- TGT-002 forward returns: a quote while the market is closed (a stray quote in the daily break,
+  within the fill delay) is never an entry or exit fill; the fill is the first quote at or after
+  the intended time that lies in market hours, or there is no label, as in both backtest tiers.
+  The forward-return code version goes from 4 to 5, which changes dataset ids (no real dataset
+  exists; owner's go-ahead, ADR 0050, C-21). The screener and the targets share
+  `MarketClock.first_open`.
 - BT-002 screener: a quote while the market is closed (a stray quote in the daily break, for
   example) is never a fill quote; the fill is the first quote at or after the intended time that
   lies in market hours, or the trade is missed. Before, a closed-market quote within the fill

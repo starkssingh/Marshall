@@ -146,6 +146,24 @@ def test_a_friday_decision_is_labelled_over_the_weekend() -> None:
     )
 
 
+def test_a_quote_while_the_market_is_closed_is_never_a_fill() -> None:
+    # ADR 0050 (code version 5): a stray quote in the daily break (21:01 UTC, within the 300 s
+    # fill delay) is not a fill; the next open quote comes too late, so there is no label
+    decided = sigma(*at("2024-03-12 20:59:58"))  # entry due at 20:59:59, one second to the close
+    entry = run(spec("long"), quotes_at("2024-03-12 21:01:00", "2024-03-12 22:59:59.5"), decided)
+    assert np.isnan(entry["value"].iloc[0])
+    assert pd.isna(entry["label_start"].iloc[0])
+    decided = sigma(*at("2024-03-12 19:59:58"))  # exit due at 20:59:59
+    exit_quotes = quotes_at("2024-03-12 19:59:59.5", "2024-03-12 21:01:00", "2024-03-12 22:00:05")
+    exit_ = run(spec("long"), exit_quotes, decided)
+    assert np.isnan(exit_["value"].iloc[0])
+    assert pd.isna(exit_["label_end"].iloc[0])
+    # an open quote in time is the fill
+    in_time = quotes_at("2024-03-12 19:59:59.5", "2024-03-12 20:59:59.5", "2024-03-12 21:01:00")
+    ok = run(spec("long"), in_time, decided)
+    assert ok["label_end"].iloc[0] == pd.Timestamp("2024-03-12 20:59:59.5", tz="UTC")
+
+
 def test_no_label_when_the_fill_comes_too_late_or_never() -> None:
     later = T0 + pd.Timedelta(minutes=15)  # next quote after later + 1 s is 45 minutes away
     out = run(spec("long"), QUOTES, sigma(T0, later))

@@ -8,8 +8,9 @@ skipped. ``1d`` is one regular trading day, 23 market hours (ADR 0032); ``4h`` i
   weekend or holiday) gets no label (ADR 0032);
 - the intended entry is ``latency`` of market time after t, and the intended exit ``h + latency``
   after t;
-- the entry fill is the first usable quote at or after the intended entry, the exit fill the first
-  at or after the intended exit;
+- the entry fill is the first usable quote at or after the intended entry that lies in market
+  hours, the exit fill the first such quote at or after the intended exit — a quote while the
+  market is closed (a stray quote in the daily break) is never a fill (ADR 0050, code version 5);
 - ``long`` buys at the entry ask and sells at the exit bid: ``log(bid_exit / ask_entry)``;
   ``short`` sells at the entry bid and buys back at the exit ask: ``log(bid_entry / ask_exit)``;
   ``mid`` is the symmetric research variant ``log(mid_exit / mid_entry)``;
@@ -112,8 +113,10 @@ def compute(
     latency = pd.Timedelta(milliseconds=int(spec.params["execution_latency_ms"])).value
     delay = pd.Timedelta(seconds=float(spec.params["max_fill_delay_s"])).value
 
-    entry, entry_ok, entry_late = _fill(ts, clock.advance(t, latency), delay)
-    exit_, exit_ok, exit_late = _fill(ts, clock.advance(t, spec.horizon.value + latency), delay)
+    entry, entry_ok, entry_late = _fill(ts, clock.advance(t, latency), delay, clock)
+    exit_, exit_ok, exit_late = _fill(
+        ts, clock.advance(t, spec.horizon.value + latency), delay, clock
+    )
     ok = entry_ok & exit_ok & clock.is_open(t)  # no label for decisions while closed
     fill_delay = np.where(ok, np.maximum(entry_late, exit_late) / 1e9, np.nan)
     value = np.full(len(t), np.nan)
@@ -154,19 +157,19 @@ def compute(
 
 
 def _fill(
-    ts: npt.NDArray[np.int64], intended: npt.NDArray[np.int64], delay: int
+    ts: npt.NDArray[np.int64], intended: npt.NDArray[np.int64], delay: int, clock: MarketClock
 ) -> tuple[npt.NDArray[np.int64], npt.NDArray[np.bool_], npt.NDArray[np.int64]]:
-    """First quote at or after each intended time: its index, whether it is timely, its delay.
+    """First market-hours quote at or after each intended time: its row, timeliness and delay.
 
-    An intended time of `NAT_NS` (beyond the market clock) has no fill. The delay (nanoseconds) is
-    0 where no quote follows.
+    A quote while the market is closed is never a fill quote (ADR 0050). An intended time of
+    `NAT_NS` (beyond the market clock) has no fill. The delay (nanoseconds) is 0 where no quote
+    follows.
     """
-    index = np.searchsorted(ts, intended, side="left")
-    found = (index < len(ts)) & (intended != NAT_NS)
+    index, found = clock.first_open(ts, intended)
     late = np.zeros(len(intended), dtype=np.int64)
     late[found] = ts[index[found]] - intended[found]
     timely = found & (late <= delay)
-    return index.astype(np.int64), timely, late
+    return index, timely, late
 
 
 def _ns(index: pd.DatetimeIndex) -> npt.NDArray[np.int64]:
@@ -178,7 +181,7 @@ def _ns(index: pd.DatetimeIndex) -> npt.NDArray[np.int64]:
 
 FORWARD_RETURN = TargetKind(
     name="forward_return",
-    code_version=4,
+    code_version=5,
     expand=expand,
     sigma=sigma_rate,
     compute=compute,

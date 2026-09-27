@@ -232,6 +232,27 @@ class MarketClock:
         crosses: npt.NDArray[np.bool_] = before_end > before_start
         return crosses
 
+    def first_open(
+        self, ts: npt.NDArray[np.int64], intended: npt.NDArray[np.int64]
+    ) -> tuple[npt.NDArray[np.int64], npt.NDArray[np.bool_]]:
+        """Row of the first instant of `ts` (sorted) at or after each intended time in market hours.
+
+        Used for fills: a quote while the market is closed (a stray quote in the daily break, say)
+        is never a fill quote, and quotes outside the clock's range cannot be judged and are not
+        used either. An intended time of `NAT_NS` has none. Returns the rows (0 where there is
+        none) and whether one was found.
+        """
+        usable = np.zeros(len(ts), dtype=bool)
+        inside = (ts >= self.covered_from) & (ts < self.covered_to)
+        if inside.any():
+            usable[inside] = self.is_open(ts[inside])
+        rows = np.flatnonzero(usable)
+        k = np.searchsorted(ts[rows], intended, side="left")
+        found: npt.NDArray[np.bool_] = (k < len(rows)) & (intended != NAT_NS)
+        first = np.zeros(len(intended), dtype=np.int64)
+        first[found] = rows[k[found]]
+        return first, found
+
     def _check_covered(self, t: npt.NDArray[np.int64]) -> None:
         if len(t) and (t.min() < self.covered_from or t.max() >= self.covered_to):
             raise ValueError(
