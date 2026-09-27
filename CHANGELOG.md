@@ -296,6 +296,11 @@ IDs from `docs/specs/development-plan.md`.
   recovers the AR(1) optimum), `gate_block_length`, `bootstrap_distribution` and
   `bootstrap_sharpe` (percentile interval and null-centred one-sided p-value, nominal size on
   zero-mean AR(1) returns). ADR 0032.
+- BASE-001: forecast baselines (`xq.models.baselines.FORECAST_BASELINES`) for the walk-forward
+  runner, fixed and untuned — `zero_return`, `random_walk` (persistence: the log return of the
+  latest completed bar of the horizon's timeframe, joined on availability; `random_walk_columns`),
+  `historical_mean` (the training fold's mean, expanding with the windows) and `climatology` (the
+  training fold's frequency of positive targets). Known outputs per fold are tested.
 
 ### Changed
 
