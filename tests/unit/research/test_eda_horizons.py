@@ -259,8 +259,8 @@ def test_cost_table_and_admission() -> None:
         sigma_minutes=60,
     )
     overall = table.loc[table["session"] == ALL_SESSIONS].set_index("horizon")
-    assert not overall.loc["5m", "admitted"]  # 5 bp against about 3 bp of costs
-    assert overall.loc["4h", "admitted"]  # 240 bp against about 3 bp
+    assert not overall.loc["5m", "below_bound"]  # 5 bp against about 3 bp of costs
+    assert overall.loc["4h", "below_bound"]  # 240 bp against about 3 bp
     assert overall.loc["4h", "move_bps"] == pytest.approx(240.0)
     assert overall.loc["4h", "cost_to_vol"] == pytest.approx(overall.loc["4h", "cost_bps"] / 240.0)
     assert overall.loc["5m", "n"] == len(periods["5m"])
@@ -270,7 +270,8 @@ def test_cost_table_and_admission() -> None:
     result = admission(table, ["15m", "5m", "4h"], 0.3, provisional_costs=True)
     assert result.admitted == ["4h"]
     assert result.excluded == ["15m", "5m"]  # no data for 15m: not shown to be affordable
-    assert result.by_session["london"] == ["4h"]
+    london = table.loc[table["session"] == "london"].set_index("horizon")
+    assert london.loc["4h", "below_bound"]  # reported per session ...
     assert result.cost_basis == SCREENING_LABEL
     assert overall.loc["4h", "move_median_bps"] == pytest.approx(240.0)
     assert overall.loc["4h", "cost_to_vol_median"] == pytest.approx(
@@ -281,6 +282,7 @@ def test_cost_table_and_admission() -> None:
     assert loaded["provenance"] == {"dataset_id": "ds-x"}
     assert (loaded["cost_basis"], loaded["provisional_costs"]) == (SCREENING_LABEL, True)
     assert set(loaded["cost_to_vol_median"]) == {"5m", "4h"}
+    assert not any("session" in key for key in loaded)  # ... but never part of the admission
     assert len(cost_to_volatility_figure(table, 0.3, "t").axes) == 1
 
 

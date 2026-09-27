@@ -32,7 +32,9 @@ session the decision falls in). The median absolute move, the median cost and th
 ``median cost / median move`` are reported beside them — heavy tails pull the mean move above the
 typical one — but admission uses the mean ratio. A horizon whose overall mean ratio exceeds
 ``horizons.max_cost_to_vol`` (plan default 0.3) is excluded from directional research; it is
-still used for execution simulation, realized volatility and entry timing.
+still used for execution simulation, realized volatility and entry timing. The per-session rows
+are report-only (``below_bound`` marks a ratio at most the bound): a session-restricted horizon
+can be used only through a pre-registered hypothesis, never through the admission list (ADR 0041).
 
 While the cost model is provisional, every cost and ratio is a screening figure and carries its
 label ("screening, placeholder costs"). The admission list is written to the report
@@ -101,7 +103,7 @@ TABLE_COLUMNS = [
     "cost_median_bps",
     "cost_to_vol",
     "cost_to_vol_median",
-    "admitted",
+    "below_bound",
     "cost_basis",
 ]
 
@@ -112,11 +114,10 @@ class AdmissionError(XQError):
 
 @dataclass(frozen=True)
 class HorizonAdmission:
-    """Horizons admitted to directional research, overall and per session."""
+    """Horizons admitted to directional research: on their overall ratio only (ADR 0041)."""
 
     admitted: list[str]
     excluded: list[str]
-    by_session: dict[str, list[str]]
     max_cost_to_vol: float
     cost_basis: str
     provisional_costs: bool
@@ -133,7 +134,6 @@ class HorizonAdmission:
             "provisional_costs": self.provisional_costs,
             "cost_to_vol": {h: round(r, 6) for h, r in self.ratios.items()},
             "cost_to_vol_median": {h: round(r, 6) for h, r in self.median_ratios.items()},
-            "admitted_by_session": self.by_session,
         }
 
 
@@ -381,7 +381,7 @@ def cost_to_volatility_table(
                     "cost_median_bps": cost_median,
                     "cost_to_vol": ratio,
                     "cost_to_vol_median": ratio_median,
-                    "admitted": ratio <= max_cost_to_vol,
+                    "below_bound": ratio <= max_cost_to_vol,
                     "cost_basis": cost.result_label,
                 }
             )
@@ -397,8 +397,9 @@ def admission(
 ) -> HorizonAdmission:
     """The admission list: candidates whose overall ratio is at most `max_cost_to_vol`.
 
-    A candidate without data is excluded (it cannot be shown to be affordable).
-    `provisional_costs` says whether the table was priced with a provisional cost model.
+    A candidate without data is excluded (it cannot be shown to be affordable). Only the overall
+    ratios admit: the per-session rows are report-only (ADR 0041). `provisional_costs` says
+    whether the table was priced with a provisional cost model.
     """
     overall = table.loc[table["session"] == ALL_SESSIONS].set_index("horizon")
     column = overall["cost_to_vol"]
@@ -406,15 +407,10 @@ def admission(
     medians = overall["cost_to_vol_median"]
     median_ratios = {h: float(medians[h]) for h in candidates if h in overall.index}
     admitted = [h for h in candidates if h in ratios and ratios[h] <= max_cost_to_vol]
-    by_session: dict[str, list[str]] = {}
-    for session, chunk in table.loc[table["session"] != ALL_SESSIONS].groupby("session", sort=True):
-        ok = set(chunk.loc[chunk["admitted"].astype(bool), "horizon"])
-        by_session[str(session)] = [h for h in candidates if h in ok]
     basis = str(table["cost_basis"].iloc[0]) if len(table) else "no data"
     return HorizonAdmission(
         admitted=admitted,
         excluded=[h for h in candidates if h not in admitted],
-        by_session=by_session,
         max_cost_to_vol=max_cost_to_vol,
         cost_basis=basis,
         provisional_costs=provisional_costs,
