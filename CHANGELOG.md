@@ -645,6 +645,11 @@ IDs from `docs/specs/development-plan.md`.
   lies in market hours, or the trade is missed. Before, a closed-market quote within the fill
   delay could fill a decision taken just before the close. Found while reconciling the screener
   with the event tier, which never fills while closed (BT-005, BT-009).
+- BT-002 screener: a position still open when the quotes end is charged the rollover that ends
+  the last quote's trading day (marked at the last quote), as the event tier does; before,
+  financing stopped at the last quote, understating the last day's costs of an open position.
+  The financing series now lists every rollover from the first fill through that day's end.
+  Found by the BT-009 reconciliation (the only mechanical residual between the tiers).
 - ARCH-008 Docker test stage: the image now copies `docs/`, so the EXP-005 test that reads the
   committed research log (`docs/research/log.md`) passes inside it; the CI `docker` job had failed
   on `main` since Sprint 5 (PR #9) with `FileNotFoundError` for that file.

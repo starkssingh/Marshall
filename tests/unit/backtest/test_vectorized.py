@@ -95,7 +95,8 @@ def test_a_short_held_over_the_triple_rollover_pays_four_nights() -> None:
     )
     result = screen(positions(("2024-03-12 14:00", -1.0), ("2024-03-14 14:00", 0.0)), q)
     night = 0.5 * 100 * 2000.0 * 0.036 / 360  # 10 USD on 100,000 notional
-    np.testing.assert_allclose(result.financing, [night, 3 * night])
+    # Thursday's rollover ends the last quote's trading day; nothing is held over it
+    np.testing.assert_allclose(result.financing, [night, 3 * night, 0.0])
     daily = result.daily
     assert daily.index.tolist() == [date(2024, 3, 12), date(2024, 3, 13), date(2024, 3, 14)]
     np.testing.assert_allclose(daily["financing"], [night, 3 * night, 0.0])
@@ -103,6 +104,18 @@ def test_a_short_held_over_the_triple_rollover_pays_four_nights() -> None:
     trade = result.trades.iloc[0]
     assert trade["side"] == -1.0
     assert trade["pnl"] == pytest.approx(daily["net_pnl"].sum())
+
+
+def test_a_position_open_when_the_quotes_end_pays_that_days_rollover() -> None:
+    q = quotes(
+        ("2024-03-12 14:00:02", 1999.9, 2000.1),  # Tuesday: buy 0.5 lots
+        ("2024-03-12 20:59:00", 2009.9, 2010.1),  # the last quote, before Tuesday's rollover
+    )
+    result = screen(positions(("2024-03-12 14:00", 1.0)), q)
+    night = 0.5 * 100 * 2010.0 * 0.036 / 360  # marked at the last quote
+    np.testing.assert_allclose(result.financing, [night])
+    assert result.financing.index[0] == at("2024-03-12 21:00")
+    assert result.daily["financing"].tolist() == [pytest.approx(night)]
 
 
 def test_a_fill_later_than_the_allowed_delay_is_missed_and_retried() -> None:

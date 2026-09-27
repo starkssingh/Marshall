@@ -18,7 +18,8 @@ into fills, daily P&L and trades:
   position held stays until the next decision taken while the market is open; the skipped
   decisions that would have traded are reported in ``closed``.
 - **Costs**: the half-spread against mid is paid by each fill; slippage and commission come from
-  the cost model; financing is charged at every rollover on the lots held over it.
+  the cost model; financing is charged at every rollover on the lots held over it, up to and
+  including the rollover that ends the last quote's trading day.
 - **Days** are trading days (17:00 New York roll) with quotes. Positions are marked at the mid of
   the last quote before each day's end. ``net_pnl`` is the change in equity; ``gross_pnl`` is
   what it would have been with fills at mid and no costs, so ``net = gross - spread - slippage -
@@ -44,7 +45,7 @@ import pandas as pd
 
 from xq.backtest.costs import CostModel
 from xq.core.errors import NaiveTimestampError
-from xq.core.time import trading_day_bounds, trading_days
+from xq.core.time import trading_day, trading_day_bounds, trading_days
 from xq.data.calendar import NAT_NS, MarketClock
 
 FloatArray = npt.NDArray[np.float64]
@@ -184,8 +185,8 @@ def required_quotes(
     days = np.unique(trading_days(pd.DatetimeIndex(quotes["ts_utc"])))
     ends = np.array([trading_day_bounds(d.item())[1].value for d in days], dtype=np.int64)
     first_quote = pd.Timestamp(int(ts[0]), tz="UTC")
-    last_quote = pd.Timestamp(int(ts[-1]), tz="UTC") + pd.Timedelta(1, "ns")
-    rolls = _ns(pd.DatetimeIndex(costs.rollovers(first_quote, last_quote).index))
+    last_end = _last_day_end(ts) + pd.Timedelta(1, "ns")
+    rolls = _ns(pd.DatetimeIndex(costs.rollovers(first_quote, last_end).index))
     before = np.searchsorted(ts, np.concatenate([ends, rolls]), side="left") - 1
     keep.append(before[before >= 0])
     return np.unique(np.concatenate(keep)).astype(np.int64)
@@ -235,17 +236,25 @@ def _fills(
 def _financing(
     fills: pd.DataFrame, ts: IntArray, bid: FloatArray, ask: FloatArray, costs: CostModel
 ) -> pd.Series:
-    """Charges at rollovers from the first fill to the last quote, on the lots held over each."""
+    """Charges at rollovers from the first fill to the end of the last quote's trading day.
+
+    A position still open when the quotes end is held over that day's closing rollover too, and
+    is charged for it (marked at the last quote), as in the event tier.
+    """
     if fills.empty or len(ts) == 0:
         return pd.Series(dtype="float64", index=pd.DatetimeIndex([], tz="UTC", name="rollover"))
     start = pd.Timestamp(fills["fill_time"].iloc[0])
-    end = pd.Timestamp(int(ts[-1]), tz="UTC") + pd.Timedelta(1, "ns")
-    rolls = costs.rollovers(start, end)
+    rolls = costs.rollovers(start, _last_day_end(ts) + pd.Timedelta(1, "ns"))
     r = _ns(pd.DatetimeIndex(rolls.index))
     held = _held_at(fills, r)
     last = np.maximum(np.searchsorted(ts, r, side="left") - 1, 0)
     charge = costs.financing_usd(held, (bid[last] + ask[last]) / 2, rolls.to_numpy())
     return pd.Series(charge, index=rolls.index, name="financing")
+
+
+def _last_day_end(ts: IntArray) -> pd.Timestamp:
+    """The end (17:00 New York) of the trading day of the last quote."""
+    return trading_day_bounds(trading_day(pd.Timestamp(int(ts[-1]), tz="UTC")))[1]
 
 
 def _held_at(fills: pd.DataFrame, instants: IntArray) -> FloatArray:
