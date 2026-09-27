@@ -389,6 +389,8 @@ IDs from `docs/specs/development-plan.md`.
 - EDA-006 analytic test: on a Gaussian random walk with known sigma and a constant spread, the mean
   absolute move over h matches sigma·sqrt(2h/π), the ratio matches spread ÷ that move, and
   admission flips at the 0.3 bound (ADR 0040).
+- EDA-006 reports the median absolute move, the median cost and the median-based ratio beside the
+  means (table, figure, admission list); admission stays on the mean ratio (ADR 0040).
 - BASE-005 H-0001 draft revised at the owner's request (ADR 0035, C-15), still unregistered: rule
   baselines are evaluated over the full pre-vault history after each rule's warm-up, with the
   fold-aligned version stored for comparison; they run on 1d and 1h signal bars (not 15m), so the

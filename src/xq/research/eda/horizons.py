@@ -26,9 +26,11 @@ Its **round-trip cost** in basis points, from the configured cost model (BT-001,
 
 The **expected absolute move** is the mean absolute log mid move. The ratio is ``mean cost / mean
 move``, per horizon over all periods and per session and overlap of ``config/sessions.yaml`` (the
-session the decision falls in). A horizon whose overall ratio exceeds ``horizons.max_cost_to_vol``
-(plan default 0.3) is excluded from directional research; it is still used for execution
-simulation, realized volatility and entry timing.
+session the decision falls in). The median absolute move, the median cost and their ratio
+``median cost / median move`` are reported beside them — heavy tails pull the mean move above the
+typical one — but admission uses the mean ratio. A horizon whose overall mean ratio exceeds
+``horizons.max_cost_to_vol`` (plan default 0.3) is excluded from directional research; it is
+still used for execution simulation, realized volatility and entry timing.
 
 While the cost model is provisional, every cost and ratio is a screening figure and carries its
 label ("screening, placeholder costs"). The admission list is written to the report
@@ -88,12 +90,15 @@ TABLE_COLUMNS = [
     "n",
     "crosses_close_share",
     "move_bps",
+    "move_median_bps",
     "spread_bps",
     "commission_bps",
     "slippage_bps",
     "financing_bps",
     "cost_bps",
+    "cost_median_bps",
     "cost_to_vol",
+    "cost_to_vol_median",
     "admitted",
     "cost_basis",
 ]
@@ -114,6 +119,8 @@ class HorizonAdmission:
     cost_basis: str
     provisional_costs: bool
     ratios: dict[str, float] = field(default_factory=dict)
+    #: Median cost / median move per horizon: reported, never used to admit.
+    median_ratios: dict[str, float] = field(default_factory=dict)
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -123,6 +130,7 @@ class HorizonAdmission:
             "cost_basis": self.cost_basis,
             "provisional_costs": self.provisional_costs,
             "cost_to_vol": {h: round(r, 6) for h, r in self.ratios.items()},
+            "cost_to_vol_median": {h: round(r, 6) for h, r in self.median_ratios.items()},
             "admitted_by_session": self.by_session,
         }
 
@@ -324,6 +332,9 @@ def cost_to_volatility_table(
             move = float(chosen["move_bps"].mean())
             total = float(chosen["cost_bps"].mean())
             ratio = total / move if move > 0 else math.inf
+            move_median = float(chosen["move_bps"].median())
+            cost_median = float(chosen["cost_bps"].median())
+            ratio_median = cost_median / move_median if move_median > 0 else math.inf
             rows.append(
                 {
                     "horizon": horizon,
@@ -331,12 +342,15 @@ def cost_to_volatility_table(
                     "n": int(mask.sum()),
                     "crosses_close_share": float(chosen["crosses_close"].mean()),
                     "move_bps": move,
+                    "move_median_bps": move_median,
                     "spread_bps": float(chosen["spread_bps"].mean()),
                     "commission_bps": float(chosen["commission_bps"].mean()),
                     "slippage_bps": float(chosen["slippage_bps"].mean()),
                     "financing_bps": float(chosen["financing_bps"].mean()),
                     "cost_bps": total,
+                    "cost_median_bps": cost_median,
                     "cost_to_vol": ratio,
+                    "cost_to_vol_median": ratio_median,
                     "admitted": ratio <= max_cost_to_vol,
                     "cost_basis": cost.result_label,
                 }
@@ -359,6 +373,8 @@ def admission(
     overall = table.loc[table["session"] == ALL_SESSIONS].set_index("horizon")
     column = overall["cost_to_vol"]
     ratios = {h: float(column[h]) for h in candidates if h in overall.index}
+    medians = overall["cost_to_vol_median"]
+    median_ratios = {h: float(medians[h]) for h in candidates if h in overall.index}
     admitted = [h for h in candidates if h in ratios and ratios[h] <= max_cost_to_vol]
     by_session: dict[str, list[str]] = {}
     for session, chunk in table.loc[table["session"] != ALL_SESSIONS].groupby("session", sort=True):
@@ -373,6 +389,7 @@ def admission(
         cost_basis=basis,
         provisional_costs=provisional_costs,
         ratios=ratios,
+        median_ratios=median_ratios,
     )
 
 
@@ -444,7 +461,13 @@ def cost_to_volatility_figure(table: pd.DataFrame, max_cost_to_vol: float, title
     figure = new_figure(7, 4)
     axes = figure.subplots()
     x = np.arange(len(overall))
-    axes.bar(x, overall["cost_to_vol"].to_numpy(dtype=np.float64))
+    axes.bar(x, overall["cost_to_vol"].to_numpy(dtype=np.float64), label="mean cost / mean move")
+    axes.plot(
+        x,
+        overall["cost_to_vol_median"].to_numpy(dtype=np.float64),
+        "o",
+        label="median cost / median move",
+    )
     axes.axhline(max_cost_to_vol, linestyle="--", linewidth=1, label=f"bound {max_cost_to_vol:g}")
     axes.set_xticks(x, overall["horizon"].to_numpy())
     axes.set_yscale("log")

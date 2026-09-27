@@ -12,6 +12,7 @@ import numpy as np
 import pandas as pd
 import pytest
 import yaml
+from scipy.stats import norm
 from typer.testing import CliRunner
 
 from helpers.pipeline import REPO, config
@@ -243,10 +244,15 @@ def test_cost_table_and_admission() -> None:
     assert result.excluded == ["15m", "5m"]  # no data for 15m: not shown to be affordable
     assert result.by_session["london"] == ["4h"]
     assert result.cost_basis == SCREENING_LABEL
+    assert overall.loc["4h", "move_median_bps"] == pytest.approx(240.0)
+    assert overall.loc["4h", "cost_to_vol_median"] == pytest.approx(
+        overall.loc["4h", "cost_median_bps"] / 240.0
+    )
     loaded = yaml.safe_load(admission_yaml(result, {"dataset_id": "ds-x"}))
     assert loaded["admitted"] == ["4h"]
     assert loaded["provenance"] == {"dataset_id": "ds-x"}
     assert (loaded["cost_basis"], loaded["provisional_costs"]) == (SCREENING_LABEL, True)
+    assert set(loaded["cost_to_vol_median"]) == {"5m", "4h"}
     assert len(cost_to_volatility_figure(table, 0.3, "t").axes) == 1
 
 
@@ -301,6 +307,11 @@ def expected_move_bps(minutes_: float) -> float:
     return SIGMA * np.sqrt(2 * minutes_ / np.pi) * 1e4
 
 
+def median_move_bps(minutes_: float) -> float:
+    """Median |N(0, sigma^2 h)| in bps: sigma * sqrt(h) * Phi^-1(0.75)."""
+    return SIGMA * np.sqrt(minutes_) * float(norm.ppf(0.75)) * 1e4
+
+
 @pytest.mark.parametrize(("target_ratio", "admitted"), [(0.27, True), (0.33, False)])
 def test_gaussian_random_walk_matches_theory(target_ratio: float, admitted: bool) -> None:
     # A random walk with 2 bp per market minute and a constant spread s (bps of the mid): the
@@ -316,9 +327,20 @@ def test_gaussian_random_walk_matches_theory(target_ratio: float, admitted: bool
         assert row["cost_bps"] == pytest.approx(spread_bps, rel=1e-9)
         analytic = spread_bps / expected_move_bps(minutes_)
         assert row["cost_to_vol"] == pytest.approx(analytic, rel=0.03)
+        assert row["move_median_bps"] == pytest.approx(median_move_bps(minutes_), rel=0.03)
+        assert row["cost_median_bps"] == pytest.approx(spread_bps, rel=1e-9)
+        median_ratio = spread_bps / median_move_bps(minutes_)
+        assert row["cost_to_vol_median"] == pytest.approx(median_ratio, rel=0.03)
     result = admission(table.reset_index(), ["15m", "1h"], 0.3, provisional_costs=False)
     assert result.admitted == (["1h"] if admitted else [])
     assert "15m" in result.excluded
+    # For a normal the median |move| is 0.845 of the mean, so the median ratio is 1.18 times the
+    # mean one (0.32 when the mean ratio is 0.27): above the bound even where the mean admits 1h.
+    # Admission follows the mean ratio.
+    assert result.median_ratios["1h"] > 0.3
+    assert result.median_ratios["1h"] == pytest.approx(
+        table.loc[("1h", ALL_SESSIONS)]["cost_to_vol_median"]
+    )
 
 
 def test_the_target_set_must_be_a_configured_forward_return_set() -> None:

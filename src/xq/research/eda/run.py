@@ -479,7 +479,9 @@ def _horizons(
         f"{config.decision_step.value} grid of 1m bars; horizons are trading time and "
         "overlapping periods are counted (n). Round-trip cost (spread, commission, slippage, "
         "financing) over the mean absolute log mid move, overall and per session of the "
-        f"decision. Horizons above {config.max_cost_to_vol:g} are excluded from directional "
+        "decision; the median-based ratio (median cost over median move) is shown beside it "
+        "but admission uses the mean. Horizons whose mean ratio is above "
+        f"{config.max_cost_to_vol:g} are excluded from directional "
         f"research. Admitted: {', '.join(admission.admitted) or 'none'}; "
         f"excluded: {', '.join(admission.excluded) or 'none'}."
     )

@@ -51,3 +51,11 @@ constant relative spread s and a cost model whose only cost is the spread, must 
 absolute move over h market minutes of sigma * sqrt(2h / pi) (within 3 %; the realized error is
 about 1 %), a round-trip cost of exactly s, and hence the ratio s / (sigma * sqrt(2h / pi)); with
 s set 10 % below and above the 0.3 bound for 1h, admission flips accordingly.
+
+## Decision 5 — Medians beside the means
+
+The table reports the median absolute move, the median round-trip cost and their ratio beside the
+means, overall and per session, and the admission list carries the median ratios for reference.
+Admission stays on the mean ratio (the plan's cost ÷ expected absolute move). For a normal move
+the median ratio is about 1.18 times the mean one, so a horizon admitted near the bound can show a
+median ratio above it; heavier tails widen the gap.
