@@ -71,9 +71,9 @@ model promoted.
   validated on real data. No statistical report exists.
 - The plain Ljung-Box on returns is kept for comparability with the literature, but only the
   robust Q* may support a claim of return autocorrelation.
-- **Trials (Claude's reading, for the owner's review with C-18).** STAT-001, STAT-002 and STAT-003
-  are descriptive tests on the discovery window: like EDA they evaluate no trading configuration
-  and record no trials, and would run under the descriptive hypothesis H-0000 (ADR 0041). STAT-006
-  and the volatility board (VOL-005) evaluate models on walk-forward test folds, so each (model,
-  horizon) is one trial of the run's hypothesis family; their benchmarks are references, not
-  trials.
+- **Trials** (approved by the owner at the review of PR #11, with separate families, ADR 0046).
+  STAT-001, STAT-002 and STAT-003 are descriptive tests on the discovery window: like EDA they
+  evaluate no trading configuration and record no trials, and run under the descriptive
+  hypothesis H-0000 (ADR 0041). STAT-006 evaluates models on walk-forward test folds, so each
+  (model, horizon) is one trial — of the `linear_forecasts` family, never of a trading-strategy
+  family; its benchmarks are references, not trials.

@@ -91,3 +91,6 @@ before any real result; changing one afterwards needs an ADR.
     equal to the default in truth, a simulation of 400 boards promotes one in 4.5 % of them with
     the adjustment and in 30.5 % without it; a test pins the adjusted rate at 7 % or less.
     `Selection.p_holm` records the adjusted p-values.
+11. **Volatility trials in their own family.** Inside a run each volatility model evaluated on the
+    test folds is one trial of the `volatility_models` family, never of a trading-strategy family
+    (ADR 0046).

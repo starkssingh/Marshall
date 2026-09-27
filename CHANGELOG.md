@@ -495,6 +495,11 @@ IDs from `docs/specs/development-plan.md`.
   before applying `dm_alpha` (owner review of PR #11): with twelve challengers equal to the default
   in truth, a simulated board promotes one in 4.5 % of 400 samples (30.5 % without the adjustment);
   `Selection.p_holm` records the adjusted p-values. ADR 0044.
+- STAT-006 and VOL-005 trials are recorded in their own families, `linear_forecasts` and
+  `volatility_models` (`xq.tracking.trials.MODEL_FAMILIES`), whatever the run's hypothesis, never
+  in a trading-strategy family (owner review of PR #11); `arma_study` and `evaluate_forecasters`
+  lose their `family_id` argument. A test records both under a `baselines` hypothesis and finds
+  the `baselines` family's trial count, effective N and Sharpe variance unchanged. ADR 0046.
 - BASE-005 H-0001 draft revised at the owner's request (ADR 0035, C-15), still unregistered: rule
   baselines are evaluated over the full pre-vault history after each rule's warm-up, with the
   fold-aligned version stored for comparison; they run on 1d and 1h signal bars (not 15m), so the

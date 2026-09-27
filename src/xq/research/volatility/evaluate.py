@@ -24,7 +24,7 @@ periods frame and the same target, so the comparison is fair by construction:
    volatility regime: the trailing mean RV over ``regime_window`` periods at each decision, cut at
    quantiles computed on **each fold's training rows only**.
 8. **Trials**: inside an experiment run each model evaluated on the test folds is one trial of
-   the hypothesis family.
+   the ``volatility_models`` family, never of a trading-strategy family (ADR 0046).
 
 Sprint 6 is build-only: this runs on simulated periods only; no volatility board exists for real
 data and nothing is promoted (ADR 0044).
@@ -49,6 +49,7 @@ from xq.core.types import Timeframe
 from xq.models.volatility import VolForecaster, check_periods, realized_target
 from xq.research.volatility.benchmarks import Deseasonalized, benchmark_forecasters
 from xq.research.volatility.garch import garch_forecasters
+from xq.tracking.trials import VOLATILITY_MODEL_FAMILY
 from xq.validation.forecast_eval import (
     ModelConfidenceSet,
     diebold_mariano,
@@ -165,7 +166,6 @@ def evaluate_forecasters(
     seed: int,
     sessions: pd.Series | None = None,
     run: RunContext | None = None,
-    family_id: str | None = None,
 ) -> VolBoard:
     """Evaluate every forecaster on identical folds and targets (module docstring).
 
@@ -174,7 +174,9 @@ def evaluate_forecasters(
         factories: A fresh forecaster per call, by board name; must include the reference
             (``cfg.dm_reference``) and `default`.
         sessions: Optional session label per period (known in advance), for the breakdown.
-        run: When given, each model is recorded as one trial of `family_id` on test folds.
+        run: When given, each model is recorded as one trial on test folds of the volatility-model
+            family ``volatility_models`` — never of a trading-strategy family, whatever the run's
+            hypothesis (ADR 0046).
 
     Raises:
         ValueError: if the reference or default is missing, no fold exists, or a forecast on a
@@ -184,8 +186,6 @@ def evaluate_forecasters(
     for required in (cfg.dm_reference, default):
         if required not in factories:
             raise ValueError(f"the board needs {required!r} (reference or default)")
-    if run is not None and family_id is None:
-        raise ValueError("recording trials needs the hypothesis family")
     target, label_end = realized_target(periods, horizon)
     folds = WalkForwardSplitter(splitter).split(pd.DatetimeIndex(periods.index), label_end)
     if not folds:
@@ -263,10 +263,10 @@ def evaluate_forecasters(
         .reset_index()
     )
     slices = _slices(long)
-    if run is not None and family_id is not None:
+    if run is not None:
         for name in names:
             run.record_trial(
-                family_id=family_id,
+                family_id=VOLATILITY_MODEL_FAMILY,
                 config={
                     "board": "volatility",
                     "model": name,

@@ -10,7 +10,9 @@ errors (Harvey correction, ``horizon`` lags), two-sided and one-sided (the model
 expected loss). One-sided p-values are Holm-adjusted across horizons for each (model, benchmark)
 pair; **useful evidence** (plan) is a Holm-adjusted p below ``alpha`` against every benchmark at
 some horizon — anything else, including in-sample significance of coefficients, is recorded and
-never promoted. SARIMA is not built: the plan allows it only if EDA-004 finds a stable daily cycle.
+never promoted. Inside a run each (model, horizon) is a trial of the ``linear_forecasts`` family,
+never of a trading-strategy family (ADR 0046). SARIMA is not built: the plan allows it only if
+EDA-004 finds a stable daily cycle.
 """
 
 from __future__ import annotations
@@ -40,6 +42,7 @@ from xq.models.arma import (
 from xq.models.base import ModelConfig, ModelSpec
 from xq.models.baselines import forecast_baseline
 from xq.research.stats.results import holm_adjust
+from xq.tracking.trials import LINEAR_FORECAST_FAMILY
 from xq.validation.forecast_eval import diebold_mariano, diebold_mariano_less, loss_series
 from xq.validation.splitters import WalkForwardConfig, WalkForwardSplitter
 from xq.validation.walkforward import walk_forward
@@ -116,7 +119,6 @@ def arma_study(
     alpha: float,
     seed: int,
     run: RunContext | None = None,
-    family_id: str | None = None,
 ) -> ArmaStudy:
     """Walk-forward ARMA forecasts against the benchmarks (module docstring).
 
@@ -124,13 +126,12 @@ def arma_study(
         features: Decision-time-indexed features with the decision bar's ``open`` and ``close``
             (and the random walk's columns where they exist).
         run: When given, every (model, horizon) evaluated on test folds is recorded as a trial of
-            `family_id` (the benchmarks are references, not trials).
+            the linear-forecast family ``linear_forecasts`` — never of a trading-strategy family,
+            whatever the run's hypothesis (ADR 0046); the benchmarks are references, not trials.
 
     Raises:
         ValueError: if the models' folds differ (they cannot: one splitter, one ``label_end``).
     """
-    if run is not None and family_id is None:
-        raise ValueError("recording trials needs the hypothesis family")
     rows: list[dict[str, Any]] = []
     predictions: dict[str, pd.DataFrame] = {}
     fold_ids: dict[str, list[str]] = {}
@@ -178,9 +179,9 @@ def arma_study(
         frame.insert(0, "fold_id", outputs[first].predictions["fold_id"])
         predictions[target.label] = frame
         for model in models:
-            if run is not None and family_id is not None:
+            if run is not None:
                 run.record_trial(
-                    family_id=family_id,
+                    family_id=LINEAR_FORECAST_FAMILY,
                     config={
                         "study": "arma",
                         "model": model,
