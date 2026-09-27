@@ -238,3 +238,27 @@
    round-trip cost, the same one the event tier fills with; the cost model is shared
    infrastructure, and moving it to its own package is left to a layout ADR if the runtime needs
    it without the backtester.
+
+## SIGNAL-005 — the signal engine in the event backtester
+
+1. **Adapter.** `SignalStrategy` (in `xq.backtest.strategies`) wraps a `SignalEngine`, a forecast
+   source (the forecasts made at the decision time from the bars seen so far) and an optional
+   regime source (none exists before REG-007). At each signal bar it decides with the context's
+   quote, sigma-hat and position, keeps every forecast and every record, and observes the bar's
+   spread *after* deciding, so the spread reference stays causal. Shadow replay and the paper
+   runtime will call the same engine (PAPER-001); only the event backtester exists now.
+2. **Audit trail.** The intent's `signal_id` is its record's id and the ledger stores it, so
+   `SignalStrategy.audit(ledger)` traces every fill to its order, risk decision (approved, profile
+   version), intent (its reason is empty for a signal, `time stop` for the engine's exit of one),
+   signal record and forecasts. A synthetic run (a causal momentum stub declared calibrated, not a
+   model) shows every fill traced, one record per candidate, every signal intent matching its
+   record, and the risk engine sizing on the calibrated probability; with the same stub
+   uncalibrated nothing reaches the risk engine.
+3. **Open point for the owner — probability scaling and payoffs.** The default risk profile scales
+   size on the raw calibrated probability (zero at 0.5, full at 0.6), which suits 1:1 payoffs. For
+   asymmetric barriers the break-even probability differs (1/3 for 2:1), so a good 2:1 trade with
+   p = 0.45 would be sized to zero. The forecast-to-fill test uses a profile matched to its 2:1
+   barriers (zero at 0.34, full at 0.5). Options: (a) keep raw-p scaling and require each
+   strategy's risk profile to match its payoff; (b) scale on the edge instead, p minus the
+   break-even `SL / (TP + SL)`. Recorded as a carry-over in STATUS; the default is unchanged
+   until decided.

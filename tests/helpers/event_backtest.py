@@ -34,18 +34,20 @@ RISK = RiskEngine.from_config(CFG)
 def risk_engine(
     *,
     risk_per_trade: float | None = None,
+    sizing: dict[str, Any] | None = None,
     breakers: dict[str, Any] | None = None,
     kill_switch: dict[str, Any] | None = None,
     **limits: Any,
 ) -> RiskEngine:
-    """The default profile's engine with changed sizing budget, breakers, kill switch, limits."""
+    """The default profile's engine with changed sizing, breakers, kill switch and limits."""
     config = CFG.risk_config()
-    sizing = config.sizing
+    changes = dict(sizing or {})
     if risk_per_trade is not None:
-        sizing = sizing.model_copy(update={"risk_per_trade": risk_per_trade})
+        changes["risk_per_trade"] = risk_per_trade
+    sizing_config = config.sizing.model_copy(update=changes)
     changed = config.model_copy(
         update={
-            "sizing": sizing,
+            "sizing": sizing_config,
             "limits": config.limits.model_copy(update=limits),
             "breakers": config.breakers.model_copy(update=breakers or {}),
             "kill_switch": config.kill_switch.model_copy(update=kill_switch or {}),

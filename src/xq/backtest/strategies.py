@@ -1,4 +1,4 @@
-"""Strategies shared by both backtest tiers (BT-009, BT-010).
+"""Strategies shared by both backtest tiers (BT-009, BT-010), and the signal engine's adapter.
 
 The vectorized screener takes target exposures per decision time; these strategies express the
 same decisions to the event engine as market-order intents, so a strategy can run through both
@@ -12,14 +12,24 @@ Both behave like the screener: an intent is sent when the target differs from th
 last target that was actually executed, so a missed, refused or expired decision is retried at
 the next decision. The exposure is a request to the risk engine, which sizes it; they never size.
 
-Every long or short intent carries a protective stop ``stop_sigmas`` daily sigma-hats (the value
-in the strategy's context, the one the risk engine uses) from the mid, on the losing side of the
-entry quote — the stop policy (RISK-004) requires one. Without a sigma-hat or a quote the intent
-goes without a stop, and the risk engine refuses it. The screener has no stops: a reconciliation
-of the two tiers is only meaningful while no stop fills.
+`SignalStrategy` (SIGNAL-005) runs the signal engine (`xq.signals.engine.SignalEngine`) inside
+the event backtester: at each signal bar it asks a forecast source for the forecasts made at that
+decision time, lets the engine turn them into at most one intent, and keeps every forecast and
+every `SignalRecord`. An intent's ``signal_id`` is its record's id, so the decision ledger links
+each fill, through its order, risk decision and intent, back to the signal record and the
+forecasts behind it (`SignalStrategy.audit`). It is event-tier only: the screener has no stops.
+
+Every long or short intent of the exposure strategies carries a protective stop ``stop_sigmas``
+daily sigma-hats (the value in the strategy's context, the one the risk engine uses) from the mid,
+on the losing side of the entry quote — the stop policy (RISK-004) requires one. Without a
+sigma-hat or a quote the intent goes without a stop, and the risk engine refuses it. The screener
+has no stops: a reconciliation of the two tiers is only meaningful while no stop fills.
 """
 
 from __future__ import annotations
+
+import json
+from typing import Protocol
 
 import pandas as pd
 
@@ -27,7 +37,8 @@ from xq.backtest.engine import Strategy, StrategyContext
 from xq.backtest.events import Bar, Fill
 from xq.core.time import from_ns
 from xq.models.baselines import RuleStrategyConfig, VolTargetConfig, rule_exposure
-from xq.signals.schema import Direction, TradeIntent
+from xq.signals.engine import SignalEngine
+from xq.signals.schema import Direction, Forecast, RegimeState, SignalRecord, TradeIntent
 
 
 class _TargetStrategy(Strategy):
@@ -148,3 +159,97 @@ def signal_frame(bars: list[Bar] | pd.DataFrame) -> pd.DataFrame:
         },
         index=pd.DatetimeIndex([from_ns(b.available_at) for b in bars], name="available_at"),
     )
+
+
+class ForecastSource(Protocol):
+    """Forecasts made at the decision time from the bars seen so far (a model, or a test stub)."""
+
+    def __call__(self, bar: Bar, ctx: StrategyContext) -> list[Forecast]:
+        """The forecasts at ``ctx.now``."""
+        ...
+
+
+class RegimeSource(Protocol):
+    """The filtered regime at the decision time (none exists before REG-007)."""
+
+    def __call__(self, bar: Bar, ctx: StrategyContext) -> RegimeState | None:
+        """The regime at ``ctx.now``."""
+        ...
+
+
+class SignalStrategy(Strategy):
+    """The signal engine as an event-backtest strategy (module docstring)."""
+
+    def __init__(
+        self,
+        engine: SignalEngine,
+        forecasts: ForecastSource,
+        *,
+        regimes: RegimeSource | None = None,
+    ) -> None:
+        self.engine = engine
+        self.source = forecasts
+        self.regimes = regimes
+        self.strategy_id = engine.spec.strategy_id
+        self.version = engine.spec.version
+        self.forecasts: list[Forecast] = []
+        self.records: list[SignalRecord] = []
+
+    def on_bar(self, bar: Bar, ctx: StrategyContext) -> list[TradeIntent]:
+        """The engine's intents on this bar's forecasts; the bar's spread is observed after."""
+        forecasts = self.source(bar, ctx)
+        self.forecasts.extend(forecasts)
+        intents: list[TradeIntent] = []
+        if ctx.quote is not None:
+            decision = self.engine.decide(
+                ctx.now,
+                forecasts,
+                bid=ctx.quote.bid,
+                ask=ctx.quote.ask,
+                sigma_daily=ctx.sigma_daily,
+                regime=None if self.regimes is None else self.regimes(bar, ctx),
+                position_lots=ctx.account.position_lots,
+            )
+            self.records.extend(decision.records)
+            intents = decision.intents
+        self.engine.observe_spread(ctx.now, bar.ask_close - bar.bid_close)
+        return intents
+
+    def audit(self, ledger: pd.DataFrame) -> pd.DataFrame:
+        """Every fill of `ledger` traced to its order, decision, intent, record and forecasts.
+
+        One row per fill: the ids along the chain, the decision's approval and profile version,
+        the intent's reason (non-empty for the engine's own exits: time stop, weekend, kill switch)
+        and, for a signal's intent, the record's outcome and its forecasts' ids and calibration.
+        """
+        records = {r.record_id: r for r in self.records}
+        forecasts = {f.forecast_id: f for f in self.forecasts}
+        intents = ledger.loc[ledger["kind"] == "intent"].set_index("intent_id")
+        decisions = ledger.loc[ledger["kind"] == "decision"].set_index("decision_id")
+        orders = ledger.loc[ledger["kind"] == "order"].set_index("order_id")
+        rows = []
+        for fill in ledger.loc[ledger["kind"] == "fill"].to_dict("records"):
+            intent = intents.loc[fill["intent_id"]]
+            decision = decisions.loc[fill["decision_id"]]
+            signal_id = json.loads(str(intent["detail"]))["signal_id"]
+            record = records.get(signal_id) if signal_id is not None else None
+            linked = [] if record is None else list(record.candidate.forecast_ids)
+            rows.append(
+                {
+                    "fill_id": fill["fill_id"],
+                    "role": fill["role"],
+                    "order_id": fill["order_id"],
+                    "order_known": fill["order_id"] in orders.index,
+                    "decision_id": fill["decision_id"],
+                    "approved": bool(decision["approved"]),
+                    "config_version": json.loads(str(decision["detail"]))["config_version"],
+                    "intent_id": fill["intent_id"],
+                    "intent_reason": intent["reason"],
+                    "signal_id": signal_id,
+                    "record_outcome": None if record is None else record.outcome,
+                    "forecast_ids": tuple(linked),
+                    "forecasts_known": all(f in forecasts for f in linked),
+                    "calibrated": all(forecasts[f].calibrated for f in linked if f in forecasts),
+                }
+            )
+        return pd.DataFrame(rows)

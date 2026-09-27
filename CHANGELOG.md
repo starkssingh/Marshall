@@ -609,6 +609,13 @@ IDs from `docs/specs/development-plan.md`.
   unqualified EV are rejected with reasons; the best remaining candidate becomes the one
   `TradeIntent`; a `SignalRecord` for every candidate. Tested on hand-computed stops, costs and
   EV. ADR 0052.
+- SIGNAL-005: the signal engine in the event backtester (`xq.backtest.strategies.SignalStrategy`)
+  — forecasts made at each decision go through the signal engine, the risk engine and the
+  simulated broker; every forecast and signal record is kept, and `SignalStrategy.audit` traces
+  every fill through its order, risk decision and intent to its record and forecasts. A
+  forecast-to-fill run on synthetic quotes with a causal stub forecaster (declared calibrated,
+  not a model) traces every fill, and with the stub uncalibrated nothing reaches the risk engine.
+  ADR 0052.
 
 ### Changed
 
