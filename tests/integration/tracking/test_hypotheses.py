@@ -98,6 +98,27 @@ def test_invalid_hypotheses_are_refused(
         load_hypothesis(write(tmp_path, **changes), cfg)
 
 
+@pytest.mark.parametrize("family", ["momentum", "baselines", "descriptive_x", "descriptives"])
+def test_a_zero_trial_budget_is_refused_outside_the_descriptive_family(
+    cfg: AppConfig, tmp_path: Path, family: str
+) -> None:
+    with pytest.raises(ConfigError, match="greater than 0 unless the family is 'descriptive'"):
+        load_hypothesis(write(tmp_path, family=family, trial_budget=0), cfg)
+    doc, _ = load_hypothesis(write(tmp_path, family=family, trial_budget=1), cfg)
+    assert doc.trial_budget == 1
+
+
+def test_a_descriptive_hypothesis_may_have_a_zero_trial_budget(
+    cfg: AppConfig, engine: Engine, tmp_path: Path
+) -> None:
+    doc, _ = load_hypothesis(write(tmp_path, family="descriptive", trial_budget=0), cfg)
+    assert (doc.family, doc.trial_budget) == ("descriptive", 0)
+    ref = register_hypothesis(cfg, engine, tmp_path / "H-0001.yaml")
+    assert get_hypothesis(engine, ref.hypothesis_id).family_id == "descriptive"
+    with pytest.raises(ConfigError, match="greater than or equal to 0"):
+        load_hypothesis(write(tmp_path, family="descriptive", trial_budget=-1), cfg)
+
+
 def test_file_name_must_match_the_id(cfg: AppConfig, tmp_path: Path) -> None:
     path = write(tmp_path)
     renamed = path.rename(tmp_path / "H-0002.yaml")

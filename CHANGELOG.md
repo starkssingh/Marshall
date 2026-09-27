@@ -396,6 +396,9 @@ IDs from `docs/specs/development-plan.md`.
   whole-window median used data from after the entry (ADR 0040).
 - EDA-006 per-session admission is report-only (ADR 0041): the admission list and
   `config/horizons.yaml` admit on the overall ratio only; the table's per-row flag is `below_bound`.
+- EXP-002 accepts `trial_budget: 0` only for hypotheses of family `descriptive` (the H-0000
+  prerequisite, ADR 0041, ADR 0042); every other family still needs a budget of at least one, and
+  negative budgets are refused. H-0000 itself is not written or registered yet (C-16).
 - BASE-005 H-0001 draft revised at the owner's request (ADR 0035, C-15), still unregistered: rule
   baselines are evaluated over the full pre-vault history after each rule's warm-up, with the
   fold-aligned version stored for comparison; they run on 1d and 1h signal bars (not 15m), so the

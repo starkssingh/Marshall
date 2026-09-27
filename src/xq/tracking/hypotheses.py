@@ -10,6 +10,10 @@ Validation enforces the research standards the document must meet: a falsificati
 trial budget, a discovery window that ends before the evaluation window starts (ideas found by
 looking at data are tested on later data), and an evaluation window that ends at or before
 ``vault.start`` (the vault is only for the release gate).
+
+The trial budget is at least one, except in the ``descriptive`` family: a descriptive hypothesis
+(the standing hypothesis H-0000 that EDA runs belong to, ADR 0041) evaluates no trading
+configuration, so its budget may be zero (ADR 0042).
 """
 
 from __future__ import annotations
@@ -20,7 +24,15 @@ from pathlib import Path
 from typing import Any
 
 import yaml
-from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, ValidationError, field_validator
+from pydantic import (
+    AwareDatetime,
+    BaseModel,
+    ConfigDict,
+    Field,
+    ValidationError,
+    field_validator,
+    model_validator,
+)
 from sqlalchemy import Engine
 
 from xq.core.config import AppConfig
@@ -35,6 +47,8 @@ from xq.tracking.registry import (
 )
 
 HYPOTHESIS_ID = re.compile(r"^H-\d{4}$")
+#: The only family whose trial budget may be zero (ADR 0042).
+DESCRIPTIVE_FAMILY = "descriptive"
 
 
 class Window(BaseModel):
@@ -70,9 +84,18 @@ class HypothesisDoc(BaseModel):
     primary_metric: str = Field(min_length=1)
     success_criteria: list[str] = Field(min_length=1)
     falsification_criteria: list[str] = Field(min_length=1)
-    trial_budget: int = Field(gt=0)
+    trial_budget: int = Field(ge=0)
     planned_tests: list[str] = Field(min_length=1)
     slices: list[str] = []
+
+    @model_validator(mode="after")
+    def _budget(self) -> HypothesisDoc:
+        if self.trial_budget == 0 and self.family != DESCRIPTIVE_FAMILY:
+            raise ValueError(
+                f"trial_budget must be greater than 0 unless the family is "
+                f"{DESCRIPTIVE_FAMILY!r} (family {self.family!r})"
+            )
+        return self
 
     def check_windows(self, vault_start: datetime) -> None:
         """Raise ConfigError unless discovery precedes evaluation, which must avoid the vault."""
