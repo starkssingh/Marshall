@@ -79,7 +79,7 @@ def test_shared_market_order_strategies_reconcile_within_tolerance(
     event, result = run_both(RULES[name], q, costs=PLACEHOLDER, capital=capital, sigma=sigma)
     assert result.passed
     assert result.within_tolerance
-    assert result.max_abs_difference <= 0.05 * result.total_costs
+    assert result.max_abs_difference_after_sizing <= 0.05 * result.total_costs
     assert result.explained
     assert result.max_abs_residual < 0.01  # the mechanics agree to the cent on identical orders
     assert set(result.causes["cause"]) <= {"match", "sizing"}
@@ -104,7 +104,13 @@ def test_every_sizing_difference_is_itemized_and_accounts_for_the_gap() -> None:
     np.testing.assert_allclose(
         daily["difference"], daily["execution_effect"] + daily["residual"], atol=1e-9
     )
+    np.testing.assert_allclose(
+        daily["difference"], daily["sizing_effect"] + daily["difference_after_sizing"], atol=1e-9
+    )
     np.testing.assert_allclose(daily["residual"], 0.0, atol=0.01)
+    # only sizing differs here, so the sized screen is the event tier to the cent
+    np.testing.assert_allclose(daily["difference_after_sizing"], 0.0, atol=0.01)
+    assert result.max_abs_sizing_effect > 1.0
 
 
 def test_missed_and_closed_decisions_match_across_tiers() -> None:
@@ -134,7 +140,9 @@ def test_event_only_rules_are_explained_even_beyond_the_tolerance() -> None:
     assert result.max_abs_residual < 0.01
     events = result.decisions.loc[result.decisions["cause"] == "event rule", "detail"]
     assert events.str.startswith("refused: entry blackout").any()
-    assert not result.within_tolerance  # a refused entry changes the P&L far beyond 5 % of costs
+    # a refused entry changes the P&L far beyond 5 % of costs, even after the sizing effect
+    assert result.max_abs_difference_after_sizing > 0.05 * result.total_costs
+    assert not result.within_tolerance
     assert not result.passed
 
 
@@ -182,14 +190,13 @@ def test_an_exposure_schedule_replays_the_screeners_positions(capital: float) ->
     assert len(event.fills) > 10
     assert result.explained
     assert set(result.causes["cause"]) <= {"match", "sizing"}
-    if capital > CAPITAL:
-        assert result.passed
-    else:
+    # the tolerance applies after the sizing effect (ADR 0050), so small accounts pass too
+    assert result.passed
+    np.testing.assert_allclose(result.daily["difference"], result.daily["sizing_effect"], atol=0.01)
+    if capital == CAPITAL:
         # 0.5 of 100,000 USD is 0.25 lots, so one 0.01-lot rounding step is 4 % of the
-        # position: the sizing effect alone may exceed 5 % of costs, and it is all of the gap
-        np.testing.assert_allclose(
-            result.daily["difference"], result.daily["execution_effect"], atol=0.01
-        )
+        # position: the sizing effect alone exceeds 5 % of costs, the rest is within it
+        assert result.max_abs_sizing_effect > 0.05 * result.total_costs
 
 
 def test_only_market_orders_can_be_reconciled() -> None:

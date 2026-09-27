@@ -656,6 +656,12 @@ IDs from `docs/specs/development-plan.md`.
 - `CLAUDE.md` no longer marks `docs/specs/project-instructions.md` as missing: the owner committed
   it together with the revised development plan (backlog tables back in section 9, STAT-008
   dependencies, Sprint 13 ordering, critical-path note).
+- BT-009 reconciliation applies the 5 %-of-costs tolerance after the separately reported sizing
+  effect (owner's decision, ADR 0050): a *sized* screen replays the screener's decisions with the
+  event tier's lots where only sizing differs, `sizing_effect` = sized - screener and
+  `within_tolerance` compares |event - sized| with the tolerance; event-only rules and their
+  follow-ons stay inside the check, and the mechanical residual must still be below one cent.
+  An exposure schedule on 100,000 USD now passes, its sizing effect alone above 5 % of costs.
 
 ### Fixed
 

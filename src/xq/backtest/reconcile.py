@@ -2,27 +2,28 @@
 
 A market-order strategy — the same target exposures at the same decision times — is run through
 both tiers (`run_vectorized` and `run_event_backtest`, typically with `ExposureStrategy` or
-`RuleStrategy`), and `reconcile` compares them:
+`RuleStrategy`), and `reconcile` compares their daily equity. The difference is taken apart in
+three steps, each by replaying positions through the screener:
 
-1. **Equity.** The daily equity of the event tier minus the screener's. The tiers agree within
-   tolerance when the largest absolute daily difference is at most ``tolerance`` (default 5 %,
-   ``backtest.event.reconcile_tolerance``) of the screener's total costs.
-2. **Every difference explained.** The difference is split in two by replaying the event tier's
-   *executed* positions through the screener (the *adjusted* screen): each event fill becomes the
-   exposure that makes the screener trade exactly its lots at the same quote.
+1. **Sizing** (the *sized* screen). The screener's own decisions, with the event tier's lots
+   wherever both tiers filled a decision on the same quote, and without the trades the event
+   tier's lot rounding made unnecessary. ``sizing_effect`` = sized - screener: the event tier
+   sizes through the risk engine at the decision's prices and rounds down to the lot step; the
+   screener sizes fractional lots of the requested exposure at the fill's mid. It is reported
+   separately.
+2. **Tolerance, after sizing** (ADR 0050). The tiers agree within tolerance when the largest
+   absolute daily ``difference_after_sizing`` = event - sized is at most ``tolerance`` (default
+   5 %, ``backtest.event.reconcile_tolerance``) of the screener's total costs. Event-only rules
+   (entry blackouts, risk rejections, weekend exits) and their follow-ons stay inside this check.
+3. **Every difference explained.** The event tier's *executed* positions replayed through the
+   screener (the *adjusted* screen) split the whole difference into ``execution_effect`` =
+   adjusted - screener, itemized per decision with a cause (``decisions``: sizing, an event-tier
+   rule, a follow-on of an earlier difference), and ``residual`` = event - adjusted, what the fill,
+   cost, financing and accounting mechanics disagree on for identical orders. The residual must be
+   zero up to rounding (``residual_tolerance_usd``, one cent by default).
 
-   - ``execution_effect`` = adjusted - screener: what the event tier executed differently. Each
-     decision is classified (``decisions``) and every difference gets a cause: sizing (the event
-     tier sizes at the decision's mid and rounds down to the lot step through the risk approver;
-     the screener sizes fractional lots at the fill's mid), an event-tier rule the screener does
-     not have (an entry blackout, a margin rejection, a weekend exit) or a follow-on of an earlier
-     difference (the tiers then hold different positions).
-   - ``residual`` = event - adjusted: what the fill, cost, financing and accounting mechanics
-     disagree on for identical orders. It must be zero up to rounding
-     (``residual_tolerance_usd``, one cent by default).
-
-   The comparison is *explained* when no decision is left without a cause and the residual is
-   within its tolerance. `Reconciliation.passed` requires both that and the tolerance of step 1.
+The comparison is *explained* when no decision is left without a cause and the residual is within
+its tolerance; `Reconciliation.passed` requires that and the tolerance of step 2.
 
 Only market orders can be reconciled: the screener has no stops, targets or resting orders.
 """
@@ -45,9 +46,9 @@ COST_COLUMNS = ["spread_cost", "slippage_cost", "commission", "financing"]
 CAUSES = {
     "match": "both tiers executed the decision identically (or both skipped it)",
     "sizing": (
-        "same fill quote, different lots: the event tier sizes at the mid known at the decision "
-        "and rounds down to the lot step (risk approver); the screener sizes fractional lots at "
-        "the fill's mid"
+        "same fill quote, different lots: the event tier sizes through the risk engine at the "
+        "decision's prices and rounds down to the lot step; the screener sizes fractional lots "
+        "of the requested exposure at the fill's mid"
     ),
     "target unchanged after rounding": (
         "the event tier's rounded target equals its position, so no order was needed"
@@ -69,11 +70,14 @@ class Reconciliation:
     tolerance: float
     tolerance_usd: float
     max_abs_difference: float
+    max_abs_sizing_effect: float
+    max_abs_difference_after_sizing: float
     max_abs_residual: float
     residual_tolerance_usd: float
     within_tolerance: bool
     explained: bool
     screener: BacktestResult
+    sized: BacktestResult
     adjusted: BacktestResult
 
     @property
@@ -123,8 +127,16 @@ def reconcile(
     adjusted = run_vectorized(
         executed, quotes, costs, clock, capital=capital, sigma_1m_bps=sigma_1m_bps
     )
-    daily = _daily(screener, adjusted, event, capital)
     decisions = _decisions(positions, screener, event)
+    sized = run_vectorized(
+        _sized_positions(screener, event, decisions),
+        quotes,
+        costs,
+        clock,
+        capital=capital,
+        sigma_1m_bps=sigma_1m_bps,
+    )
+    daily = _daily(screener, sized, adjusted, event, capital)
     causes = (
         decisions.groupby("cause", sort=False)
         .size()
@@ -133,8 +145,12 @@ def reconcile(
         .assign(explanation=lambda f: f["cause"].map(CAUSES))
     )
     total_costs = float(screener.daily[COST_COLUMNS].to_numpy().sum())
-    max_difference = float(daily["difference"].abs().max()) if len(daily) else 0.0
-    max_residual = float(daily["residual"].abs().max()) if len(daily) else 0.0
+
+    def largest(column: str) -> float:
+        return float(daily[column].abs().max()) if len(daily) else 0.0
+
+    after_sizing = largest("difference_after_sizing")
+    max_residual = largest("residual")
     return Reconciliation(
         daily=daily,
         decisions=decisions,
@@ -142,13 +158,16 @@ def reconcile(
         total_costs=total_costs,
         tolerance=tolerance,
         tolerance_usd=tolerance * total_costs,
-        max_abs_difference=max_difference,
+        max_abs_difference=largest("difference"),
+        max_abs_sizing_effect=largest("sizing_effect"),
+        max_abs_difference_after_sizing=after_sizing,
         max_abs_residual=max_residual,
         residual_tolerance_usd=residual_tolerance_usd,
-        within_tolerance=max_difference <= tolerance * total_costs,
+        within_tolerance=after_sizing <= tolerance * total_costs,
         explained=bool((decisions["cause"] != "unexplained").all())
         and max_residual <= residual_tolerance_usd,
         screener=screener,
+        sized=sized,
         adjusted=adjusted,
     )
 
@@ -161,7 +180,11 @@ def _as_timestamps(quotes: pd.DataFrame) -> pd.DataFrame:
 
 
 def _daily(
-    screener: BacktestResult, adjusted: BacktestResult, event: EventBacktestResult, capital: float
+    screener: BacktestResult,
+    sized: BacktestResult,
+    adjusted: BacktestResult,
+    event: EventBacktestResult,
+    capital: float,
 ) -> pd.DataFrame:
     days = event.daily.index
 
@@ -169,17 +192,48 @@ def _daily(
         # the screener's days start at its first fill; before it, equity is the capital
         return result.daily["equity"].reindex(days).ffill().fillna(capital)
 
-    screen, adjust, events = equity(screener), equity(adjusted), event.daily["equity"]
+    screen, size, adjust = equity(screener), equity(sized), equity(adjusted)
+    events = event.daily["equity"]
     return pd.DataFrame(
         {
             "screener_equity": screen,
             "event_equity": events,
             "difference": events - screen,
+            "sizing_effect": size - screen,
+            "difference_after_sizing": events - size,
             "execution_effect": adjust - screen,
             "residual": events - adjust,
         },
         index=days,
     )
+
+
+def _sized_positions(
+    screener: BacktestResult, event: EventBacktestResult, decisions: pd.DataFrame
+) -> pd.Series:
+    """The screener's own decisions, with the event tier's lots where only sizing differs.
+
+    At a decision both tiers filled on the same quote with different lots, the target becomes the
+    exposure that makes the screener trade the event tier's lots; at one the event tier's lot
+    rounding made unnecessary, the held target is repeated so the screener does not trade.
+    """
+    causes = decisions.set_index("decision_time")["cause"]
+    e_fills = event.fills.set_index("decision_time")
+    s_fills = screener.fills
+    values: list[float] = []
+    held = 0.0
+    for t, target in zip(s_fills["decision_time"], s_fills["target"], strict=True):
+        cause = causes.get(t)
+        if cause == "sizing":
+            fill = e_fills.loc[t]
+            value = float(fill["position_lots"] * fill["mid"] * event.contract_size / event.capital)
+        elif cause == "target unchanged after rounding":
+            value = held
+        else:
+            value = float(target)
+        values.append(value)
+        held = value
+    return pd.Series(values, index=pd.DatetimeIndex(s_fills["decision_time"]), dtype="float64")
 
 
 def _decisions(
