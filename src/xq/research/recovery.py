@@ -31,6 +31,7 @@ _MULTIPLE = "tests/unit/validation/test_multiple_testing.py"
 _PERTURB = "tests/unit/robustness/test_perturb.py"
 _COST_STRESS = "tests/unit/robustness/test_costs_stress.py"
 _BOOTSTRAP = "tests/unit/robustness/test_bootstrap.py"
+_SLICING = "tests/integration/robustness/test_slicing.py"
 
 RECOVERY_TESTS: Mapping[str, tuple[str, ...]] = {
     "ADF": (
@@ -169,6 +170,12 @@ RECOVERY_TESTS: Mapping[str, tuple[str, ...]] = {
     "trade_permutation": (
         f"{_BOOTSTRAP}::test_unordered_trades_sit_anywhere_in_the_permutation_distribution",
         f"{_BOOTSTRAP}::test_clustered_losses_are_at_the_top_of_the_permutation_distribution",
+    ),
+    "pre_registered_slicing": (
+        f"{_SLICING}::test_slices_come_from_the_locked_version_the_run_tested",
+        f"{_SLICING}::test_an_edge_earned_in_one_year_fails_the_single_year_gate",
+        f"{_SLICING}::test_volatility_terciles_find_an_edge_that_lives_in_high_volatility",
+        f"{_SLICING}::test_sessions_follow_dst_and_name_the_overlap",
     ),
 }
 

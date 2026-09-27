@@ -658,6 +658,15 @@ IDs from `docs/specs/development-plan.md`.
   0.85–0.95 for iid, GARCH and AR(1) returns (an iid bootstrap under-covers the AR(1) case), the
   drawdown interval brackets the true drawdown median, unordered trades have uniform
   percentiles and clustered losses sit at the top. ADR 0054.
+- ROB-006: pre-registered slicing (`xq.robustness.slicing`) — the slices are read from the
+  registered, hash-locked text of the hypothesis version a run tested (`run_slices`); a
+  `DeclaredSlices` cannot be built by a caller. Vocabulary: year, volatility tercile (of the
+  daily sigma-hat known at the start of the day) and session (closed trades by entry session,
+  overlaps named, DST by construction); unknown names are refused and regime slices wait for
+  REG-007. Per slice: net P&L, its share, Sharpe and positive days (or trades, mean trade and win
+  rate); the R2 `max_single_year_pnl_share` check. The hypothesis template's slices use the
+  vocabulary. Proven on planted edges: an edge earned in one year fails the gate, an edge in
+  high volatility lands in the high tercile, sessions follow DST. ADR 0054.
 
 ### Changed
 

@@ -151,3 +151,40 @@ simulations (`tests/helpers/strategies.py`) are:
    process, not a prediction interval for the next path. A fresh path's drawdown falls outside
    the 90 % interval about 22 % of the time, because it has its own mean. The distribution of
    future drawdowns under the risk rules is ROB-004's Monte Carlo.
+
+## ROB-006 — pre-registered slicing
+
+1. **Slices come from the locked hypothesis, never from the caller.** `run_slices(engine,
+   run_id)` reads the `slices` field from the registered text of the hypothesis version the
+   run's experiment tests. An edit registered after the run creates a new version and does not
+   change what that run is sliced by. `DeclaredSlices` refuses construction outside the loaders,
+   the same pattern as `OrderIntent`, so a report cannot slice by whatever looks best after the
+   fact. Slices are descriptive: reported, not tested, with no p-values and no trials.
+2. **Vocabulary.** Names are compared in lower case with spaces, hyphens and slashes read as
+   underscores.
+   - `year`: the calendar year of the trading day.
+   - `volatility_tercile`: low, mid or high by the 1/3 and 2/3 quantiles of the sliced days'
+     daily sigma-hat, where each day's value is the one known at its start. The cut points use
+     the whole sliced period. That is an after-the-fact grouping for a report and never feeds a
+     decision, so it is not a full-sample normalization of a feature.
+   - `session`: closed trades by entry session from `config/sessions.yaml`, converted to UTC per
+     date. A configured overlap is named when a trade lies in exactly its sessions; any other
+     combination is joined with `+`; `off_session` otherwise.
+   - A name outside the vocabulary is refused when loaded. A regime slice (any name containing
+     "regime") is a legitimate declaration, refused only when computed until REG-007 provides a
+     causal regime model. The template's `volatility regime` became `volatility tercile`, which
+     is what the plan's ROB-006 lists.
+3. **The single-year gate is always computed.** R2's `max_single_year_pnl_share` (at most 0.50)
+   is a pre-registered gate in `config/gates.yaml`, so it does not depend on the hypothesis
+   declaring a year slice. It is NaN, and so fails, unless total net P&L is positive.
+4. **Known truth.** On planted edges:
+   - P&L earned only in 2022 gives that year more than 80 % of the total and fails the gate; a
+     steady edge gives each of four years about a quarter and passes.
+   - An edge only on high-sigma days puts more than 80 % of the P&L in the high tercile, with
+     the days split in thirds.
+   - A 12:30 UTC entry is London-only in January and in the London–New York overlap in July.
+   - A screened backtest's trades and days add up across the slices to its totals.
+5. **Open point for the owner.** Slice names are checked when the slices are loaded, not when
+   the hypothesis is registered. A typo therefore surfaces only at report time and needs a new
+   hypothesis version. Checking at registration would move the vocabulary into the tracking
+   layer.
