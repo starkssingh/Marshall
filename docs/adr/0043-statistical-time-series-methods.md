@@ -40,7 +40,21 @@ model promoted.
    windows stay inside contiguous runs of the slice, and slices' joint p-values are
    Holm-adjusted. Volatility-regime labels use the trailing volatility known before each return,
    with cut-offs from reference rows the caller names (training or discovery rows).
-7. **Recovery before use.** `xq.research.recovery.RECOVERY_TESTS` names, per method, the tests
+7. **STAT-006.** ARMA(p, q) of 1-bar log returns (= ARIMA(p, 1, q) of log price with drift) by
+   exact maximum likelihood on each training fold only (returns scaled to unit variance for the
+   optimizer); `ar_aic` chooses p by AIC on the training fold. Forecasts of the next h bars' sum
+   filter innovations forward from zero with the fitted parameters, so they are causal by
+   construction. As a walk-forward estimator (`ArmaForecast`) the model reads the decision bar's
+   own return, `log(close / open)`, learns from the training rows' returns (not the targets) and
+   starts its filter at each fold's first test row. `arma_study` runs models and benchmarks
+   (`zero_return`, BASE-001's `random_walk` where the horizon's bar exists) through the runner on
+   identical folds and compares them by Diebold-Mariano on squared errors with h-bar
+   autocovariances; one-sided p-values are Holm-adjusted across horizons per (model, benchmark).
+   **Useful evidence** is a Holm-adjusted p below `alpha` against every benchmark at some horizon;
+   in-sample coefficients (first training fold) are recorded, never promoted. Inside a run each
+   (model, horizon) is one trial on test folds; benchmarks are references, not trials. SARIMA is
+   not built (EDA-004 has found no stable daily cycle on real data yet).
+8. **Recovery before use.** `xq.research.recovery.RECOVERY_TESTS` names, per method, the tests
    that recover a known answer on a simulated process (random walk, AR(1), level shift,
    GARCH(1,1), Ornstein-Uhlenbeck); a test checks that each named test exists. A method without
    an entry must not be used by a report, a board or the sigma-hat selection.

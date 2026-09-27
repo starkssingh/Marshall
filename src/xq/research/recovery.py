@@ -14,6 +14,7 @@ from collections.abc import Mapping
 _STATIONARITY = "tests/unit/research/test_stats_stationarity.py"
 _DEPENDENCE = "tests/unit/research/test_stats_dependence.py"
 _VARIANCE_RATIO = "tests/unit/research/test_stats_variance_ratio.py"
+_ARIMA = "tests/unit/research/test_stats_arima.py"
 
 RECOVERY_TESTS: Mapping[str, tuple[str, ...]] = {
     "ADF": (
@@ -50,6 +51,17 @@ RECOVERY_TESTS: Mapping[str, tuple[str, ...]] = {
     "Chow-Denning": (
         f"{_VARIANCE_RATIO}::test_ou_increments_have_variance_ratios_below_one_matching_theory",
         f"{_VARIANCE_RATIO}::test_chow_denning_size_is_controlled_on_garch_returns",
+    ),
+    "ARMA": (
+        f"{_ARIMA}::test_ar1_with_phi_one_half_is_recovered",
+        f"{_ARIMA}::test_arma11_parameters_are_recovered",
+        f"{_ARIMA}::test_aic_selects_the_order_of_an_ar2",
+        f"{_ARIMA}::test_one_step_forecasts_match_statsmodels_after_burn_in",
+        f"{_ARIMA}::test_forecasts_are_causal",
+    ),
+    "DM": (
+        f"{_ARIMA}::test_walk_forward_ar1_beats_the_benchmarks_on_identical_folds",
+        f"{_ARIMA}::test_iid_returns_give_no_useful_evidence",
     ),
 }
 

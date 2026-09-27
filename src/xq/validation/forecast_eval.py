@@ -23,7 +23,8 @@ of the same targets; lower loss is better.
   of its mean uses the autocovariances up to ``horizon - 1`` (Diebold and Mariano 1995; Newey-West
   weights if that estimate is not positive); with ``harvey`` the statistic is scaled by
   ``sqrt((T + 1 - 2h + h(h - 1) / T) / T)`` and compared with Student's t with ``T - 1`` degrees
-  of freedom (Harvey, Leybourne and Newbold 1997).
+  of freedom (Harvey, Leybourne and Newbold 1997). `diebold_mariano_less` is its one-sided
+  version: the p-value of "a has the lower expected loss".
 - `giacomini_white`: conditional equal predictive ability (Giacomini and White 2006). With
   instruments ``h`` known before the forecast (default: a constant and the lagged loss
   difference), ``T * zbar' Omega^-1 zbar`` for ``z_t = h_(t - horizon) d_t`` is chi-squared with
@@ -249,6 +250,21 @@ def diebold_mariano(
     else:
         p_value = 2 * float(norm.sf(abs(statistic)))
     return ComparisonTest(statistic, p_value, n, mean)
+
+
+def diebold_mariano_less(
+    loss_a: npt.ArrayLike, loss_b: npt.ArrayLike, *, horizon: int = 1
+) -> ComparisonTest:
+    """One-sided Diebold-Mariano test that forecast ``a`` has the lower expected loss.
+
+    The Harvey-corrected statistic of `diebold_mariano`; the p-value is its lower tail under
+    Student's t with ``T - 1`` degrees of freedom (a negative statistic favours ``a``).
+    """
+    test = diebold_mariano(loss_a, loss_b, horizon=horizon, harvey=True)
+    if not math.isfinite(test.statistic):
+        return test
+    p_value = float(student_t.cdf(test.statistic, df=test.n - 1))
+    return ComparisonTest(test.statistic, p_value, test.n, test.mean_difference)
 
 
 def giacomini_white(

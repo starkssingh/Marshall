@@ -395,6 +395,15 @@ IDs from `docs/specs/development-plan.md`.
   Ornstein-Uhlenbeck increments VR(q) is below 1 and matches (1 - phi^q) / (q (1 - phi)), and the
   joint test rejects; on a random walk it does not; its size on GARCH returns stays at most 10 %;
   slices find reversion only where it is. ADR 0043.
+- STAT-006: ARMA walk-forward forecasts (`xq.research.stats.arima`) — ARMA(p, q) of 1-bar log
+  returns by exact maximum likelihood per training fold (AR(p) by AIC for `ar_aic`), causal
+  h-bar forecasts, the `ArmaForecast` estimator for the walk-forward runner, and `arma_study`:
+  every model and benchmark (`zero_return`, `random_walk`) on identical folds, Diebold-Mariano
+  on squared errors (two- and one-sided, `diebold_mariano_less` in `xq.validation.forecast_eval`)
+  with Holm across horizons, "useful evidence" only out of sample, one trial per (model, horizon)
+  inside a run. Recovery: AR(1) with phi = 0.5 and ARMA(1, 1) recovered, AIC finds an AR(2),
+  forecasts match the closed form and statsmodels and are causal, an AR(1) beats both benchmarks
+  after Holm and i.i.d. returns do not. ADR 0043.
 
 ### Changed
 

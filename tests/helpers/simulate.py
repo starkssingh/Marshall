@@ -210,3 +210,48 @@ def garch_path(
             h[t] = omega + (alpha + gamma * (r[t - 1] < 0)) * shock + beta * h[t - 1]
         r[t] = np.sqrt(h[t]) * z[t]
     return r[burn:], h[burn:]
+
+
+def bar_frame(
+    returns: npt.ArrayLike, *, start: str = "2022-01-03", freq: str = "15min"
+) -> pd.DataFrame:
+    """Decision-time-indexed ``open`` / ``close`` of bars whose own log returns are `returns`.
+
+    Each bar opens at the previous close (no gaps); the index is the bars' decision times.
+    """
+    r = np.asarray(returns, dtype=np.float64)
+    log_close = np.cumsum(r)
+    log_open = log_close - r
+    index = pd.date_range(start, periods=len(r), freq=freq, tz="UTC", name="decision_time")
+    return pd.DataFrame(
+        {"open": 2000.0 * np.exp(log_open), "close": 2000.0 * np.exp(log_close)}, index=index
+    )
+
+
+def forward_target(frame: pd.DataFrame, bars: int) -> tuple[pd.Series, pd.Series]:
+    """The sum of the next `bars` bar returns and its ``label_end`` (missing at the end)."""
+    r = np.log(frame["close"] / frame["open"]).to_numpy(np.float64)
+    n = len(r)
+    cumulative = np.r_[0.0, np.cumsum(r)]
+    y = np.full(n, np.nan)
+    y[: n - bars] = cumulative[bars + 1 :] - cumulative[1 : n - bars + 1]
+    ends = pd.Series(pd.NaT, index=frame.index, dtype="datetime64[ns, UTC]")
+    ends.iloc[: n - bars] = frame.index[bars:]
+    return pd.Series(y, index=frame.index), ends
+
+
+def completed_block_columns(frame: pd.DataFrame, bars: int, prefix: str) -> pd.DataFrame:
+    """``<prefix>open`` / ``<prefix>close`` of the latest completed block of `bars` bars.
+
+    Blocks are rows ``[k * bars, (k + 1) * bars)``; a row sees the last block ending at or before it
+    (a context bar joined on availability).
+    """
+    n = len(frame)
+    rows = np.arange(n)
+    block = (rows + 1) // bars - 1  # the last block whose final row is at or before this row
+    known = block >= 0
+    first = np.where(known, block * bars, 0)
+    last = np.where(known, block * bars + bars - 1, 0)
+    opened = np.where(known, frame["open"].to_numpy()[first], np.nan)
+    closed = np.where(known, frame["close"].to_numpy()[last], np.nan)
+    return pd.DataFrame({f"{prefix}open": opened, f"{prefix}close": closed}, index=frame.index)

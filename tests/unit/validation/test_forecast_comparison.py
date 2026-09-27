@@ -10,7 +10,12 @@ import pytest
 from scipy.signal import lfilter
 from scipy.stats import t as student_t
 
-from xq.validation.forecast_eval import diebold_mariano, giacomini_white, model_confidence_set
+from xq.validation.forecast_eval import (
+    diebold_mariano,
+    diebold_mariano_less,
+    giacomini_white,
+    model_confidence_set,
+)
 
 RNG = np.random.default_rng(31)
 
@@ -51,6 +56,19 @@ def test_diebold_mariano_detects_a_better_forecast() -> None:
         return diebold_mariano(RNG.normal(0.3, 1, 200), np.zeros(200)).p_value
 
     assert rejection_rate(one, 300) > 0.9
+
+
+def test_one_sided_diebold_mariano_is_the_lower_tail() -> None:
+    rng = np.random.default_rng(3)
+    better, worse = rng.normal(1.0, 1.0, 800), rng.normal(1.2, 1.0, 800)
+    two = diebold_mariano(better, worse, horizon=2)
+    one = diebold_mariano_less(better, worse, horizon=2)
+    assert one.statistic == two.statistic < 0
+    assert one.p_value == pytest.approx(two.p_value / 2)
+    assert diebold_mariano_less(worse, better, horizon=2).p_value == pytest.approx(
+        1 - two.p_value / 2
+    )
+    assert math.isnan(diebold_mariano_less([1.0], [2.0]).p_value)
 
 
 def test_giacomini_white_has_the_nominal_size_and_sees_conditional_differences() -> None:
