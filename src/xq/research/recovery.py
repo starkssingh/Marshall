@@ -19,6 +19,7 @@ _ESTIMATORS = "tests/unit/research/test_vol_estimators.py"
 _REALIZED = "tests/unit/research/test_vol_realized.py"
 _BENCHMARKS = "tests/unit/research/test_vol_benchmarks.py"
 _GARCH = "tests/unit/research/test_vol_garch.py"
+_EVALUATE = "tests/unit/research/test_vol_evaluate.py"
 
 RECOVERY_TESTS: Mapping[str, tuple[str, ...]] = {
     "ADF": (
@@ -106,6 +107,12 @@ RECOVERY_TESTS: Mapping[str, tuple[str, ...]] = {
         f"{_GARCH}::test_student_t_degrees_of_freedom_are_recovered",
         f"{_GARCH}::test_forecasts_follow_the_garch_recursion_and_its_closed_form",
         f"{_GARCH}::test_forecasts_are_causal_and_reproducible",
+    ),
+    "vol_evaluation": (
+        f"{_EVALUATE}::test_har_and_ewma_are_evaluated_with_qlike_on_identical_folds",
+        f"{_EVALUATE}::test_the_true_variance_ranks_first_and_a_biased_forecast_is_rejected",
+        f"{_EVALUATE}::test_mincer_zarnowitz_matches_ols_with_white_errors",
+        f"{_EVALUATE}::test_regime_cut_offs_come_from_training_rows_only",
     ),
 }
 

@@ -58,3 +58,14 @@ before any real result; changing one afterwards needs an ADR.
    training data, so every test forecast is causal (a test perturbs later rows). On hourly periods
    the models run on deseasonalized returns through `Deseasonalized`. FIGARCH is not built
    (STAT-004, Sprint 8, has not found long memory).
+7. **VOL-005 evaluation on identical folds.** One splitter on the periods' decision times, purged
+   by the target's `label_end`; the target is the RV summed over the horizon; in each fold every
+   model is built fresh, fitted on the training periods and scored on the same test rows (rows
+   where any model or the target is missing are dropped for all and counted); fold-level scores
+   are kept. QLIKE is primary, MSE on variance secondary; Mincer-Zarnowitz with Newey-West errors
+   (h - 1 lags; White's for h = 1) and the Wald test of a = 0, b = 1; Diebold-Mariano on QLIKE
+   against `har` (two-sided and one-sided) and one-sided against the default `ewma_0.94`; the 90 %
+   MCS on QLIKE. Breakdowns by session (labels known in advance) and volatility regime (trailing
+   mean RV with cut-offs from each fold's training rows only). Inside a run each model is one trial
+   on test folds. A recovery test ranks the true GARCH variance first and in the MCS, passes it on
+   Mincer-Zarnowitz and rejects a doubled forecast.

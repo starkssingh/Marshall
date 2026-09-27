@@ -439,6 +439,14 @@ IDs from `docs/specs/development-plan.md`.
   seeded distribution) and fit diagnostics. Recovery: GARCH(1,1), GJR leverage, EGARCH and
   Student-t degrees of freedom recovered within tolerance on simulated data; forecasts match the
   GARCH recursion and its multi-step closed form; causal and reproducible. ADR 0044.
+- VOL-005: volatility evaluation (`xq.research.volatility.evaluate`) — every forecaster on the
+  same walk-forward folds and target (RV summed over the horizon), fitted per fold on training
+  periods only: QLIKE (primary) and MSE, Mincer-Zarnowitz with Newey-West errors, Diebold-Mariano
+  against HAR and the EWMA default, the 90 % Model Confidence Set, fold-level scores, breakdowns
+  by session and by volatility regime (cut-offs from training rows), one trial per model inside a
+  run. Recovery: HAR and EWMA scored with QLIKE on identical folds and refit by hand; the true
+  GARCH variance ranks first, stays in the MCS and passes Mincer-Zarnowitz while a doubled
+  forecast fails. ADR 0044.
 
 ### Changed
 
