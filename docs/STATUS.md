@@ -11,7 +11,7 @@ with the repository, the repository wins.
 ## Current sprint
 
 - **Sprint:** 4 — evaluation spine (branch `sprint-4`, from `main` at `b64f059`).
-- **Next task:** the Sprint 3 review carry-overs below (C-6, C-7), then WF-001.
+- **Next task:** the Sprint 3 review carry-overs below C-7, then WF-001 (C-6 blocked, see below).
 - **Sprint 4 order:** WF-001, WF-006, WF-002, WF-003, BT-001, BT-002, BT-003, BASE-006, VAL-001,
   VAL-002, VAL-005, VAL-007, BASE-001, BASE-002, BASE-005 — synthetic data only.
 - **Hold point:** before VAL-007, the proposed `config/gates.yaml` goes to the owner, and work waits
@@ -26,8 +26,8 @@ with the repository, the repository wins.
 | C-2 | Fill-delay diagnostic: count fills delayed > 5 s in target-build output | Sprint 3 review | Claude | `5ebfa87` |
 | C-3 | Rollover window 16:45–18:15 America/New_York (US release window unchanged) | Sprint 3 review | Claude | `3d141a1` |
 | C-4 | Trial clustering: keep ρ 0.7, require 60 common daily points | Sprint 3 review | Claude | `f15ef30` |
-| C-5 | Trading-time horizons (market-open minutes only) and a `crosses_close` target column; leakage tests and `label_end` checks updated | Sprint 3 review | Claude | `feat(targets): TGT-002 trading-time horizons and crosses_close` (hash recorded in the next commit) |
-| C-6 | Rebuild the Docker image and run the suite inside it (`scipy` added unchecked) | Sprint 3 review | Claude | open |
+| C-5 | Trading-time horizons (market-open minutes only) and a `crosses_close` target column; leakage tests and `label_end` checks updated | Sprint 3 review | Claude | `523821d` |
+| C-6 | Rebuild the Docker image and run the suite inside it (`scipy` added unchecked) | Sprint 3 review | Claude, then owner | open — blocked: image builds in the Claude sandbox need the session proxy's CA inside the build, which is not permitted; owner to choose a route (see open decisions) |
 | C-7 | `resample_causal` must respect availability (latency argument, test with latency > 0) | Sprint 3 review | Claude | open |
 | C-8 | Run `xq validate` on ≥ 1 year of real broker ticks, then the DQ-008 human review | Sprint 2 | Owner (data), then Claude | open — blocked on real data |
 
@@ -42,6 +42,7 @@ with the repository, the repository wins.
 | Research horizon focus | 15m–1d, other | 15m–1d; four horizons kept until EDA-006 (ADR 0026) |
 | Meaning of the `1d` horizon in trading time | 24 market hours (one trading day + 1 h), 23 market hours (one trading day) | 24 market hours, the literal reading of ADR 0026 |
 | Risk budget | per-trade risk, drawdown halt | 0.5 % per trade, halt at 15 % drawdown (plan default) |
+| How to verify the Docker image (C-6) | a CI job that builds a `test` target and runs the suite on GitHub Actions; the owner builds and runs it locally; allow sandbox builds with the proxy CA | none yet; the image was last built in Sprint 1 |
 | Vault | holdout start | `2025-09-25T21:00:00Z`, the last 12 months at project start (fixed) |
 
 ## Provisional assumptions not yet confirmed
@@ -80,7 +81,8 @@ with the repository, the repository wins.
 - Not started, deferred by plan: EXP-005 (conclusions table and research log), EXP-006
   (reproduce), DQ-005 (feed consistency), DATA-011 to DATA-013.
 - The raw-file permission test is skipped when the suite runs as root (it runs in CI).
-- The Docker image has not been rebuilt since `scipy` was added (C-6).
+- The Docker image has not been rebuilt since `scipy` was added (C-6); it cannot be built inside the
+  Claude sandbox without trusting the session proxy's CA in the build, which is not permitted.
 
 ## Status per phase
 
