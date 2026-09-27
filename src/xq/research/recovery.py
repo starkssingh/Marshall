@@ -1,10 +1,14 @@
-"""Recovery tests every Phase 5 and Phase 6 method passes before anything uses it (ADR 0043).
+"""Recovery tests every Phase 5, 6, 16 and 17 method passes before anything uses it (ADR 0043,
+ADR 0054).
 
 The plan requires every statistical and volatility method to recover a known answer on a simulated
-process before it runs on gold. `RECOVERY_TESTS` names, per method, the tests (pytest node ids,
-relative to the repository root) that prove it; a unit test checks that every named test exists,
-and the verdict report (STAT-008) cites them in each method's evidence. A method without an entry
-here must not be used by a report, a board or the sigma-hat selection.
+process before it runs on gold; Sprint 9's validation and robustness methods (VAL-003, VAL-004,
+VAL-006, ROB-001 ... ROB-007) are held to the same rule on simulated strategies with known truth —
+noise-only families, a single-point optimum on noise, a genuine edge. `RECOVERY_TESTS` names, per
+method, the tests (pytest node ids, relative to the repository root) that prove it; a unit test
+checks that every named test exists, and the verdict report (STAT-008) cites them in each method's
+evidence. A method without an entry here must not be used by a report, a board, the sigma-hat
+selection, a validation report or a robustness report.
 """
 
 from __future__ import annotations
@@ -21,6 +25,7 @@ _BENCHMARKS = "tests/unit/research/test_vol_benchmarks.py"
 _GARCH = "tests/unit/research/test_vol_garch.py"
 _EVALUATE = "tests/unit/research/test_vol_evaluate.py"
 _SELECTION = "tests/unit/models/test_volatility_selection.py"
+_PBO = "tests/unit/validation/test_pbo.py"
 
 RECOVERY_TESTS: Mapping[str, tuple[str, ...]] = {
     "ADF": (
@@ -122,6 +127,12 @@ RECOVERY_TESTS: Mapping[str, tuple[str, ...]] = {
         f"{_SELECTION}::test_twelve_null_challengers_promote_in_at_most_about_five_percent_of_samples",
         f"{_SELECTION}::test_ewma_is_kept_end_to_end_when_it_is_the_true_model",
         f"{_SELECTION}::test_sigma_is_served_per_fold_from_training_periods_only",
+    ),
+    "PBO": (
+        f"{_PBO}::test_a_hand_computed_case",
+        f"{_PBO}::test_noise_families_have_a_pbo_near_one_half",
+        f"{_PBO}::test_a_graded_genuine_edge_passes",
+        f"{_PBO}::test_a_single_point_optimum_on_noise_fails",
     ),
 }
 

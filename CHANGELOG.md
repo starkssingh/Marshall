@@ -616,6 +616,12 @@ IDs from `docs/specs/development-plan.md`.
   forecast-to-fill run on synthetic quotes with a causal stub forecaster (declared calibrated,
   not a model) traces every fill, and with the stub uncalibrated nothing reaches the risk engine.
   ADR 0052.
+- VAL-003: probability of backtest overfitting by combinatorially symmetric cross-validation
+  (`xq.validation.pbo.pbo_cscv`) — 16 contiguous blocks by default, C(16, 8) = 12,870 in-sample
+  halves, the in-sample winner's out-of-sample logit rank, PBO, the probability of loss and the
+  degradation slope. Proven on known truth (`tests/helpers/strategies.py`): a hand-computed case,
+  noise families averaging 0.5, a graded genuine edge at or below the R2 limit, a single-point
+  optimum on noise above it; registered in the recovery registry. ADR 0054.
 
 ### Changed
 
