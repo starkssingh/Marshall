@@ -11,7 +11,8 @@ follow are in [`CLAUDE.md`](CLAUDE.md), and decisions are recorded in [`docs/adr
 
 ## Status
 
-Sprints 1 to 5 are merged; Sprint 6 is in review. Sprint 2 (clean ticks, bars and data quality) is implemented and tested
+Sprints 1 to 6 are merged; Sprint 11 is in review (run ahead of Sprints 7-10 while real data is
+pending, ADR 0048). Sprint 2 (clean ticks, bars and data quality) is implemented and tested
 on synthetic data but **not validated**: its quality report must first run on at least one year of
 real broker ticks, followed by the human review (DQ-008); the owner's decisions on its open
 questions are in ADR 0013. Sprint 3 (datasets, leakage harness, experiment registry, forward-return
@@ -26,7 +27,12 @@ research) is build-only too: stationarity, dependence and variance-ratio tests, 
 forecasts, the verdict-report framework, range and realized volatility estimators, EWMA/HAR/GARCH
 forecasters, their evaluation on identical folds and the sigma-hat selection are implemented and
 pass recovery tests on simulated processes; nothing has run on real data and no volatility model
-is promoted. See [`CHANGELOG.md`](CHANGELOG.md) for
+is promoted. Sprint 11 (the event-driven backtester) is implemented and tested on synthetic data
+only: event queue and clock, a broker simulator (brackets, gaps, pessimistic intrabar resolution,
+no fills while closed), FIFO portfolio accounting, a decision ledger linking every order to its
+risk decision, entry blackouts, reconciliation with the screener and a backtest report. Its risk
+approver is a **placeholder that performs no risk checks** until the risk engine (RISK-005,
+Sprint 12). See [`CHANGELOG.md`](CHANGELOG.md) for
 completed backlog tasks and [`docs/STATUS.md`](docs/STATUS.md) for the current sprint, open
 decisions and carry-over items.
 
