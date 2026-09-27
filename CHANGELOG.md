@@ -233,6 +233,14 @@ IDs from `docs/specs/development-plan.md`.
   closing commits, open owner decisions, provisional assumptions, known issues and per-phase
   status; `CLAUDE.md` gains a session protocol (read it after `CLAUDE.md`, keep it current, record
   chat decisions in an ADR and in it the same session, the repository wins over memory).
+- TGT-002 trading-time horizons (ADR 0026, C-5): `MarketClock` (`xq.data.calendar`) counts only
+  market-open time from `config/sessions.yaml`; forward-return horizons and latency are measured
+  on it, so decisions before a close or on a Friday are labelled over the break or weekend and
+  decisions taken while closed are entered at the reopen. Targets gain a boolean `crosses_close`
+  (a market close lies between entry and exit fills). Fill delays stay wall-clock. Target kinds
+  take the clock, and their lookahead is market time plus wall time; the builder reads and gates
+  quotes up to that reach. `forward_return` code version 2 (dataset ids change). Leakage suite:
+  exits are checked against the market-time horizon; property tests for the clock.
 - EXP-004 trial clustering (ADR 0026, C-4): trial returns are summed per trading day (17:00 New
   York roll) before they are correlated, and a pair needs 60 common trading days
   (`experiments.trial_clustering.min_common_days`, replacing `min_overlap: 20`); the correlation

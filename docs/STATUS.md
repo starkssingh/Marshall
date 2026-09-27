@@ -11,7 +11,7 @@ with the repository, the repository wins.
 ## Current sprint
 
 - **Sprint:** 4 — evaluation spine (branch `sprint-4`, from `main` at `b64f059`).
-- **Next task:** the Sprint 3 review carry-overs below (C-5 … C-7), then WF-001.
+- **Next task:** the Sprint 3 review carry-overs below (C-6, C-7), then WF-001.
 - **Sprint 4 order:** WF-001, WF-006, WF-002, WF-003, BT-001, BT-002, BT-003, BASE-006, VAL-001,
   VAL-002, VAL-005, VAL-007, BASE-001, BASE-002, BASE-005 — synthetic data only.
 - **Hold point:** before VAL-007, the proposed `config/gates.yaml` goes to the owner, and work waits
@@ -25,8 +25,8 @@ with the repository, the repository wins.
 | C-1 | Record the Sprint 3 review decisions in one ADR | Sprint 3 review | Claude | `4c67cfe` (ADR 0026) |
 | C-2 | Fill-delay diagnostic: count fills delayed > 5 s in target-build output | Sprint 3 review | Claude | `5ebfa87` |
 | C-3 | Rollover window 16:45–18:15 America/New_York (US release window unchanged) | Sprint 3 review | Claude | `3d141a1` |
-| C-4 | Trial clustering: keep ρ 0.7, require 60 common daily points | Sprint 3 review | Claude | `feat(tracking): EXP-004 trial clustering on trading-day returns` (hash recorded in the next commit) |
-| C-5 | Trading-time horizons (market-open minutes only) and a `crosses_close` target column; leakage tests and `label_end` checks updated | Sprint 3 review | Claude | open |
+| C-4 | Trial clustering: keep ρ 0.7, require 60 common daily points | Sprint 3 review | Claude | `f15ef30` |
+| C-5 | Trading-time horizons (market-open minutes only) and a `crosses_close` target column; leakage tests and `label_end` checks updated | Sprint 3 review | Claude | `feat(targets): TGT-002 trading-time horizons and crosses_close` (hash recorded in the next commit) |
 | C-6 | Rebuild the Docker image and run the suite inside it (`scipy` added unchecked) | Sprint 3 review | Claude | open |
 | C-7 | `resample_causal` must respect availability (latency argument, test with latency > 0) | Sprint 3 review | Claude | open |
 | C-8 | Run `xq validate` on ≥ 1 year of real broker ticks, then the DQ-008 human review | Sprint 2 | Owner (data), then Claude | open — blocked on real data |
@@ -40,6 +40,7 @@ with the repository, the repository wins.
 | Evidence gate thresholds (`config/gates.yaml`) | to be proposed before VAL-007 | none yet |
 | Account currency | USD, other | USD (plan default) |
 | Research horizon focus | 15m–1d, other | 15m–1d; four horizons kept until EDA-006 (ADR 0026) |
+| Meaning of the `1d` horizon in trading time | 24 market hours (one trading day + 1 h), 23 market hours (one trading day) | 24 market hours, the literal reading of ADR 0026 |
 | Risk budget | per-trade risk, drawdown halt | 0.5 % per trade, halt at 15 % drawdown (plan default) |
 | Vault | holdout start | `2025-09-25T21:00:00Z`, the last 12 months at project start (fixed) |
 
@@ -53,6 +54,7 @@ with the repository, the repository wins.
 | Trading calendar | 18:00–17:00 New York, NYSE holidays, 13:30 early closes | ADR 0002, `config/sessions.yaml` | broker schedule |
 | Costs (commission, slippage, financing) | not yet modelled | BT-001 (Sprint 4) | broker terms, paper trading |
 | Execution latency | 1 s (market time from ADR 0026) | `config/targets.yaml` `fwd_returns.v1` | BT-001, paper trading |
+| Decisions taken while the market is closed | entered at the reopen (plus latency) | `xq.targets.returns`, ADR 0026 | owner review of Sprint 4 |
 | Maximum fill delay | 300 s | `fwd_returns.v1` | ADR 0026: kept, provisional |
 | Bar publication latency | 0 ms | `config/base.yaml` `bars` | live feed measurement |
 | Quality thresholds | ratified provisional; one change allowed after DQ-008 | `config/quality.yaml`, ADR 0013 | DQ-008 review |

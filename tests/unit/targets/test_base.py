@@ -1,12 +1,16 @@
 """TGT-001: target specs, long target frames and the schema guard."""
 
+from datetime import date
+
 import pandas as pd
 import pytest
 
+from helpers.pipeline import REPO
 from helpers.targets import STUB_DEFINITION as DEFINITION
 from helpers.targets import STUB_KIND as KIND
 from helpers.targets import stub_compute
-from xq.core.config import TargetSetConfig
+from xq.core.config import TargetSetConfig, load_config
+from xq.data.calendar import MarketClock
 from xq.targets.base import (
     TargetKind,
     TargetLeakError,
@@ -19,17 +23,23 @@ from xq.targets.base import (
 )
 
 T = pd.date_range("2024-03-12 10:00", periods=4, freq="15min", tz="UTC", name="decision_time")
+CLOCK = MarketClock.for_range(
+    load_config("research", config_dir=REPO / "config").sessions_config(),
+    date(2024, 3, 11),
+    date(2024, 3, 13),
+)
 
 
 def test_long_frame_has_one_row_per_decision_and_target() -> None:
     specs = KIND.expand(DEFINITION)
-    frame = compute_targets(KIND, specs, pd.DataFrame(), pd.Series(1.0, index=T))
+    frame = compute_targets(KIND, specs, pd.DataFrame(), pd.Series(1.0, index=T), CLOCK)
     assert frame.index.name == "decision_time"
     assert list(frame.columns) == [
         "target",
         "value",
         "label_start",
         "label_end",
+        "crosses_close",
         "scale",
         "fill_delay_s",
     ]
@@ -43,12 +53,16 @@ def test_long_frame_has_one_row_per_decision_and_target() -> None:
 
 
 def test_kinds_must_return_every_value_column() -> None:
-    def bad(spec: TargetSpec, quotes: pd.DataFrame, sigma: pd.Series) -> pd.DataFrame:
-        return stub_compute(spec, quotes, sigma).drop(columns="label_end")
+    def bad(
+        spec: TargetSpec, quotes: pd.DataFrame, sigma: pd.Series, clock: MarketClock
+    ) -> pd.DataFrame:
+        return stub_compute(spec, quotes, sigma, clock).drop(columns="label_end")
 
     broken = TargetKind("bad", 1, KIND.expand, KIND.sigma, bad, KIND.lookahead)
     with pytest.raises(ValueError, match="label_end"):
-        compute_targets(broken, KIND.expand(DEFINITION), pd.DataFrame(), pd.Series(1.0, index=T))
+        compute_targets(
+            broken, KIND.expand(DEFINITION), pd.DataFrame(), pd.Series(1.0, index=T), CLOCK
+        )
 
 
 @pytest.mark.parametrize("column", ["stub_long_1h", "label_end", "value", "tgt_anything", "fwd_x"])

@@ -41,3 +41,12 @@ added in Sprint 3 without re-checking the image.
   horizon definition.
 - A trading-time label can span a long closure (a holiday weekend); `crosses_close` lets research
   separate or exclude those labels deliberately rather than by accident.
+- A trading day has 23 market hours (18:00–17:00 New York), so the `1d` horizon — 24 hours of
+  market time — ends one hour into the following session. Whether `1d` should instead mean one
+  trading day (23 market hours) is an open owner question (`docs/STATUS.md`); the literal reading
+  is used until then.
+- Implementation: `MarketClock` in `xq.data.calendar` (an existing module of the plan's layout)
+  measures market time from the market hours of `config/sessions.yaml`. Target kinds receive the
+  clock, and a kind's lookahead is split into market time (horizon plus latency) and wall time
+  (the allowed fill delay); the dataset builder reads and quality-gates quotes up to that reach.
+  The last possible decision time now includes the bar publication latency.

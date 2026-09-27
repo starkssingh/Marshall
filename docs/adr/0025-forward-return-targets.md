@@ -1,6 +1,7 @@
 # ADR 0025 — Execution-aware forward-return targets
 
-- **Status:** accepted; latency, fill delay and sigma-hat span are provisional
+- **Status:** accepted; latency, fill delay and sigma-hat span are provisional; decisions 1, 2 and 4
+  amended by ADR 0026 (horizons and latency in trading time)
 - **Date:** 2026-09-26
 - **Tasks:** TGT-002 (on the framework of ADR 0024)
 
@@ -17,10 +18,13 @@ or after t + latency, on the correct side.
 1. **Fills.** Entry at the first usable clean tick at or after `t + latency`; exit at the first at
    or after `t + h + latency`. Long: ask in, bid out. Short: bid in, ask out. Mid: mid both
    ways (research only; never a trade price). `label_start` / `label_end` are the two fill times.
+   Since ADR 0026, `latency` and `h` are counted in market time on the calendar's market clock.
 2. **No stale fills.** If a fill would come more than `max_fill_delay_s` (300 s) after its intended
    time — daily break, weekend, holiday, an excluded day, the end of the data — the target has no
    value. Horizons are calendar durations, so a 1-day label from a Friday has no value rather than
-   a weekend-gap fill.
+   a weekend-gap fill. (Replaced by ADR 0026: horizons count only market-open time, so a Friday
+   label holds over the weekend and is flagged `crosses_close`; the 300 s limit still applies to
+   each fill, measured on the wall clock from the intended fill time.)
 3. **Latency.** `execution_latency_ms` = 1000 (decision to order arrival), a provisional
    assumption, not a broker fact; BT-001's cost model and paper-trading data will replace it via a
    new target set version.

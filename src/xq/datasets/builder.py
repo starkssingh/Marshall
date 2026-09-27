@@ -5,8 +5,9 @@
 - ``features.parquet`` — one row per complete base bar with ``start <= bar_start < end``, keyed by
   ``decision_time_utc`` (the bar's ``available_at``), computed by the spec's feature set;
 - ``targets.parquet`` — if the spec names a target set (TGT-001), the targets of every decision time
-  in long form (``target``, ``value``, ``label_start``, ``label_end``, ``scale``,
-  ``fill_delay_s``), computed from clean ticks after the decision time; a schema guard keeps
+  in long form (``target``, ``value``, ``label_start``, ``label_end``, ``crosses_close``,
+  ``scale``, ``fill_delay_s``), computed from clean ticks after the decision time with horizons
+  in trading time (a `MarketClock` from ``config/sessions.yaml``, ADR 0026); a schema guard keeps
   target columns out of the features;
 - ``spec.yaml`` — the *resolved* spec (bar build, quality run and config digest pinned), from which
   the dataset can be rebuilt with the same id;
@@ -30,11 +31,14 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 import shutil
 from dataclasses import dataclass
+from datetime import timedelta
 from pathlib import Path
 from typing import Any, Literal
 
+import numpy as np
 import pandas as pd
 import pyarrow as pa
 import pyarrow.parquet as pq
@@ -44,8 +48,9 @@ from xq.core.config import AppConfig
 from xq.core.errors import ConfigError, XQError
 from xq.core.ids import new_ulid
 from xq.core.logging import get_logger
-from xq.core.time import ensure_utc, trading_days, utc_now
+from xq.core.time import ensure_utc, trading_day, trading_days, utc_now
 from xq.data.bars import bar_set_id, build_version, exclude_mask
+from xq.data.calendar import NAT_NS, MarketClock
 from xq.data.catalog import Catalog
 from xq.data.clean import rules_version
 from xq.data.raw_store import sha256_file
@@ -60,6 +65,7 @@ from xq.datasets.spec import DatasetSpec, code_versions, dataset_id, dump_spec
 from xq.datasets.vault import check_window, vault_start
 from xq.quality.gate import GateDecision, gate_partitions
 from xq.targets.base import (
+    Lookahead,
     TargetKind,
     TargetSpec,
     check_feature_matrix,
@@ -203,16 +209,21 @@ def build_dataset(cfg: AppConfig, engine: Engine, spec: DatasetSpec, *, git_sha:
     check_window(cfg, spec.start, spec.end)  # research datasets never read the vault
     feature_def = feature_set(spec.feature_set)
     targets_def: tuple[TargetKind, list[TargetSpec]] | None = None
-    lookahead = pd.Timedelta(0)
+    reach: Lookahead | None = None
     if spec.target_set is not None:
         definition = cfg.target_set(spec.target_set.name, spec.target_set.version)
         kind = target_kind(definition.kind)
         targets_def = (kind, kind.expand(definition))
-        lookahead = kind.lookahead(definition)
+        reach = kind.lookahead(definition)
     resolved = resolve_spec(cfg, engine, spec)
     ds_id = dataset_id(resolved, code_versions_for(cfg, resolved))
 
-    inputs, decision = _load_inputs(cfg, engine, resolved, lookahead)
+    clock: MarketClock | None = None
+    quotes_until: pd.Timestamp | None = None
+    if reach is not None:
+        clock = _market_clock(cfg, resolved, reach)
+        quotes_until = _reach_end(clock, reach, _last_decision_bound(cfg, resolved))
+    inputs, decision = _load_inputs(cfg, engine, resolved, quotes_until)
     base = inputs[BASE_INPUT]
     context = FeatureContext(
         resolved.base_timeframe, tuple(resolved.context_timeframes), cfg.sessions_config()
@@ -228,12 +239,14 @@ def build_dataset(cfg: AppConfig, engine: Engine, spec: DatasetSpec, *, git_sha:
     target_names = [t.name for t in targets_def[1]] if targets_def else []
     check_feature_matrix(features, target_names)
     targets: pd.DataFrame | None = None
-    if targets_def is not None and resolved.target_set is not None:
+    if targets_def is not None and resolved.target_set is not None and clock is not None:
         definition = cfg.target_set(resolved.target_set.name, resolved.target_set.version)
         lock_target_set(engine, resolved.target_set.name, resolved.target_set.version, definition)
         excluded = {e.trading_day for e in decision.excluded}
         decisions = pd.DatetimeIndex(features.index)
-        targets = _targets(cfg, resolved, base, decisions, excluded, *targets_def, definition)
+        targets = _targets(
+            cfg, resolved, base, decisions, excluded, *targets_def, definition, clock
+        )
 
     root = datasets_root(cfg)
     root.mkdir(parents=True, exist_ok=True)
@@ -336,13 +349,42 @@ def _verify_files(directory: Path, manifest: dict[str, Any]) -> None:
             )
 
 
+def _last_decision_bound(cfg: AppConfig, spec: DatasetSpec) -> pd.Timestamp:
+    """No decision time of `spec` is later: the last bar's end plus the publication latency."""
+    latency = pd.Timedelta(milliseconds=cfg.bars_config().publication_latency_ms)
+    return ensure_utc(spec.end) + spec.base_timeframe.duration + latency
+
+
+def _market_clock(cfg: AppConfig, spec: DatasetSpec, reach: Lookahead) -> MarketClock:
+    """A market clock from before the first decision until `reach` after the last one."""
+    first = trading_day(ensure_utc(spec.start)) - timedelta(days=1)
+    last = _last_decision_bound(cfg, spec)
+    margin = 7 + 2 * math.ceil(reach.market / pd.Timedelta(days=1))
+    for _ in range(6):
+        clock = MarketClock.for_range(
+            cfg.sessions_config(), first, trading_day(last) + timedelta(days=margin)
+        )
+        if clock.advance(np.array([last.value]), reach.market.value)[0] != NAT_NS:
+            return clock
+        margin *= 2
+    raise ConfigError(f"the calendar has no {reach.market} of market time after {last}")
+
+
+def _reach_end(clock: MarketClock, reach: Lookahead, decision: pd.Timestamp) -> pd.Timestamp:
+    """The latest quote time a target at `decision` may read."""
+    until = int(clock.advance(np.array([decision.value]), reach.market.value)[0])
+    if until == NAT_NS:
+        raise ValueError(f"the market clock does not reach {reach.market} past {decision}")
+    return pd.Timestamp(until, tz="UTC") + reach.wall
+
+
 def _load_inputs(
-    cfg: AppConfig, engine: Engine, spec: DatasetSpec, lookahead: pd.Timedelta
+    cfg: AppConfig, engine: Engine, spec: DatasetSpec, quotes_until: pd.Timestamp | None
 ) -> tuple[dict[str, pd.DataFrame], GateDecision]:
     """Complete bars of every input timeframe, gated by the spec's quality run (DQ-007).
 
-    With targets, the trading days their quotes may reach (up to `lookahead` after the last
-    decision, never past the vault) are gated too.
+    With targets, the trading days their quotes may reach (up to `quotes_until`, never past the
+    vault) are gated too.
     """
     catalog = Catalog(cfg)
     load_start = ensure_utc(spec.start - spec.warmup)
@@ -366,10 +408,8 @@ def _load_inputs(
 
     exclusions = {e.trading_day: e.reason for e in spec.exclusions}
     days = {day for bars in loaded.values() for day in bars["trading_day"]} | set(exclusions)
-    if lookahead > pd.Timedelta(0):
-        ahead_end = min(
-            ensure_utc(spec.end) + spec.base_timeframe.duration + lookahead, vault_start(cfg)
-        )
+    if quotes_until is not None:
+        ahead_end = min(quotes_until, vault_start(cfg))
         if ahead_end > ensure_utc(spec.end):
             ahead = catalog.load_bars(
                 spec.source,
@@ -401,16 +441,18 @@ def _targets(
     kind: TargetKind,
     specs: list[TargetSpec],
     definition: Any,
+    clock: MarketClock,
 ) -> pd.DataFrame:
     """Targets of every decision time, computed month by month from clean ticks.
 
     Sigma-hat is computed on the gated base bars (warm-up included) and taken at each decision
-    time. Quotes are the clean ticks from the decision time up to `lookahead` later (never past
-    the vault), without ticks the bars exclude and without ticks of excluded trading days.
+    time. Quotes are the clean ticks from the decision time up to the kind's lookahead later
+    (never past the vault), without ticks the bars exclude and without ticks of excluded trading
+    days.
     """
     close = pd.Series(base["close"].to_numpy(), index=decision_index(base))
     sigma = kind.sigma(close, definition, spec.base_timeframe.duration).reindex(decisions)
-    lookahead = kind.lookahead(definition)
+    reach = kind.lookahead(definition)
     vault = vault_start(cfg)
     mask = exclude_mask(cfg.bars_config())
     catalog = Catalog(cfg)
@@ -418,7 +460,7 @@ def _targets(
     frames = []
     for _, chunk in sigma.groupby(months, sort=True):
         start = chunk.index[0]
-        end = min(chunk.index[-1] + lookahead + pd.Timedelta(seconds=1), vault)
+        end = min(_reach_end(clock, reach, chunk.index[-1]) + pd.Timedelta(seconds=1), vault)
         if end <= start:  # decisions at the vault start: every fill would need vault quotes
             quotes = pd.DataFrame(
                 {
@@ -434,7 +476,7 @@ def _targets(
                 days = trading_days(pd.DatetimeIndex(ticks["ts_utc"]))
                 usable &= ~pd.Series([d.item() for d in days]).isin(excluded).to_numpy()
             quotes = ticks.loc[usable, ["ts_utc", "bid", "ask"]].reset_index(drop=True)
-        frames.append(compute_targets(kind, specs, quotes, chunk))
+        frames.append(compute_targets(kind, specs, quotes, chunk, clock))
     return pd.concat(frames)
 
 

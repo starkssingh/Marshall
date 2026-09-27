@@ -1,6 +1,10 @@
-"""TGT-002 end to end: a dataset with execution-aware forward-return targets on synthetic ticks."""
+"""TGT-002 end to end: a dataset with execution-aware forward-return targets on synthetic ticks.
+
+Horizons are trading time (ADR 0026): label windows are checked on the market clock.
+"""
 
 from collections.abc import Iterator
+from datetime import date
 from pathlib import Path
 
 import numpy as np
@@ -12,8 +16,10 @@ from typer.testing import CliRunner
 
 from helpers.datasets import dataset_spec, validated_pipeline
 from helpers.pipeline import REPO, config
+from helpers.ticks import dense_ticks, write_mt5
 from xq.cli.main import app
 from xq.core.config import AppConfig
+from xq.data.calendar import MarketClock
 from xq.data.catalog import Catalog
 from xq.datasets.builder import build_dataset, load_dataset
 from xq.datasets.spec import load_spec
@@ -21,6 +27,14 @@ from xq.targets.base import target_values
 
 FWD = {"name": "fwd_returns", "version": "v1"}
 S = pd.Timedelta(seconds=1)
+DELAY = pd.Timedelta(seconds=300)
+CLOCK = MarketClock.for_range(config(REPO).sessions_config(), date(2024, 3, 10), date(2024, 3, 29))
+
+
+def advance(times: pd.DatetimeIndex, duration: pd.Timedelta) -> pd.DatetimeIndex:
+    """Instants `duration` of market time after `times`."""
+    stamps = times.as_unit("ns").to_numpy("datetime64[ns]").view("int64")
+    return pd.DatetimeIndex(pd.to_datetime(CLOCK.advance(stamps, duration.value), utc=True))
 
 
 @pytest.fixture(scope="module")
@@ -68,27 +82,62 @@ def test_values_match_a_hand_computation_from_ticks(cfg: AppConfig, targets: pd.
     assert normalized["scale"] > 0
 
 
-def test_label_windows_are_bounded_and_markets_closures_give_no_label(
-    targets: pd.DataFrame,
-) -> None:
+def test_label_windows_follow_trading_time(targets: pd.DataFrame) -> None:
     for horizon in ("15m", "1h", "4h", "1d"):
         one = target_values(targets, f"fwd_ret_mid_{horizon}")
         known = one["value"].notna()
         assert known.any()
-        decision = one.index[known]
-        assert (one.loc[known, "label_start"] >= decision + S).all()
-        limit = pd.Timedelta(horizon) + S + pd.Timedelta(seconds=300)
-        assert (one.loc[known, "label_end"] - decision <= limit).all()
+        decision = pd.DatetimeIndex(one.index[known])
+        entry, exit_ = advance(decision, S), advance(decision, pd.Timedelta(horizon) + S)
+        starts = pd.DatetimeIndex(one.loc[known, "label_start"])
+        ends = pd.DatetimeIndex(one.loc[known, "label_end"])
+        assert ((starts >= entry) & (starts - entry <= DELAY)).all()
+        assert ((ends >= exit_) & (ends - exit_ <= DELAY)).all()
+        assert one.loc[known, "crosses_close"].any()  # some hold over the daily break
+        assert not one.loc[~known, "crosses_close"].any()
+    # Tuesday 16:00 EDT, 1 hour: the exit comes 1 second after Tuesday's 18:00 EDT reopen.
+    held = target_values(targets, "fwd_ret_mid_1h").loc[pd.Timestamp("2024-03-12 20:00", tz="UTC")]
+    assert np.isfinite(held["value"])
+    assert held["crosses_close"]
+    assert held["label_end"] >= pd.Timestamp("2024-03-12 22:00:01", tz="UTC")
     daily = target_values(targets, "fwd_ret_mid_1d")
-    thursday = pd.Timestamp("2024-03-14 14:00", tz="UTC")
+    assert np.isfinite(daily.loc[pd.Timestamp("2024-03-14 14:00", tz="UTC"), "value"])
+    # The data ends at the Friday close, so a Friday 1d label has no exit quote.
+    assert np.isnan(daily.loc[pd.Timestamp("2024-03-15 14:00", tz="UTC"), "value"])
+
+
+def test_friday_decisions_are_labelled_over_the_weekend(tmp_path: Path) -> None:
+    ticks_dir = tmp_path / "ticks"
+    ticks_dir.mkdir()
+    ticks = dense_ticks("2024-03-12 22:00", "2024-03-19 21:00", seed=23, mean_interval_s=15)
+    write_mt5(ticks, ticks_dir / "XAUUSD_weekend.csv")
+    cfg = config(tmp_path)
+    engine = validated_pipeline(cfg, ticks_dir)
+    spec = dataset_spec(target_set=FWD, start="2024-03-14T00:00:00Z", end="2024-03-18T12:00:00Z")
+    targets = load_dataset(cfg, build_dataset(cfg, engine, spec, git_sha="t").dataset_id, "targets")
+    engine.dispose()
+
     friday = pd.Timestamp("2024-03-15 14:00", tz="UTC")
-    assert np.isfinite(daily.loc[thursday, "value"])
-    assert np.isnan(daily.loc[friday, "value"])  # the exit falls on the weekend
-    assert np.isnan(
-        target_values(targets, "fwd_ret_mid_1h").loc[
-            pd.Timestamp("2024-03-12 20:00", tz="UTC"), "value"
-        ]
-    )  # the exit falls in the daily break
+    daily = target_values(targets, "fwd_ret_long_1d").loc[friday]
+    assert np.isfinite(daily["value"])
+    assert daily["crosses_close"]
+    # 7 market hours on Friday, then 17 after the Sunday 18:00 EDT open: Monday 15:00 UTC.
+    assert daily["label_end"] >= pd.Timestamp("2024-03-18 15:00:01", tz="UTC")
+    assert daily["label_end"] - pd.Timestamp("2024-03-18 15:00:01", tz="UTC") <= DELAY
+
+    pre_close = target_values(targets, "fwd_ret_mid_15m").loc[
+        pd.Timestamp("2024-03-15 20:45", tz="UTC")
+    ]  # Friday 16:45 EDT: the 15 minutes end at the close, the exit is the Sunday reopen
+    assert np.isfinite(pre_close["value"])
+    assert pre_close["crosses_close"]
+    assert pre_close["label_end"] >= pd.Timestamp("2024-03-17 22:00:01", tz="UTC")
+
+    at_close = target_values(targets, "fwd_ret_mid_15m").loc[
+        pd.Timestamp("2024-03-15 21:00", tz="UTC")
+    ]  # decided at the Friday close: entered at the Sunday reopen, no close in the holding period
+    assert np.isfinite(at_close["value"])
+    assert at_close["label_start"] >= pd.Timestamp("2024-03-17 22:00:01", tz="UTC")
+    assert not at_close["crosses_close"]
 
 
 def test_manifest_reports_labels_with_late_fills(cfg: AppConfig, engine: Engine) -> None:
