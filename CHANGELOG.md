@@ -272,6 +272,11 @@ IDs from `docs/specs/development-plan.md`.
   MSE, MAE, QLIKE, and `loss_series` per-observation losses for Diebold–Mariano tests; matches the
   scikit-learn documentation examples and scipy's Mann–Whitney statistic. Walk-forward fold
   metrics and validation selection now use it.
+- VAL-001: Sharpe inference (`xq.validation.sharpe`) — per-period Sharpe ratio with i.i.d.
+  (Lo), non-normal (Mertens) and GMM/Newey–West standard errors, Lo's eta(q) annualization
+  factor, stationary-bootstrap percentile interval and minimum track record length. Verified by
+  closed forms and Monte Carlo on normal, skewed and AR(1) returns (no published table was
+  reproduced for this task). ADR 0031.
 
 ### Changed
 
