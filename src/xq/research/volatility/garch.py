@@ -17,7 +17,8 @@ kept in `diagnostics`.
 
 **Forecast.** With the fitted parameters fixed, the conditional variance is filtered over the
 periods passed and the variance of the next h periods' summed return is the sum of the h-step
-forecasts, times the scale squared. GARCH and GJR use analytic multi-step forecasts; EGARCH has
+forecasts, times the scale squared (a missing return counts as a zero shock). GARCH and GJR use
+analytic multi-step forecasts; EGARCH has
 them only one step ahead, so beyond it they are simulated (``simulations`` paths, from a
 distribution seeded through `xq.core.seeds`). The recursion starts from arch's backcast of the
 first 75 periods passed, so forecasts from the 75th period on use no later data; in walk-forward
