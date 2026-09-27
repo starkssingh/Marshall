@@ -14,10 +14,12 @@ decision time t comes with:
   seconds (missing without a label); `fill_delay_report` summarizes it for build output.
 
 Horizons are trading time: kinds receive a `MarketClock` and count only market-open time
-(ADR 0026). Targets are stored apart from features, in long form (one row per decision time and
-target). The schema guard `check_feature_matrix` refuses any target column in a feature matrix. A
-target set's definition is hash-locked in ``target_sets`` the first time it is used: changing a
-definition requires a new version.
+(ADR 0026). `market_horizon` turns a horizon label into market time: ``<n>d`` is n regular
+trading days (23 market hours each for the 18:00-17:00 New York session), other labels are market
+time as written (ADR 0032). Targets are stored apart from features, in long form (one row per
+decision time and target). The schema guard `check_feature_matrix` refuses any target column in
+a feature matrix. A target set's definition is hash-locked in ``target_sets`` the first time it is
+used: changing a definition requires a new version.
 """
 
 from __future__ import annotations
@@ -31,7 +33,7 @@ from typing import Any
 import pandas as pd
 from sqlalchemy import Engine
 
-from xq.core.config import PriceRef, TargetSetConfig
+from xq.core.config import TRADING_DAYS_HORIZON, PriceRef, TargetSetConfig
 from xq.core.errors import ConfigError, XQError
 from xq.core.time import utc_now
 from xq.data.calendar import MarketClock
@@ -76,6 +78,14 @@ class Lookahead:
     wall: pd.Timedelta
 
 
+def market_horizon(label: str, trading_day: pd.Timedelta) -> pd.Timedelta:
+    """Market time of a horizon label: ``<n>d`` is n times `trading_day`, others as written."""
+    days = TRADING_DAYS_HORIZON.match(label)
+    if days:
+        return int(days["days"]) * trading_day
+    return pd.Timedelta(label)
+
+
 TargetFn = Callable[[TargetSpec, pd.DataFrame, pd.Series, MarketClock], pd.DataFrame]
 SigmaFn = Callable[[pd.Series, TargetSetConfig, pd.Timedelta], pd.Series]
 
@@ -87,22 +97,24 @@ class TargetKind:
     Attributes:
         name: Kind name used in ``config/targets.yaml``.
         code_version: Part of every dataset id that uses the kind.
-        expand: Target specs of a target set definition (validates its params).
+        expand: ``expand(definition, trading_day)``: target specs of a target set definition
+            (validates its params), with horizons in market time (`market_horizon`).
         sigma: ``sigma(close, definition, bar)``: volatility rate per square-root minute at each
             decision time, from the base close series (indexed by decision time) and the base
             bar length; must be causal. A kind scales it to a horizon h by sqrt(h in minutes).
         compute: ``compute(spec, quotes, sigma, clock)`` returning `VALUE_COLUMNS` indexed by
             the decision times of `sigma`; `quotes` has ``ts_utc`` (tz-aware), ``bid`` and
             ``ask``; `clock` measures horizons in trading time and covers every decision time.
-        lookahead: How far after a decision time the kind may read quotes.
+        lookahead: ``lookahead(definition, trading_day)``: how far after a decision time the
+            kind may read quotes.
     """
 
     name: str
     code_version: int
-    expand: Callable[[TargetSetConfig], list[TargetSpec]]
+    expand: Callable[[TargetSetConfig, pd.Timedelta], list[TargetSpec]]
     sigma: SigmaFn
     compute: TargetFn
-    lookahead: Callable[[TargetSetConfig], Lookahead]
+    lookahead: Callable[[TargetSetConfig, pd.Timedelta], Lookahead]
 
 
 def definition_hash(definition: TargetSetConfig) -> str:

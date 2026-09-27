@@ -8,11 +8,15 @@ into fills, daily P&L and trades:
   mid price of its fill; while the target is unchanged, the lots are unchanged (no rebalancing).
   This is a research screener: the event-driven tier (BT-004+) routes orders through the risk
   engine, which sizes them.
-- **Fills** happen at the first quote at or after ``latency`` of *market time* after the decision
-  (a decision taken while the market is closed fills after the reopen), on the correct side —
-  buy at the ask, sell at the bid — plus slippage. Never at the signal bar's close, never at mid.
-  If that quote comes more than ``max_fill_delay`` after the intended time, the trade is missed and
-  the position stays; the next decision tries again from the position actually held.
+- **Fills** happen at the first quote at or after ``latency`` of *market time* after the decision,
+  on the correct side — buy at the ask, sell at the bid — plus slippage. Never at the signal bar's
+  close, never at mid. If that quote comes more than ``max_fill_delay`` after the intended time,
+  the trade is missed and the position stays; the next decision tries again from the position
+  actually held.
+- **Decisions taken while the market is closed** (the 17:00 close itself, the daily break,
+  weekends, holidays) place no order at all — no entry, no exit, no change (ADR 0032). The
+  position held stays until the next decision taken while the market is open; the skipped
+  decisions that would have traded are reported in ``closed``.
 - **Costs**: the half-spread against mid is paid by each fill; slippage and commission come from
   the cost model; financing is charged at every rollover on the lots held over it.
 - **Days** are trading days (17:00 New York roll) with quotes. Positions are marked at the mid of
@@ -22,6 +26,11 @@ into fills, daily P&L and trades:
 - **Trades** are holding episodes: from leaving flat (or flipping side) to returning to flat (or
   flipping), with their net P&L including costs and financing. An episode still open at the end is
   marked at the last mid and flagged.
+
+`required_quotes` picks the only quotes a screen of given decision times can read — the first
+quote at or after each intended fill time, the last quote before every trading-day end and every
+rollover, and the last quote — so long histories can be screened from a small subset with
+exactly the same result (tested).
 """
 
 from __future__ import annotations
@@ -57,15 +66,22 @@ DAILY_COLUMNS = (
 
 @dataclass(frozen=True)
 class BacktestResult:
-    """Fills, missed decisions, daily P&L and trades of one screened position series."""
+    """Fills, skipped decisions, daily P&L and trades of one screened position series.
+
+    `missed`: decisions whose fill would have come too late; `closed`: decisions taken while the
+    market was closed, which place no order. `cost_basis` is the cost model's label for net
+    results ("screening, placeholder costs" while it is provisional); reports print it.
+    """
 
     fills: pd.DataFrame
     missed: pd.DatetimeIndex
+    closed: pd.DatetimeIndex
     daily: pd.DataFrame
     trades: pd.DataFrame
     financing: pd.Series
     capital: float
     contract_size: float
+    cost_basis: str
 
 
 def run_vectorized(
@@ -103,6 +119,7 @@ def run_vectorized(
     )
     contract = float(costs.instrument.contract_size)
 
+    market_open = clock.is_open(t) if len(t) else np.array([], dtype=bool)
     intended = clock.advance(t, costs.latency.value) if len(t) else np.array([], np.int64)
     quote = np.searchsorted(ts, intended, side="left")
     found = (quote < len(ts)) & (intended != NAT_NS)
@@ -111,9 +128,13 @@ def run_vectorized(
 
     rows: list[tuple[int, int, float, float]] = []  # decision, quote, trade lots, lots after
     missed: list[int] = []
+    closed: list[int] = []
     held_exposure, lots = 0.0, 0.0
     for i in range(len(t)):
         if target[i] == held_exposure:
+            continue
+        if not market_open[i]:
+            closed.append(i)
             continue
         if not timely[i]:
             missed.append(i)
@@ -128,7 +149,49 @@ def run_vectorized(
     financing = _financing(fills, ts, bid, ask, costs)
     daily = _daily(fills, financing, ts, bid, ask, capital, contract)
     trades = _trades(fills, financing, bid, ask, contract)
-    return BacktestResult(fills, decisions[missed], daily, trades, financing, capital, contract)
+    return BacktestResult(
+        fills,
+        decisions[missed],
+        decisions[closed],
+        daily,
+        trades,
+        financing,
+        capital,
+        contract,
+        costs.result_label,
+    )
+
+
+def required_quotes(
+    quotes: pd.DataFrame,
+    decisions: pd.DatetimeIndex,
+    costs: CostModel,
+    clock: MarketClock,
+) -> IntArray:
+    """Sorted row positions of the quotes `run_vectorized` can read for `decisions`.
+
+    Screening any positions on these decision times with only these rows gives the same result as
+    with all of `quotes`: every lookup the screener makes (the first quote at or after a time, the
+    last one before a time) lands on a row kept here.
+    """
+    if len(quotes) == 0:
+        return np.array([], dtype=np.int64)
+    ts = _ns(pd.DatetimeIndex(quotes["ts_utc"]))
+    keep = [np.array([len(ts) - 1], dtype=np.int64)]
+    t = _ns(pd.DatetimeIndex(decisions))
+    if len(t):
+        intended = clock.advance(t, costs.latency.value)
+        intended = intended[intended != NAT_NS]
+        first = np.searchsorted(ts, intended, side="left")
+        keep.append(first[first < len(ts)])
+    days = np.unique(trading_days(pd.DatetimeIndex(quotes["ts_utc"])))
+    ends = np.array([trading_day_bounds(d.item())[1].value for d in days], dtype=np.int64)
+    first_quote = pd.Timestamp(int(ts[0]), tz="UTC")
+    last_quote = pd.Timestamp(int(ts[-1]), tz="UTC") + pd.Timedelta(1, "ns")
+    rolls = _ns(pd.DatetimeIndex(costs.rollovers(first_quote, last_quote).index))
+    before = np.searchsorted(ts, np.concatenate([ends, rolls]), side="left") - 1
+    keep.append(before[before >= 0])
+    return np.unique(np.concatenate(keep)).astype(np.int64)
 
 
 def _fills(

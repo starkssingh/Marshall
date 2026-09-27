@@ -8,7 +8,7 @@ import pytest
 from pydantic import ValidationError
 
 from helpers.pipeline import REPO
-from xq.backtest.costs import CostModel
+from xq.backtest.costs import SCREENING_LABEL, CostModel
 from xq.core.config import CostModelConfig, load_config
 from xq.core.errors import ConfigError
 from xq.data.spreads import NoSpreadDataError
@@ -87,8 +87,42 @@ def test_financing_by_side_and_multiplier() -> None:
     np.testing.assert_allclose(
         charges, [200_000 * 0.06 / 360, 200_000 * 0.18 / 360, 200_000 * 0.02 / 360, 0.0]
     )
-    credit = model(financing__short_rate_annual_pct=-1.0)
-    assert credit.financing_usd([-1.0], PRICE, [1])[0] < 0  # a negative rate is a credit
+    # broker terms (a non-provisional model) may credit a side: a negative rate is a credit
+    data = CFG.cost_model_config().model_dump()
+    data["provisional"] = False
+    data["financing"]["short_rate_annual_pct"] = -1.0
+    credit = CostModel(
+        CostModelConfig.model_validate(data), CFG.instrument("xauusd"), CFG.sessions_config()
+    )
+    assert credit.financing_usd([-1.0], PRICE, [1])[0] < 0
+
+
+@pytest.mark.parametrize(
+    "rates",
+    [
+        {"short_rate_annual_pct": -1.0},
+        {"short_rate_annual_pct": 0.0},
+        {"long_rate_annual_pct": 0.0},
+    ],
+)
+def test_a_provisional_model_charges_financing_on_both_sides(rates: dict[str, float]) -> None:
+    # ADR 0032: until broker terms replace the placeholder, financing is a cost long and short.
+    changes = {f"financing__{key}": value for key, value in rates.items()}
+    with pytest.raises(ValidationError, match="financing on longs and shorts"):
+        model(**changes)
+    placeholder = CFG.cost_model_config().financing
+    assert placeholder.long_rate_annual_pct > 0
+    assert placeholder.short_rate_annual_pct > 0
+
+
+def test_net_results_of_a_provisional_model_are_labelled_screening() -> None:
+    assert model().result_label == SCREENING_LABEL == "screening, placeholder costs"
+    data = CFG.cost_model_config().model_dump()
+    data.update(provisional=False, venue="broker")
+    real = CostModel(
+        CostModelConfig.model_validate(data), CFG.instrument("xauusd"), CFG.sessions_config()
+    )
+    assert real.result_label == "net of broker costs"
 
 
 def test_fallback_spread_from_hour_of_week_statistics() -> None:

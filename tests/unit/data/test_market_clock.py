@@ -88,3 +88,20 @@ def test_intervals_are_validated() -> None:
         MarketClock(one, one, 0, 100)
     with pytest.raises(ValueError, match="must not overlap"):
         MarketClock(np.array([0, 5], dtype=np.int64), np.array([10, 20], dtype=np.int64), 0, 100)
+
+
+def test_is_open_marks_the_market_open_intervals() -> None:
+    times = [
+        "2024-03-12 20:59:59",  # Tuesday 16:59:59 EDT: open
+        "2024-03-12 21:00",  # the 17:00 close itself: closed
+        "2024-03-12 21:30",  # the daily break
+        "2024-03-12 22:00",  # the 18:00 reopen: open
+        "2024-03-16 12:00",  # Saturday
+        "2024-03-17 22:00",  # Sunday 18:00 EDT open
+        "2024-03-29 12:00",  # Good Friday: closed all day
+    ]
+    stamps = pd.DatetimeIndex([pd.Timestamp(t, tz="UTC") for t in times])
+    values = stamps.as_unit("ns").to_numpy("datetime64[ns]").view("int64")
+    np.testing.assert_array_equal(
+        CLOCK.is_open(values), [True, False, False, True, False, True, False]
+    )

@@ -33,8 +33,9 @@ import hashlib
 import json
 import math
 import shutil
+from collections.abc import Collection
 from dataclasses import dataclass
-from datetime import timedelta
+from datetime import date, timedelta
 from pathlib import Path
 from typing import Any, Literal
 
@@ -50,7 +51,7 @@ from xq.core.ids import new_ulid
 from xq.core.logging import get_logger
 from xq.core.time import ensure_utc, trading_day, trading_days, utc_now
 from xq.data.bars import bar_set_id, build_version, exclude_mask
-from xq.data.calendar import NAT_NS, MarketClock
+from xq.data.calendar import NAT_NS, MarketClock, regular_trading_day
 from xq.data.catalog import Catalog
 from xq.data.clean import rules_version
 from xq.data.raw_store import sha256_file
@@ -213,8 +214,9 @@ def build_dataset(cfg: AppConfig, engine: Engine, spec: DatasetSpec, *, git_sha:
     if spec.target_set is not None:
         definition = cfg.target_set(spec.target_set.name, spec.target_set.version)
         kind = target_kind(definition.kind)
-        targets_def = (kind, kind.expand(definition))
-        reach = kind.lookahead(definition)
+        trading_day = regular_trading_day(cfg.sessions_config())
+        targets_def = (kind, kind.expand(definition, trading_day))
+        reach = kind.lookahead(definition, trading_day)
     resolved = resolve_spec(cfg, engine, spec)
     ds_id = dataset_id(resolved, code_versions_for(cfg, resolved))
 
@@ -452,9 +454,8 @@ def _targets(
     """
     close = pd.Series(base["close"].to_numpy(), index=decision_index(base))
     sigma = kind.sigma(close, definition, spec.base_timeframe.duration).reindex(decisions)
-    reach = kind.lookahead(definition)
+    reach = kind.lookahead(definition, regular_trading_day(cfg.sessions_config()))
     vault = vault_start(cfg)
-    mask = exclude_mask(cfg.bars_config())
     catalog = Catalog(cfg)
     months = decisions.tz_convert("UTC").strftime("%Y-%m")
     frames = []
@@ -470,14 +471,34 @@ def _targets(
                 }
             )
         else:
-            ticks = catalog.load_ticks(spec.source, spec.instrument, start, end)
-            usable = (ticks["flags"].to_numpy() & mask) == 0
-            if excluded and len(ticks):
-                days = trading_days(pd.DatetimeIndex(ticks["ts_utc"]))
-                usable &= ~pd.Series([d.item() for d in days]).isin(excluded).to_numpy()
-            quotes = ticks.loc[usable, ["ts_utc", "bid", "ask"]].reset_index(drop=True)
+            ticks = usable_quotes(cfg, spec, start, end, excluded, catalog=catalog)
+            quotes = ticks.loc[:, ["ts_utc", "bid", "ask"]]
         frames.append(compute_targets(kind, specs, quotes, chunk, clock))
     return pd.concat(frames)
+
+
+def usable_quotes(
+    cfg: AppConfig,
+    spec: DatasetSpec,
+    start: pd.Timestamp,
+    end: pd.Timestamp,
+    excluded: Collection[date],
+    *,
+    catalog: Catalog | None = None,
+) -> pd.DataFrame:
+    """The clean ticks of a dataset's source in ``[start, end)`` that targets and screens use.
+
+    Ticks carrying a flag the bars exclude, and ticks of `excluded` trading days, are dropped. The
+    catalog enforces the vault. Columns: ``ts_utc``, ``bid``, ``ask``, ``raw_file_id``,
+    ``row_num``, in the catalog's order.
+    """
+    ticks = (catalog or Catalog(cfg)).load_ticks(spec.source, spec.instrument, start, end)
+    usable = (ticks["flags"].to_numpy() & exclude_mask(cfg.bars_config())) == 0
+    if excluded and len(ticks):
+        days = trading_days(pd.DatetimeIndex(ticks["ts_utc"]))
+        usable &= ~pd.Series([d.item() for d in days]).isin(set(excluded)).to_numpy()
+    columns = ["ts_utc", "bid", "ask", "raw_file_id", "row_num"]
+    return ticks.loc[usable, columns].reset_index(drop=True)
 
 
 def _write_frame(frame: pd.DataFrame, path: Path) -> None:

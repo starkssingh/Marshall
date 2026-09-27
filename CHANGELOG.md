@@ -286,9 +286,70 @@ IDs from `docs/specs/development-plan.md`.
   Harvey–Leybourne–Newbold correction, Giacomini–White conditional predictive ability test and
   the Model Confidence Set (T_max, stationary bootstrap, MCS p-values). Size checked on simulated
   nulls and power on simulated alternatives. ADR 0031.
+- VAL-007: evidence policy (`config/gates.yaml`, approved by the owner) loaded as
+  `AppConfig.gates` — conventions (daily net returns, annualization by
+  `backtest.periods_per_year`, effective trial count with a raw/effective review flag, one-sided
+  tests, stationary bootstrap with 10,000 resamples and a Politis–White block length of at least 5
+  days) and gates R1–R4, validated strictly; only `gates.yaml` may set them (base, profile,
+  `XQ_GATES__*` and `--set` are refused); `GatesConfig.criteria()` fixes every threshold's boundary
+  rule; `gates_hash`. VAL-001 gains `politis_white_block_length` (matches `arch` 8.0.0 to 1e-9,
+  recovers the AR(1) optimum), `gate_block_length`, `bootstrap_distribution` and
+  `bootstrap_sharpe` (percentile interval and null-centred one-sided p-value, nominal size on
+  zero-mean AR(1) returns). ADR 0032.
+- BASE-001: forecast baselines (`xq.models.baselines.FORECAST_BASELINES`) for the walk-forward
+  runner, fixed and untuned — `zero_return`, `random_walk` (persistence: the log return of the
+  latest completed bar of the horizon's timeframe, joined on availability; `random_walk_columns`),
+  `historical_mean` (the training fold's mean, expanding with the windows) and `climatology` (the
+  training fold's frequency of positive targets). Known outputs per fold are tested.
+- BASE-002: rule baselines with fixed parameters (`xq.models.baselines`) — `buy_and_hold`,
+  `time_series_momentum`, `zscore_reversion`, `ma_crossover`, `donchian_breakout` (channel exit
+  and ATR stop fixed at entry), each optionally volatility-targeted (`VolTargetConfig`), computed
+  on signal bars (the dataset's distinct context bars indexed by availability, `signal_bars`) and
+  placed at decision times by an as-of join on availability (`positions_at`); the random-entry null
+  (`random_entry`, `random_entry_null`) keeps a template's holding episodes — trade count, holding
+  times, exposure paths and sides — and randomizes their timing uniformly. Hand-built series give
+  known positions and screened trades; every rule passes the leakage harness, which catches a
+  planted bar-start placement. ADR 0033.
+- BASE-005: baseline board (`xq.models.board.run_baseline_board`, `xq baselines run --dataset <id>
+  [--target ...] [--config ...] [--exploratory]`, `experiments/configs/baselines/board.yaml`) —
+  forecast baselines through walk-forward per target (losses with bootstrap intervals and a
+  one-sided Diebold–Mariano test against `zero_return`), forecast-sign and rule strategies (plain
+  and volatility-targeted) screened with the cost model on identical folds; daily net returns on
+  every out-of-sample trading day with the gate conventions: Sharpe with bootstrap interval,
+  one-sided p-value, three standard errors, PSR, DSR with the family's effective trial count,
+  MinTRL and the random-entry null p-value, plus bootstrap intervals for annual return,
+  volatility, Sortino and maximum drawdown; every strategy recorded as a trial; report
+  `reports/baselines/<dataset>/<run>/` (`board.md`, `board.json`, `returns.parquet`) with every
+  net figure marked "screening, placeholder costs". BT-002 gains `required_quotes` (the quotes a
+  screen can read; identical results from the subset) and DS-005 `usable_quotes` (shared quote
+  filter). Draft pre-registration `experiments/hypotheses/H-0001.yaml` (not registered). ADR 0034.
 
 ### Changed
 
+- ARCH-007/ARCH-008 Docker verification (ADR 0032, C-6): `docker/Dockerfile` has `base`, `test`
+  (dev dependencies, `git`, `tzdata`, the test suite; runs as the non-root user under
+  `TZ=Asia/Tokyo`) and `runtime` (still the default and the compose target) stages; CI gains a
+  `docker` job that builds and starts the runtime image, builds the test stage and runs the suite
+  inside it.
+- BT-001 costs stay provisional, and financing is a cost on both sides until broker terms replace
+  it (ADR 0032): a `provisional: true` cost model must have strictly positive long and short
+  financing rates (only a non-provisional model may credit a side). Net results carry the cost
+  model's label — `SCREENING_LABEL`, "screening, placeholder costs", while it is provisional —
+  as `CostModel.result_label` and `BacktestResult.cost_basis`, for every report to print.
+- TGT-002 and BT-002: decisions taken while the market is closed (the 17:00 close itself, the
+  daily break, weekends, holidays) get no target label and place no order (ADR 0032), instead of
+  being entered at the reopen; decisions taken while open keep their label across a close with
+  `crosses_close = true`. `MarketClock.is_open`; `BacktestResult.closed` lists the skipped
+  decisions that would have traded (no entry, exit or change: the held position stays until the
+  next decision taken while open); `forward_return` code version 4. The leakage suite checks that
+  only open-market decisions are labelled.
+- TGT-002 `1d` is one trading day (ADR 0032): a horizon label `<n>d` is n regular trading days of
+  market time — 23 market hours for the 18:00–17:00 New York session
+  (`xq.data.calendar.regular_trading_day`), so a `1d` label ends at the same session clock time one
+  trading day later instead of an hour into the next session; `4h` stays 4 market hours. Labels may
+  not mix days with other units (`1d6h` is refused). `TargetKind.expand` and `lookahead` take the
+  trading-day length (`xq.targets.base.market_horizon`); `forward_return` code version 3 (dataset
+  ids change); `_vol` targets scale `1d` by `sqrt(1380)` minutes.
 - `docs/STATUS.md` tracks the current sprint and next task, review carry-overs with owners and
   closing commits, open owner decisions, provisional assumptions, known issues and per-phase
   status; `CLAUDE.md` gains a session protocol (read it after `CLAUDE.md`, keep it current, record
@@ -340,6 +401,11 @@ IDs from `docs/specs/development-plan.md`.
 
 ### Fixed
 
+- WF-002: `run_walk_forward` no longer fails when a stitched metric is undefined (the hit rate of
+  an all-zero forecast is NaN, which the non-null `metrics.value` column rejected with an
+  `IntegrityError`); undefined metrics stay NaN in the result and are not logged, and
+  `registry.log_metric` now refuses a non-finite value with a clear `ValueError`. Found by the
+  BASE-005 board running the `zero_return` baseline.
 - Dataset targets: a month of decisions whose only decision time is exactly `vault.start` no longer
   asks the catalog for an empty tick window (which it rejects); those decisions get no label,
   since every fill would need vault quotes.

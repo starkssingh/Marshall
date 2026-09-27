@@ -23,7 +23,7 @@ from xq.data.calendar import MarketClock
 from xq.data.catalog import Catalog
 from xq.datasets.builder import build_dataset, load_dataset
 from xq.datasets.spec import load_spec
-from xq.targets.base import target_values
+from xq.targets.base import market_horizon, target_values
 
 FWD = {"name": "fwd_returns", "version": "v1"}
 S = pd.Timedelta(seconds=1)
@@ -88,7 +88,8 @@ def test_label_windows_follow_trading_time(targets: pd.DataFrame) -> None:
         known = one["value"].notna()
         assert known.any()
         decision = pd.DatetimeIndex(one.index[known])
-        entry, exit_ = advance(decision, S), advance(decision, pd.Timedelta(horizon) + S)
+        market = market_horizon(horizon, pd.Timedelta(hours=23))  # 1d = 23 market hours
+        entry, exit_ = advance(decision, S), advance(decision, market + S)
         starts = pd.DatetimeIndex(one.loc[known, "label_start"])
         ends = pd.DatetimeIndex(one.loc[known, "label_end"])
         assert ((starts >= entry) & (starts - entry <= DELAY)).all()
@@ -121,9 +122,10 @@ def test_friday_decisions_are_labelled_over_the_weekend(tmp_path: Path) -> None:
     daily = target_values(targets, "fwd_ret_long_1d").loc[friday]
     assert np.isfinite(daily["value"])
     assert daily["crosses_close"]
-    # 7 market hours on Friday, then 17 after the Sunday 18:00 EDT open: Monday 15:00 UTC.
-    assert daily["label_end"] >= pd.Timestamp("2024-03-18 15:00:01", tz="UTC")
-    assert daily["label_end"] - pd.Timestamp("2024-03-18 15:00:01", tz="UTC") <= DELAY
+    # 1d = 23 market hours (ADR 0032): 7 on Friday, then 16 after the Sunday 18:00 EDT open,
+    # ending Monday 14:00 UTC, the same session clock time one trading day later.
+    assert daily["label_end"] >= pd.Timestamp("2024-03-18 14:00:01", tz="UTC")
+    assert daily["label_end"] - pd.Timestamp("2024-03-18 14:00:01", tz="UTC") <= DELAY
 
     pre_close = target_values(targets, "fwd_ret_mid_15m").loc[
         pd.Timestamp("2024-03-15 20:45", tz="UTC")
@@ -134,9 +136,9 @@ def test_friday_decisions_are_labelled_over_the_weekend(tmp_path: Path) -> None:
 
     at_close = target_values(targets, "fwd_ret_mid_15m").loc[
         pd.Timestamp("2024-03-15 21:00", tz="UTC")
-    ]  # decided at the Friday close: entered at the Sunday reopen, no close in the holding period
-    assert np.isfinite(at_close["value"])
-    assert at_close["label_start"] >= pd.Timestamp("2024-03-17 22:00:01", tz="UTC")
+    ]  # decided at the Friday close, while the market is closed: no label (ADR 0032)
+    assert np.isnan(at_close["value"])
+    assert pd.isna(at_close["label_start"])
     assert not at_close["crosses_close"]
 
 

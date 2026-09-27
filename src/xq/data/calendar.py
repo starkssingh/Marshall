@@ -123,6 +123,19 @@ class MarketCalendar:
             raise ValueError(f"{day} is outside the calendar's years {self._years}")
 
 
+def regular_trading_day(cfg: SessionsConfig) -> pd.Timedelta:
+    """Market time of a full trading day: from the open to the close (23 h for 18:00-17:00).
+
+    Early closes do not change it: it is the length of the configured regular session, the unit
+    of trading-day horizons (ADR 0032).
+    """
+    market = cfg.market
+    day = 24 * 3600
+    seconds = [t.hour * 3600 + t.minute * 60 + t.second for t in (market.open, market.close)]
+    span = (seconds[1] - seconds[0]) % day
+    return pd.Timedelta(seconds=span or day)
+
+
 #: Integer sentinel for "no instant" in int64 nanosecond arrays (the value of ``NaT``).
 NAT_NS = np.iinfo(np.int64).min
 
@@ -200,6 +213,15 @@ class MarketClock:
         kk = k[known]
         out[known] = self.opens[kk] + target[known] - self._elapsed_at_open[kk]
         return out
+
+    def is_open(self, t: npt.NDArray[np.int64]) -> npt.NDArray[np.bool_]:
+        """Whether each instant lies inside a market-open interval ``[open, close)``."""
+        self._check_covered(t)
+        k = np.searchsorted(self.opens, t, side="right") - 1
+        inside: npt.NDArray[np.bool_] = np.zeros(len(t), dtype=bool)
+        known = k >= 0
+        inside[known] = t[known] < self.closes[k[known]]
+        return inside
 
     def crosses_close(
         self, start: npt.NDArray[np.int64], end: npt.NDArray[np.int64]

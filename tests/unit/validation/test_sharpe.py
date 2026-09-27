@@ -120,3 +120,100 @@ def test_estimate_bundles_everything() -> None:
     assert result.kurtosis == pytest.approx(3, abs=0.6)
     with pytest.raises(ValueError, match="missing"):
         s.estimate([0.1, float("nan")])
+
+
+def _ar1_series(seed: int) -> dict[str, np.ndarray]:
+    """The five series the Politis-White reference values below were computed on."""
+    rng = np.random.default_rng(seed)
+    series = {}
+    for name, phi, n in [
+        ("iid_500", 0.0, 500),
+        ("ar05_1000", 0.5, 1000),
+        ("ar_neg03_750", -0.3, 750),
+        ("ar08_2000", 0.8, 2000),
+        ("ar02_300", 0.2, 300),
+    ]:
+        e = rng.standard_normal(n)
+        series[name] = lfilter([1.0], [1.0, -phi], e)
+    return series
+
+
+# `arch.bootstrap.optimal_block_length(x)["stationary"]` (arch 8.0.0, an independent
+# implementation of Patton, Politis and White 2009) on the series of `_ar1_series(20260927)`.
+ARCH_STATIONARY_BLOCK = {
+    "iid_500": 0.6864018015538239,
+    "ar05_1000": 11.487021433177038,
+    "ar_neg03_750": 7.002654652308571,
+    "ar08_2000": 30.096931677306305,
+    "ar02_300": 2.292148018389538,
+}
+
+
+def test_politis_white_matches_an_independent_implementation() -> None:
+    for name, x in _ar1_series(20260927).items():
+        assert s.politis_white_block_length(x) == pytest.approx(
+            ARCH_STATIONARY_BLOCK[name], rel=1e-9
+        ), name
+
+
+def test_politis_white_recovers_the_ar1_optimum() -> None:
+    # For AR(1) with coefficient phi the optimal stationary-bootstrap block length is
+    # (2 phi / (1 - phi^2))^(2/3) n^(1/3) (G / g(0) = 2 phi / (1 - phi^2)).
+    n, phi = 5000, 0.5
+    theory = (2 * phi / (1 - phi**2)) ** (2 / 3) * n ** (1 / 3)
+    rng = np.random.default_rng(3)
+    blocks = [
+        s.politis_white_block_length(lfilter([1.0], [1.0, -phi], rng.standard_normal(n)))
+        for _ in range(40)
+    ]
+    assert np.mean(blocks) == pytest.approx(theory, rel=0.15)
+
+
+def test_politis_white_edge_cases_and_gate_floor() -> None:
+    assert s.politis_white_block_length([0.01, 0.02]) == 1.0
+    assert s.politis_white_block_length(np.full(100, 0.01)) == 1.0
+    noise = np.random.default_rng(4).standard_normal(500)
+    assert s.politis_white_block_length(noise) < 5
+    assert s.gate_block_length(noise, "politis_white", 5) == 5.0
+    assert s.gate_block_length(noise, 8, 5) == 8.0
+    trending = lfilter([1.0], [1.0, -0.9], np.random.default_rng(5).standard_normal(2000))
+    assert s.gate_block_length(trending, "politis_white", 5) > 5
+    # capped at ceil(min(3 sqrt(n), n / 3))
+    assert s.politis_white_block_length(np.cumsum(np.ones(90))) <= 29
+
+
+def test_bootstrap_sharpe_p_value_and_interval() -> None:
+    rng = np.random.default_rng(6)
+    strong = rng.normal(0.002, 0.01, 750)  # daily Sharpe 0.2, annualized ~3.2
+    result = s.bootstrap_sharpe(strong, n_boot=2000, mean_block=5, seed=1)
+    assert result.p_value < 0.001
+    assert result.ci_low < result.sharpe < result.ci_high
+    assert result.ci_low > 0
+    assert result == s.bootstrap_sharpe(strong, n_boot=2000, mean_block=5, seed=1)
+    losing = s.bootstrap_sharpe(-strong, n_boot=2000, mean_block=5, seed=1)
+    assert losing.p_value > 0.99
+    empty = s.bootstrap_sharpe([0.01, 0.01, 0.01], n_boot=100, mean_block=5, seed=1)
+    assert math.isnan(empty.p_value)
+
+
+def test_bootstrap_sharpe_test_has_nominal_size_under_the_null() -> None:
+    # Zero-mean AR(1) returns: the one-sided 5 % test rejects about 5 % of the time.
+    rng = np.random.default_rng(7)
+    rejections = 0
+    reps = 300
+    for rep in range(reps):
+        x = lfilter([1.0], [1.0, -0.3], rng.standard_normal(500)) * 0.01
+        block = s.gate_block_length(x, "politis_white", 5)
+        p = s.bootstrap_sharpe(x, n_boot=499, mean_block=block, seed=rep).p_value
+        rejections += p < 0.05
+    assert 0.02 <= rejections / reps <= 0.09
+
+
+def test_bootstrap_distribution_is_chunked_deterministically() -> None:
+    x = np.random.default_rng(8).normal(0, 1, 300)
+    a = s.bootstrap_distribution(x, s.row_sharpe, n_boot=1234, mean_block=4, seed=2, chunk=500)
+    b = s.bootstrap_distribution(x, s.row_sharpe, n_boot=1234, mean_block=4, seed=2, chunk=500)
+    assert a.shape == (1234,)
+    np.testing.assert_array_equal(a, b)
+    means = s.bootstrap_distribution(x, lambda d: d.mean(axis=1), n_boot=2000, mean_block=1, seed=3)
+    assert means.std() == pytest.approx(x.std() / math.sqrt(300), rel=0.1)

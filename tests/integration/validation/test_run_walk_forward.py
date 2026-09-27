@@ -1,5 +1,6 @@
 """WF-002 and WF-003 end to end: a model walks forward over a stored dataset inside a run."""
 
+import math
 from collections.abc import Iterator
 from pathlib import Path
 
@@ -13,6 +14,7 @@ from helpers.pipeline import config
 from xq.core.config import AppConfig
 from xq.datasets.builder import DatasetRef, build_dataset
 from xq.models.base import ModelConfig
+from xq.models.baselines import forecast_baseline
 from xq.tracking import registry
 from xq.tracking.runs import experiment_run
 from xq.tracking.trials import trial_count
@@ -157,3 +159,33 @@ def test_a_rerun_reads_cached_folds_and_records_them_again(
     rows = registry.get_fold_results(engine, second_run)
     assert [r.fold_id for r in rows] == [f.fold_id for f in second.folds]
     assert second.trial_id is None
+
+
+def test_undefined_metrics_are_kept_but_not_logged(
+    cfg: AppConfig, engine: Engine, dataset: DatasetRef
+) -> None:
+    # A zero forecast has no signed forecast, so its hit rate is undefined (NaN).
+    zero = forecast_baseline("zero_return")
+    with experiment_run(
+        cfg,
+        engine,
+        "H-0001",
+        {},
+        kind="baseline",
+        seed=12,
+        dataset_id=dataset.dataset_id,
+        exploratory=True,
+    ) as run:
+        result = run_walk_forward(
+            run,
+            dataset.dataset_id,
+            "fwd_ret_mid_1h",
+            zero,
+            ModelConfig(name="zero_return"),
+            SPLITS,
+            record_trial=False,
+        )
+    assert math.isnan(result.metrics["hit_rate"])
+    logged = {m.name for m in registry.get_metrics(engine, run.run_id)}
+    assert "zero_return:fwd_ret_mid_1h/mse" in logged
+    assert "zero_return:fwd_ret_mid_1h/hit_rate" not in logged

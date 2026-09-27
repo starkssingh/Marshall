@@ -1,0 +1,45 @@
+# Evidence gates (VAL-007), approved by the project owner on 2026-09-27 (ADR 0032). Fixed before any
+# candidate result exists. NEVER change a threshold to make a candidate pass (CLAUDE.md): a change
+# needs the owner's approval and a new ADR. This file is the only source of `gates`: profiles,
+# XQ_ environment variables and --set overrides are refused (xq.core.config). How each threshold is
+# compared at its boundary is fixed in code (`GatesConfig.criteria`) and listed in ADR 0032.
+version: 1
+conventions:
+  returns: daily_net
+  annualization: backtest.periods_per_year   # 252, provisional
+  trial_count: effective        # gate on clustered effective N (corr 0.7, >= 60 common days, frozen)
+  report_raw_trial_count: true
+  raw_vs_effective_review_ratio: 10   # if raw/effective > 10, flag for owner review
+  one_sided: true
+  bootstrap: {n_boot: 10000, block_length: politis_white, min_block_days: 5}
+r1_research_candidate:
+  oos_net_sharpe_min: 0.0
+  oos_sharpe_p_max: 0.05
+  best_baseline_p_max: 0.10
+  best_baseline_margin_sharpe: 0.0
+  min_oos_trades: 100
+r2_validated:
+  dsr_min: 0.95
+  pbo_max: 0.20
+  spa_p_max: 0.10
+  stressed_costs: {spread_multiplier: 1.5, slippage_multiplier: 2.0, net_sharpe_min: 0.0}
+  parameter_neighbourhood: {perturbation: 0.20, profitable_share_min: 0.70}
+  positive_folds_share_min: 0.60
+  max_single_year_pnl_share: 0.50
+  monte_carlo_drawdown: {quantile: 0.95, below: 0.15}
+  oos_max_drawdown_max: 0.15
+  decay_trend: {significance: 0.05}          # fail if performance-vs-time slope is significantly negative
+  execution_delay: {bars: 1, net_sharpe_min: 0.0}
+  min_track_record: {confidence: 0.95}       # OOS length >= MinTRL from VAL-001
+r3_vault_pass:
+  net_sharpe_min: 0.0
+  walk_forward_interval: 0.90
+  risk_limit_breaches_max: 0
+  vault_access_logged: true
+r4_paper_pass:
+  min_months: 3
+  min_trades: 100
+  realized_slippage_ratio_max: 1.5
+  monte_carlo_percentile_min: 0.10
+  shadow_parity_min: 1.0
+  unresolved_incidents_max: 0

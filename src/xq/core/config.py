@@ -3,7 +3,7 @@
 Layers, from lowest to highest precedence:
 
 1. ``config/base.yaml`` plus the section files next to it (``instruments/<id>.yaml``,
-   ``costs/<model>.yaml``, ``sessions.yaml``, ``quality.yaml``, ``targets.yaml``)
+   ``costs/<model>.yaml``, ``sessions.yaml``, ``quality.yaml``, ``targets.yaml``, ``gates.yaml``)
 2. ``config/<profile>.yaml`` (for example ``dev``, ``research``, ``paper``, ``prod``)
 3. environment variables prefixed ``XQ_``; nested keys are separated by ``__``,
    e.g. ``XQ_LOGGING__LEVEL=DEBUG``
@@ -11,16 +11,19 @@ Layers, from lowest to highest precedence:
 
 The result is a frozen `AppConfig` that is passed explicitly; there is no module-level config
 object. Secrets are typed as `SecretStr`, may only come from environment variables, and are
-excluded from `config_hash`.
+excluded from `config_hash`. The evidence gates (``gates.yaml``, VAL-007) may only come from their
+own file: no other layer can change a threshold.
 """
 
 from __future__ import annotations
 
 import hashlib
 import json
+import math
 import os
 import re
 from collections.abc import Mapping
+from dataclasses import dataclass
 from datetime import UTC, datetime, time
 from decimal import ROUND_FLOOR, Decimal
 from pathlib import Path
@@ -64,7 +67,11 @@ FRAGMENT_FILES = {
     "sessions": "sessions.yaml",
     "quality": "quality.yaml",
     "targets": "targets.yaml",
+    "gates": "gates.yaml",
 }
+#: Sections that only their own file may set: no base.yaml key, profile, environment variable or
+#: override may change them (evidence gates are fixed before results are seen, ADR 0032).
+FILE_ONLY_SECTIONS = {"gates": "gates.yaml"}
 
 _HH_MM = re.compile(r"^(?P<h>[01]\d|2[0-3]):(?P<m>[0-5]\d)(:(?P<s>[0-5]\d))?$")
 _MONTH_DAY = re.compile(r"^(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])$")
@@ -458,11 +465,18 @@ class QualityConfig(FrozenModel):
 PriceRef = Literal["long", "short", "mid"]
 
 
+#: A horizon of whole trading days, e.g. ``1d`` (ADR 0032).
+TRADING_DAYS_HORIZON = re.compile(r"^(?P<days>[1-9]\d*)[dD]$")
+_DAY_UNIT = re.compile(r"\d\s*(days?|d)(?![a-z])", re.IGNORECASE)
+
+
 class TargetSetConfig(FrozenModel):
     """A versioned target set (``config/targets.yaml``, TGT-001).
 
     It expands to one target per horizon and price reference; `params` are validated by the
-    target kind (for example execution latency for forward returns).
+    target kind (for example execution latency for forward returns). Horizons are trading time
+    (ADR 0026): ``<n>d`` is n trading days, any other label (``15m``, ``4h``) is that much market
+    time; a label may not mix days with other units (ADR 0032).
     """
 
     kind: str
@@ -480,6 +494,11 @@ class TargetSetConfig(FrozenModel):
                 raise ValueError(f"invalid horizon {text!r}") from exc
             if horizon <= pd.Timedelta(0):
                 raise ValueError(f"horizon {text!r} must be positive")
+            if not TRADING_DAYS_HORIZON.match(text) and _DAY_UNIT.search(text):
+                raise ValueError(
+                    f"horizon {text!r} mixes days with other units; write whole trading days "
+                    "('1d') or market hours and minutes ('36h')"
+                )
         if len(set(value)) != len(value):
             raise ValueError("horizons must be unique")
         return value
@@ -554,7 +573,11 @@ class FinancingConfig(FrozenModel):
 
 
 class CostModelConfig(FrozenModel):
-    """A venue's cost model (``config/costs/<name>.yaml``, BT-001)."""
+    """A venue's cost model (``config/costs/<name>.yaml``, BT-001).
+
+    A provisional model (placeholder values, no broker terms) must charge financing on both sides:
+    long and short rates strictly positive (ADR 0032). Only broker terms may credit a side.
+    """
 
     venue: str
     provisional: bool
@@ -565,6 +588,19 @@ class CostModelConfig(FrozenModel):
     slippage: SlippageConfig
     financing: FinancingConfig
 
+    @model_validator(mode="after")
+    def _provisional_financing_is_a_cost(self) -> CostModelConfig:
+        financing = self.financing
+        if (
+            self.provisional
+            and min(financing.long_rate_annual_pct, financing.short_rate_annual_pct) <= 0
+        ):
+            raise ValueError(
+                "a provisional cost model must charge financing on longs and shorts (both rates "
+                "> 0) until broker terms replace it (ADR 0032)"
+            )
+        return self
+
 
 class BacktestConfig(FrozenModel):
     """Backtest settings (``backtest:`` in ``config/base.yaml``)."""
@@ -572,6 +608,320 @@ class BacktestConfig(FrozenModel):
     cost_model: str
     capital_usd: float = Field(gt=0)
     periods_per_year: int = Field(gt=0)
+
+
+# Evidence gates (VAL-007, ``config/gates.yaml``, ADR 0032). Thresholds are fixed before any
+# candidate result exists; how each is compared at its boundary is fixed in `GatesConfig.criteria`.
+Probability = Annotated[float, Field(gt=0, lt=1)]
+Share = Annotated[float, Field(gt=0, le=1)]
+SharpeFloor = Annotated[float, Field(ge=0)]
+GateComparison = Literal[">", ">=", "<", "<="]
+PERIODS_PER_YEAR_REF = "backtest.periods_per_year"
+
+
+@dataclass(frozen=True)
+class GateCriterion:
+    """One pass/fail comparison of a gate: ``value <op> threshold`` passes; a missing value fails.
+
+    `key` is the threshold's dotted path in ``config/gates.yaml`` (``.low`` / ``.high`` for the two
+    sides of an interval); `measure` says what value is compared.
+    """
+
+    gate: str
+    key: str
+    measure: str
+    op: GateComparison
+    threshold: float
+
+    def passes(self, value: float) -> bool:
+        """Whether `value` satisfies the criterion (NaN never does)."""
+        if math.isnan(value):
+            return False
+        if self.op == ">":
+            return value > self.threshold
+        if self.op == ">=":
+            return value >= self.threshold
+        if self.op == "<":
+            return value < self.threshold
+        return value <= self.threshold
+
+
+class GateBootstrapConfig(FrozenModel):
+    """Stationary bootstrap of daily net returns used by gate statistics (VAL-001)."""
+
+    n_boot: int = Field(ge=1000)
+    #: ``politis_white``: the automatic mean block length of Politis and White (2004), with the
+    #: Patton, Politis and White (2009) correction; or a fixed mean block length in days.
+    block_length: Literal["politis_white"] | Annotated[int, Field(ge=1)]
+    #: The mean block length is never shorter than this many days.
+    min_block_days: int = Field(ge=1)
+
+
+class GateConventions(FrozenModel):
+    """How the statistics a gate compares are computed."""
+
+    returns: Literal["daily_net"]
+    annualization: Literal["backtest.periods_per_year"] | Annotated[int, Field(gt=0)]
+    trial_count: Literal["effective", "raw"]
+    report_raw_trial_count: bool
+    raw_vs_effective_review_ratio: float = Field(gt=1)
+    one_sided: Literal[True]
+    bootstrap: GateBootstrapConfig
+
+    def needs_trial_review(self, n_raw: int, n_effective: float) -> bool:
+        """True when raw trials exceed the effective count by more than the review ratio."""
+        if n_raw <= 0 or n_effective <= 0:
+            return False
+        return n_raw / n_effective > self.raw_vs_effective_review_ratio
+
+
+class R1Gate(FrozenModel):
+    """R1 research candidate: moves a candidate to the event backtest and robustness work."""
+
+    oos_net_sharpe_min: SharpeFloor
+    oos_sharpe_p_max: Probability
+    best_baseline_p_max: Probability
+    best_baseline_margin_sharpe: SharpeFloor
+    min_oos_trades: int = Field(ge=1)
+
+
+class StressedCostsGate(FrozenModel):
+    spread_multiplier: float = Field(ge=1)
+    slippage_multiplier: float = Field(ge=1)
+    net_sharpe_min: SharpeFloor
+
+
+class NeighbourhoodGate(FrozenModel):
+    perturbation: Probability
+    profitable_share_min: Share
+
+
+class MonteCarloDrawdownGate(FrozenModel):
+    quantile: Probability
+    below: Probability
+
+
+class DecayTrendGate(FrozenModel):
+    significance: Probability
+
+
+class ExecutionDelayGate(FrozenModel):
+    bars: int = Field(ge=1)
+    net_sharpe_min: SharpeFloor
+
+
+class MinTrackRecordGate(FrozenModel):
+    confidence: Probability
+
+
+class R2Gate(FrozenModel):
+    """R2 validated: allows one vault evaluation."""
+
+    dsr_min: Probability
+    pbo_max: Probability
+    spa_p_max: Probability
+    stressed_costs: StressedCostsGate
+    parameter_neighbourhood: NeighbourhoodGate
+    positive_folds_share_min: Share
+    max_single_year_pnl_share: Share
+    monte_carlo_drawdown: MonteCarloDrawdownGate
+    oos_max_drawdown_max: Probability
+    decay_trend: DecayTrendGate
+    execution_delay: ExecutionDelayGate
+    min_track_record: MinTrackRecordGate
+
+
+class R3Gate(FrozenModel):
+    """R3 vault pass: moves a candidate to paper trading."""
+
+    net_sharpe_min: SharpeFloor
+    walk_forward_interval: Probability
+    risk_limit_breaches_max: int = Field(ge=0)
+    vault_access_logged: Literal[True]
+
+
+class R4Gate(FrozenModel):
+    """R4 paper pass: makes a candidate eligible for the live review."""
+
+    min_months: int = Field(ge=1)
+    min_trades: int = Field(ge=1)
+    realized_slippage_ratio_max: float = Field(gt=0)
+    monte_carlo_percentile_min: Probability
+    shadow_parity_min: Share
+    unresolved_incidents_max: int = Field(ge=0)
+
+
+class GatesConfig(FrozenModel):
+    """The evidence policy (``config/gates.yaml``, VAL-007, ADR 0032)."""
+
+    version: Literal[1]
+    conventions: GateConventions
+    r1_research_candidate: R1Gate
+    r2_validated: R2Gate
+    r3_vault_pass: R3Gate
+    r4_paper_pass: R4Gate
+
+    def criteria(self) -> list[GateCriterion]:
+        """Every pass/fail comparison of R1-R4 with its boundary rule (ADR 0032).
+
+        Where the development plan states the comparison it is used as written ("> 0", "p < 0.05",
+        "at least", "no single year above", "below the halt level", "p <= 0.10"); otherwise
+        ``_min`` means at least and ``_max`` at most, except that a Sharpe floor must be exceeded
+        (a Sharpe ratio of exactly 0 is no edge).
+        """
+        r1, r2 = self.r1_research_candidate, self.r2_validated
+        r3, r4 = self.r3_vault_pass, self.r4_paper_pass
+        stress, hood = r2.stressed_costs, r2.parameter_neighbourhood
+        tail = round((1 - r3.walk_forward_interval) / 2, 12)
+        c = GateCriterion
+        return [
+            c("R1", "oos_net_sharpe_min", "stitched OOS net Sharpe", ">", r1.oos_net_sharpe_min),
+            c(
+                "R1",
+                "oos_sharpe_p_max",
+                "one-sided stationary-bootstrap p-value of OOS net Sharpe > 0",
+                "<",
+                r1.oos_sharpe_p_max,
+            ),
+            c(
+                "R1",
+                "best_baseline_p_max",
+                "one-sided paired block-bootstrap p-value of beating the best baseline",
+                "<",
+                r1.best_baseline_p_max,
+            ),
+            c(
+                "R1",
+                "best_baseline_margin_sharpe",
+                "OOS net Sharpe minus the best baseline's",
+                ">",
+                r1.best_baseline_margin_sharpe,
+            ),
+            c("R1", "min_oos_trades", "closed OOS trades", ">=", r1.min_oos_trades),
+            c("R2", "dsr_min", "deflated Sharpe ratio (gated trial count)", ">=", r2.dsr_min),
+            c("R2", "pbo_max", "probability of backtest overfitting (CSCV)", "<=", r2.pbo_max),
+            c("R2", "spa_p_max", "Hansen SPA p-value for the family", "<=", r2.spa_p_max),
+            c(
+                "R2",
+                "stressed_costs.net_sharpe_min",
+                f"net Sharpe at {stress.spread_multiplier:g}x spread and "
+                f"{stress.slippage_multiplier:g}x slippage",
+                ">",
+                stress.net_sharpe_min,
+            ),
+            c(
+                "R2",
+                "parameter_neighbourhood.profitable_share_min",
+                f"share of the +/-{hood.perturbation:.0%} parameter neighbourhood with positive "
+                "net P&L",
+                ">=",
+                hood.profitable_share_min,
+            ),
+            c(
+                "R2",
+                "positive_folds_share_min",
+                "share of test folds with positive net P&L",
+                ">=",
+                r2.positive_folds_share_min,
+            ),
+            c(
+                "R2",
+                "max_single_year_pnl_share",
+                "largest share of total net P&L earned in one calendar year",
+                "<=",
+                r2.max_single_year_pnl_share,
+            ),
+            c(
+                "R2",
+                "monte_carlo_drawdown.below",
+                f"{r2.monte_carlo_drawdown.quantile:.0%} quantile of the Monte Carlo maximum "
+                "drawdown",
+                "<",
+                r2.monte_carlo_drawdown.below,
+            ),
+            c("R2", "oos_max_drawdown_max", "OOS maximum drawdown", "<=", r2.oos_max_drawdown_max),
+            c(
+                "R2",
+                "decay_trend.significance",
+                "one-sided p-value of a negative slope of performance over time",
+                ">=",
+                r2.decay_trend.significance,
+            ),
+            c(
+                "R2",
+                "execution_delay.net_sharpe_min",
+                f"net Sharpe with execution delayed by {r2.execution_delay.bars} bar(s)",
+                ">",
+                r2.execution_delay.net_sharpe_min,
+            ),
+            c(
+                "R2",
+                "min_track_record.confidence",
+                f"OOS days over the minimum track record length at "
+                f"{r2.min_track_record.confidence:.0%} confidence",
+                ">=",
+                1.0,
+            ),
+            c("R3", "net_sharpe_min", "vault net Sharpe", ">", r3.net_sharpe_min),
+            c(
+                "R3",
+                "walk_forward_interval.low",
+                "quantile of the vault net Sharpe in the walk-forward bootstrap distribution",
+                ">=",
+                tail,
+            ),
+            c(
+                "R3",
+                "walk_forward_interval.high",
+                "quantile of the vault net Sharpe in the walk-forward bootstrap distribution",
+                "<=",
+                1 - tail,
+            ),
+            c(
+                "R3",
+                "risk_limit_breaches_max",
+                "risk-limit breaches in the vault run",
+                "<=",
+                r3.risk_limit_breaches_max,
+            ),
+            c("R3", "vault_access_logged", "vault access logged (1 yes, 0 no)", ">=", 1.0),
+            c("R4", "min_months", "months of paper trading", ">=", r4.min_months),
+            c("R4", "min_trades", "paper trades", ">=", r4.min_trades),
+            c(
+                "R4",
+                "realized_slippage_ratio_max",
+                "realized over modelled slippage",
+                "<=",
+                r4.realized_slippage_ratio_max,
+            ),
+            c(
+                "R4",
+                "monte_carlo_percentile_min",
+                "percentile of paper performance in the Monte Carlo band",
+                ">",
+                r4.monte_carlo_percentile_min,
+            ),
+            c(
+                "R4",
+                "shadow_parity_min",
+                "share of decisions identical to shadow replay",
+                ">=",
+                r4.shadow_parity_min,
+            ),
+            c(
+                "R4",
+                "unresolved_incidents_max",
+                "unresolved incidents",
+                "<=",
+                r4.unresolved_incidents_max,
+            ),
+        ]
+
+
+def gates_hash(gates: GatesConfig) -> str:
+    """16-hex SHA-256 of the evidence policy's canonical JSON (recorded with gate evidence)."""
+    canonical = json.dumps(gates.model_dump(mode="json"), sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()[:16]
 
 
 class SourceConfig(FrozenModel):
@@ -636,6 +986,7 @@ class AppConfig(BaseSettings):
     costs: dict[str, CostModelConfig] = {}
     backtest: BacktestConfig | None = None
     targets: dict[str, dict[str, TargetSetConfig]] = {}
+    gates: GatesConfig | None = None
     secrets: SecretsConfig = SecretsConfig()
 
     @classmethod
@@ -738,6 +1089,32 @@ class AppConfig(BaseSettings):
             known = ", ".join(sorted(self.costs)) or "none"
             raise ConfigError(f"unknown cost model {chosen!r}; configured: {known}") from None
 
+    @model_validator(mode="after")
+    def _check_gate_conventions(self) -> AppConfig:
+        if self.gates is None:
+            return self
+        conventions = self.gates.conventions
+        if conventions.annualization == PERIODS_PER_YEAR_REF and self.backtest is None:
+            raise ValueError(f"gates annualize with {PERIODS_PER_YEAR_REF}, which is not set")
+        if conventions.trial_count == "effective" and self.experiments is None:
+            raise ValueError(
+                "gates count effective trials, but experiments.trial_clustering is not configured"
+            )
+        return self
+
+    def gates_config(self) -> GatesConfig:
+        """Return the evidence policy; raise if ``config/gates.yaml`` was not loaded."""
+        if self.gates is None:
+            raise ConfigError("no evidence gates (config/gates.yaml) were loaded")
+        return self.gates
+
+    def gate_periods_per_year(self) -> int:
+        """Periods per year the gates annualize daily statistics with."""
+        annualization = self.gates_config().conventions.annualization
+        if annualization == PERIODS_PER_YEAR_REF:
+            return self.backtest_config().periods_per_year
+        return int(annualization)
+
     def datasets_config(self) -> DatasetsConfig:
         """Return the dataset builder settings; raise if they are not configured."""
         if self.datasets is None:
@@ -776,8 +1153,10 @@ def load_config(
             or the merged values fail validation.
     """
     directory = _config_dir(config_dir)
-    base_layer = deep_merge(_read_fragments(directory), _read_yaml(directory / BASE_FILE))
-    file_layers = [base_layer, _read_profile(directory, profile)]
+    base_file = _read_yaml(directory / BASE_FILE)
+    profile_layer = _read_profile(directory, profile)
+    base_layer = deep_merge(_read_fragments(directory), base_file)
+    file_layers = [base_layer, profile_layer]
     for path, layer in zip((BASE_FILE, f"{profile}.yaml"), file_layers, strict=True):
         _reject_secrets(layer, where=f"config file {path}")
 
@@ -786,6 +1165,13 @@ def load_config(
 
     env_layer = dict(EnvSettingsSource(AppConfig)())
     env_layer.pop("profile", None)  # the profile is chosen by the caller, not the environment
+    for layer, where in (
+        (base_file, f"config file {BASE_FILE}"),
+        (profile_layer, f"config file {profile}.yaml"),
+        (env_layer, f"{ENV_PREFIX}* environment variables"),
+        (override_layer, "overrides"),
+    ):
+        _reject_file_only_sections(layer, where=where)
 
     merged: dict[str, Any] = {}
     for layer in (*file_layers, env_layer, override_layer):
@@ -885,6 +1271,15 @@ def _read_yaml(path: Path) -> dict[str, Any]:
     if not isinstance(data, dict):
         raise ConfigError(f"{path} must contain a mapping at the top level")
     return data
+
+
+def _reject_file_only_sections(layer: Mapping[str, Any], *, where: str) -> None:
+    for section, filename in FILE_ONLY_SECTIONS.items():
+        if section in layer:
+            raise ConfigError(
+                f"{section!r} may only be set in config/{filename}, not in {where}: evidence "
+                "thresholds are fixed before results are seen (ADR 0032)"
+            )
 
 
 def _reject_secrets(layer: Mapping[str, Any], *, where: str) -> None:

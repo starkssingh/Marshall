@@ -17,12 +17,30 @@ deviation of the period returns, and ``n`` is the number of periods. Annualize a
 - `min_track_record_length`: the number of periods needed for the observed Sharpe ratio to exceed
   a benchmark with confidence ``1 - alpha`` (Bailey and Lopez de Prado 2012):
   ``1 + (1 - skew * sr + (kurt - 1) / 4 * sr^2) * (z / (sr - sr_benchmark))^2``.
+
+Gate conventions (VAL-007, ``config/gates.yaml``, ADR 0032):
+
+- `politis_white_block_length`: the automatic mean block length of the stationary bootstrap
+  (Politis and White 2004, with the correction of Patton, Politis and White 2009):
+  ``b = (2 G^2 / D)^(1/3) n^(1/3)`` with ``G = sum_{|k|<=M} lambda(k/M) |k| R(k)``,
+  ``D = 2 (sum_{|k|<=M} lambda(k/M) R(k))^2``, the flat-top window ``lambda`` (1 up to 1/2, then
+  falling linearly to 0 at 1) and ``M = 2 m``, where m is the first lag from which ``K_n =
+  max(5, sqrt(log10 n))`` consecutive autocorrelations are all below ``2 sqrt(log10(n) / n)``
+  (``M = ceil(sqrt(n)) + K_n`` if there is none); b is capped at ``ceil(min(3 sqrt(n), n / 3))``.
+  `gate_block_length` floors it at the gates' ``min_block_days``.
+- `bootstrap_sharpe`: the percentile interval and the one-sided p-value of ``SR > 0`` from one set
+  of stationary-bootstrap resamples. The p-value imposes the null by centring the bootstrap
+  distribution on the estimate: ``p = (1 + #{SR*_b - SR >= SR}) / (1 + B)``.
+- `bootstrap_distribution`: any statistic of the resampled series (rows of resampled returns),
+  for intervals on other metrics.
 """
 
 from __future__ import annotations
 
 import math
+from collections.abc import Callable
 from dataclasses import dataclass
+from typing import Literal
 
 import numpy as np
 import numpy.typing as npt
@@ -178,7 +196,12 @@ def stationary_bootstrap(
     """
     if mean_block < 1:
         raise ValueError("mean_block must be at least 1")
-    rng = make_rng(seed)
+    return _stationary_indices(make_rng(seed), n, n_boot, mean_block)
+
+
+def _stationary_indices(
+    rng: np.random.Generator, n: int, n_boot: int, mean_block: float
+) -> npt.NDArray[np.int64]:
     starts = rng.integers(0, n, size=(n_boot, n))
     restart = rng.random((n_boot, n)) < 1 / mean_block
     index = np.empty((n_boot, n), dtype=np.int64)
@@ -186,6 +209,118 @@ def stationary_bootstrap(
     for t in range(1, n):
         index[:, t] = np.where(restart[:, t], starts[:, t], (index[:, t - 1] + 1) % n)
     return index
+
+
+def bootstrap_distribution(
+    returns: npt.ArrayLike,
+    statistic: Callable[[FloatArray], FloatArray],
+    *,
+    n_boot: int,
+    mean_block: float,
+    seed: int,
+    chunk: int = 500,
+) -> FloatArray:
+    """`statistic` of `n_boot` stationary-bootstrap resamples of `returns`.
+
+    `statistic` maps a 2-D array (one resampled series per row) to one value per row. Resamples
+    are drawn in chunks of `chunk` rows from one generator seeded with `seed`, so the result
+    depends only on the arguments, and memory stays bounded for long series.
+    """
+    if mean_block < 1:
+        raise ValueError("mean_block must be at least 1")
+    r = _clean(returns)
+    rng = make_rng(seed)
+    parts = []
+    for size in [chunk] * (n_boot // chunk) + ([n_boot % chunk] if n_boot % chunk else []):
+        parts.append(
+            np.asarray(statistic(r[_stationary_indices(rng, len(r), size, mean_block)]), float)
+        )
+    return np.concatenate(parts) if parts else np.array([], dtype=np.float64)
+
+
+def row_sharpe(draws: FloatArray) -> FloatArray:
+    """Per-period Sharpe ratio of each row (NaN for a row without variance)."""
+    std = np.std(draws, axis=1, ddof=1)
+    safe = np.where(std > 0, std, 1.0)
+    result: FloatArray = np.where(std > 0, np.mean(draws, axis=1) / safe, np.nan)
+    return result
+
+
+@dataclass(frozen=True)
+class SharpeBootstrap:
+    """Stationary-bootstrap inference on a per-period Sharpe ratio."""
+
+    sharpe: float
+    ci_low: float
+    ci_high: float
+    #: One-sided p-value of ``SR > 0`` (the null ``SR <= 0`` imposed by centring).
+    p_value: float
+    level: float
+    mean_block: float
+    n_boot: int
+
+
+def bootstrap_sharpe(
+    returns: npt.ArrayLike,
+    *,
+    n_boot: int,
+    mean_block: float,
+    seed: int,
+    level: float = 0.95,
+) -> SharpeBootstrap:
+    """Percentile interval and one-sided p-value of the Sharpe ratio (see the module docstring)."""
+    r = _clean(returns)
+    sr = sharpe_ratio(r)
+    if len(r) < 3 or math.isnan(sr):
+        return SharpeBootstrap(sr, math.nan, math.nan, math.nan, level, mean_block, n_boot)
+    draws = bootstrap_distribution(r, row_sharpe, n_boot=n_boot, mean_block=mean_block, seed=seed)
+    valid = draws[~np.isnan(draws)]
+    alpha = (1 - level) / 2
+    low, high = np.quantile(valid, [alpha, 1 - alpha])
+    p_value = (1 + int(np.sum(valid - sr >= sr))) / (1 + len(valid))
+    return SharpeBootstrap(sr, float(low), float(high), p_value, level, mean_block, n_boot)
+
+
+def politis_white_block_length(returns: npt.ArrayLike) -> float:
+    """Automatic mean block length of the stationary bootstrap (see the module docstring).
+
+    1 for a series too short or without variance.
+    """
+    r = _clean(returns)
+    n = len(r)
+    if n < 4 or np.all(r == r[0]):
+        return 1.0
+    eps = r - np.mean(r)
+    k_n = max(5, math.ceil(math.sqrt(math.log10(n))))
+    m_max = math.ceil(math.sqrt(n)) + k_n
+    b_max = math.ceil(min(3 * math.sqrt(n), n / 3))
+    lags = min(m_max, n - 1)
+    acv = np.array([float(eps[k:] @ eps[: n - k]) / n for k in range(lags + 1)])
+    if acv[0] <= 0:
+        return 1.0
+    critical = 2 * math.sqrt(math.log10(n) / n)
+    insignificant = np.abs(acv / acv[0]) < critical
+    m_hat = next(
+        (m for m in range(1, lags - k_n + 2) if insignificant[m : m + k_n].all()),
+        None,
+    )
+    bandwidth = min(m_max if m_hat is None else 2 * m_hat, lags)
+    k = np.arange(1, bandwidth + 1)
+    window = np.where(k / bandwidth <= 0.5, 1.0, 2 * (1 - k / bandwidth))
+    g = 2 * float(np.sum(window * k * acv[1 : bandwidth + 1]))
+    long_run = acv[0] + 2 * float(np.sum(window * acv[1 : bandwidth + 1]))
+    if g == 0 or long_run == 0:
+        return 1.0
+    block = (2 * g**2 / (2 * long_run**2)) ** (1 / 3) * n ** (1 / 3)
+    return float(min(block, b_max))
+
+
+def gate_block_length(
+    returns: npt.ArrayLike, rule: Literal["politis_white"] | int, min_block: int
+) -> float:
+    """Mean block length by the gate conventions: Politis-White or fixed, at least `min_block`."""
+    base = politis_white_block_length(returns) if rule == "politis_white" else float(rule)
+    return max(base, float(min_block))
 
 
 def min_track_record_length(

@@ -1,6 +1,6 @@
 """TGT-001: target specs, long target frames and the schema guard."""
 
-from datetime import date
+from datetime import date, time
 
 import pandas as pd
 import pytest
@@ -8,9 +8,9 @@ import pytest
 from helpers.pipeline import REPO
 from helpers.targets import STUB_DEFINITION as DEFINITION
 from helpers.targets import STUB_KIND as KIND
-from helpers.targets import stub_compute
+from helpers.targets import TRADING_DAY, stub_compute
 from xq.core.config import TargetSetConfig, load_config
-from xq.data.calendar import MarketClock
+from xq.data.calendar import MarketClock, regular_trading_day
 from xq.targets.base import (
     TargetKind,
     TargetLeakError,
@@ -19,6 +19,7 @@ from xq.targets.base import (
     compute_targets,
     definition_hash,
     fill_delay_report,
+    market_horizon,
     target_values,
 )
 
@@ -31,7 +32,7 @@ CLOCK = MarketClock.for_range(
 
 
 def test_long_frame_has_one_row_per_decision_and_target() -> None:
-    specs = KIND.expand(DEFINITION)
+    specs = KIND.expand(DEFINITION, TRADING_DAY)
     frame = compute_targets(KIND, specs, pd.DataFrame(), pd.Series(1.0, index=T), CLOCK)
     assert frame.index.name == "decision_time"
     assert list(frame.columns) == [
@@ -61,7 +62,11 @@ def test_kinds_must_return_every_value_column() -> None:
     broken = TargetKind("bad", 1, KIND.expand, KIND.sigma, bad, KIND.lookahead)
     with pytest.raises(ValueError, match="label_end"):
         compute_targets(
-            broken, KIND.expand(DEFINITION), pd.DataFrame(), pd.Series(1.0, index=T), CLOCK
+            broken,
+            KIND.expand(DEFINITION, TRADING_DAY),
+            pd.DataFrame(),
+            pd.Series(1.0, index=T),
+            CLOCK,
         )
 
 
@@ -101,3 +106,27 @@ def test_fill_delay_report_counts_labelled_rows_with_a_late_fill() -> None:
         "a": {"labelled": 3, "delayed": 1, "max_delay_s": 7.25},  # 5.0 is not more than 5 s
         "b": {"labelled": 0, "delayed": 0, "max_delay_s": None},
     }
+
+
+def test_market_horizon_counts_days_as_trading_days() -> None:
+    day = pd.Timedelta(hours=23)
+    assert market_horizon("1d", day) == pd.Timedelta(hours=23)
+    assert market_horizon("2D", day) == pd.Timedelta(hours=46)
+    assert market_horizon("4h", day) == pd.Timedelta(hours=4)
+    assert market_horizon("36h", day) == pd.Timedelta(hours=36)
+    assert market_horizon("15m", day) == pd.Timedelta(minutes=15)
+
+
+@pytest.mark.parametrize("label", ["1d6h", "1 days", "2day"])
+def test_horizon_labels_may_not_mix_days_with_other_units(label: str) -> None:
+    with pytest.raises(ValueError, match="mixes days"):
+        TargetSetConfig(kind="stub", horizons=[label], price_refs=["mid"])
+
+
+def test_regular_trading_day_follows_the_configured_market_hours() -> None:
+    sessions = load_config("research", config_dir=REPO / "config").sessions_config()
+    assert regular_trading_day(sessions) == pd.Timedelta(hours=23)
+    day_session = sessions.model_copy(
+        update={"market": sessions.market.model_copy(update={"open": time(9), "close": time(17)})}
+    )
+    assert regular_trading_day(day_session) == pd.Timedelta(hours=8)

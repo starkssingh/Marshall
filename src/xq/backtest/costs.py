@@ -18,7 +18,9 @@ conservative assumptions, not broker terms (ADR 0029).
 - **Latency**: orders arrive ``latency_ms`` of market time after the decision; a fill more than
   ``max_fill_delay_s`` after that is missed.
 
-Amounts are USD (the quote currency of XAUUSD); a positive cost reduces P&L.
+Amounts are USD (the quote currency of XAUUSD); a positive cost reduces P&L. A provisional model
+charges financing on both sides (ADR 0032), and every net result computed with it carries
+`SCREENING_LABEL` (`CostModel.result_label`): reports print it with each net figure.
 """
 
 from __future__ import annotations
@@ -39,6 +41,8 @@ from xq.datasets.calendar_columns import calendar_columns
 
 FloatArray = npt.NDArray[np.float64]
 _BPS = 1e-4
+#: The mark of every net result computed with a provisional cost model (ADR 0032).
+SCREENING_LABEL = "screening, placeholder costs"
 
 
 class CostModel:
@@ -82,6 +86,13 @@ class CostModel:
             cfg.sessions_config(),
             stats,
         )
+
+    @property
+    def result_label(self) -> str:
+        """How net results computed with this model must be labelled in reports."""
+        if self.config.provisional:
+            return SCREENING_LABEL
+        return f"net of {self.config.venue} costs"
 
     @property
     def latency(self) -> pd.Timedelta:

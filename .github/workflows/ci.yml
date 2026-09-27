@@ -46,3 +46,30 @@ jobs:
 
       - name: Tests (unit, leakage, property, integration)
         run: uv run pytest -m "not slow and not research" --cov --cov-report=term-missing:skip-covered
+
+  docker:
+    # The image is verified here because it cannot be built in the Claude sandbox (ADR 0032, C-6):
+    # the `test` stage (runtime image + dev dependencies + tests) is built and the suite runs
+    # inside it, as the non-root user and under a non-UTC local timezone.
+    name: docker image, tests inside it
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Build the runtime stage
+        run: docker build --target runtime -t xq:dev -f docker/Dockerfile .
+
+      - name: Runtime image starts
+        run: docker run --rm xq:dev xq --version
+
+      - name: Build the test stage
+        run: docker build --target test -t xq:test -f docker/Dockerfile .
+
+      - name: Confirm non-UTC local timezone inside the image
+        run: >-
+          docker run --rm xq:test python -c
+          "import time; assert time.strftime('%z') == '+0900', time.strftime('%z')"
+
+      - name: Tests inside the image (unit, leakage, property, integration)
+        run: docker run --rm xq:test

@@ -8,9 +8,10 @@ import pandas as pd
 import pytest
 
 from helpers.pipeline import REPO
+from helpers.ticks import dense_ticks
 from xq.backtest.costs import CostModel
 from xq.backtest.metrics import performance_metrics
-from xq.backtest.vectorized import BacktestResult, run_vectorized
+from xq.backtest.vectorized import BacktestResult, required_quotes, run_vectorized
 from xq.core.config import CostModelConfig, load_config
 from xq.core.errors import NaiveTimestampError
 from xq.data.calendar import MarketClock
@@ -82,6 +83,7 @@ def test_a_long_round_trip_matches_a_hand_computation() -> None:
     trade = result.trades.iloc[0]
     assert (trade["side"], trade["open"]) == (1.0, False)
     assert trade["pnl"] == pytest.approx(expected)
+    assert result.cost_basis == "screening, placeholder costs"  # a provisional cost model
 
 
 def test_a_short_held_over_the_triple_rollover_pays_four_nights() -> None:
@@ -113,16 +115,46 @@ def test_a_fill_later_than_the_allowed_delay_is_missed_and_retried() -> None:
     assert result.fills["decision_time"].tolist() == [at("2024-03-12 14:15")]
 
 
-def test_a_decision_at_the_friday_close_fills_after_the_sunday_reopen() -> None:
+def test_a_decision_at_the_friday_close_places_no_order() -> None:
+    # ADR 0032: 17:00 New York is the close itself; the decision is not entered at the reopen.
     q = quotes(
         ("2024-03-15 20:59:59", 1999.9, 2000.1),  # the signal bar's last quote
         ("2024-03-17 22:00:03", 2004.9, 2005.1),  # Sunday reopen
+        ("2024-03-17 22:15:02", 2005.9, 2006.1),
     )
-    result = screen(positions(("2024-03-15 21:00", 1.0)), q)
-    assert result.fills["fill_time"].tolist() == [at("2024-03-17 22:00:03")]
-    assert result.fills["price"].iloc[0] == pytest.approx(2005.1 * 1.00005)
+    result = screen(positions(("2024-03-15 21:00", 1.0), ("2024-03-17 22:15", 1.0)), q)
+    assert result.closed.tolist() == [at("2024-03-15 21:00")]
+    assert result.missed.empty
+    # the first decision taken while open enters, after its own latency
+    assert result.fills["decision_time"].tolist() == [at("2024-03-17 22:15")]
+    assert result.fills["fill_time"].tolist() == [at("2024-03-17 22:15:02")]
+    assert result.fills["price"].iloc[0] == pytest.approx(2006.1 * 1.00005)
     assert (result.fills["fill_time"] >= result.fills["decision_time"] + S).all()
     assert bool(result.trades["open"].iloc[0])
+
+
+def test_an_exit_decided_while_closed_is_not_executed() -> None:
+    q = quotes(
+        ("2024-03-12 14:00:02", 1999.9, 2000.1),  # Tuesday: buy
+        ("2024-03-12 21:40:00", 1999.9, 2000.1),  # a stray quote inside the daily break
+        ("2024-03-12 22:00:05", 2001.9, 2002.1),  # reopen
+        ("2024-03-12 22:15:02", 2002.9, 2003.1),
+    )
+    result = screen(
+        positions(
+            ("2024-03-12 14:00", 1.0),
+            ("2024-03-12 21:30", 0.0),  # in the break: no order
+            ("2024-03-12 22:15", 0.0),  # open: the exit happens here
+        ),
+        q,
+    )
+    assert result.closed.tolist() == [at("2024-03-12 21:30")]
+    assert result.fills["decision_time"].tolist() == [
+        at("2024-03-12 14:00"),
+        at("2024-03-12 22:15"),
+    ]
+    assert result.fills["fill_time"].iloc[1] == at("2024-03-12 22:15:02")
+    assert result.fills["position_lots"].iloc[1] == 0.0
 
 
 def test_a_side_flip_closes_one_trade_and_opens_another() -> None:
@@ -199,3 +231,32 @@ def test_performance_metrics_of_a_screened_round_trip() -> None:
     assert metrics["turnover"] == pytest.approx(turnover)
     assert metrics["gross_profit"] - metrics["total_costs"] == pytest.approx(net)
     assert metrics["cagr"] == pytest.approx((1 + net / CAPITAL) ** (252 / 2) - 1)
+
+
+@pytest.mark.parametrize("seed", [1, 2, 3])
+def test_required_quotes_give_the_same_screen_as_all_quotes(seed: int) -> None:
+    ticks = dense_ticks("2024-03-11 00:00", "2024-03-16 00:00", seed=seed, mean_interval_s=20)
+    full = pd.DataFrame(
+        {
+            "ts_utc": pd.to_datetime(ticks["ts_utc"], unit="ns", utc=True),
+            "bid": ticks["bid"],
+            "ask": ticks["ask"],
+        }
+    )
+    rng = np.random.default_rng(seed)
+    # decisions every 15 minutes, market closed ones included, with sparse position changes
+    decisions = pd.date_range("2024-03-11 00:00", "2024-03-15 23:45", freq="15min", tz="UTC")
+    changes = rng.random(len(decisions)) < 0.05
+    levels = rng.choice([-1.0, -0.5, 0.0, 0.5, 1.0], size=len(decisions))
+    pos = pd.Series(np.where(changes, levels, np.nan), index=decisions).ffill().fillna(0.0)
+    keep = required_quotes(full, decisions, COSTS, CLOCK)
+    assert len(keep) < len(full) / 10
+    a = screen(pos, full)
+    b = screen(pos, full.iloc[keep].reset_index(drop=True))
+    pd.testing.assert_frame_equal(a.fills, b.fills)
+    pd.testing.assert_frame_equal(a.daily, b.daily)
+    pd.testing.assert_frame_equal(a.trades, b.trades)
+    pd.testing.assert_series_equal(a.financing, b.financing)
+    assert a.missed.equals(b.missed)
+    assert a.closed.equals(b.closed)
+    assert len(a.fills) > 5

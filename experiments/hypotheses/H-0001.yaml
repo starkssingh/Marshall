@@ -1,0 +1,49 @@
+# DRAFT for owner review (Sprint 4, BASE-005). Not registered: `xq exp register` locks this exact
+# text, so register it only after the owner has read it and before the board runs on real data
+# (not allowed in Sprint 4). The plan records the first baseline board as H-0001.
+id: H-0001
+title: Do simple strategies make money after costs? (the baseline board)
+family: baselines
+statement: >
+  At least one fixed-parameter baseline on the baseline board (experiments/configs/baselines/
+  board.yaml: buy-and-hold, time-series momentum, z-score reversion, MA crossovers, Donchian
+  breakout, their volatility-targeted versions, and the sign of the forecast baselines) earns a
+  positive stitched out-of-sample net Sharpe ratio on the walk-forward test folds of ds_base that
+  is significant (one-sided stationary-bootstrap p < 0.05) and survives deflation for every
+  configuration evaluated in this family.
+rationale: >
+  Trend-following and carry-like effects have been reported in gold and other futures, so simple
+  rules might earn something after costs. They might not: retail XAUUSD costs (spread, slippage
+  around the rollover and releases, financing on both sides) are large relative to daily moves,
+  published effects decay, and one year of out-of-sample data is short. Whatever the answer, the
+  board is the benchmark every later candidate must beat on identical folds and costs.
+target: fwd_ret_mid_1h           # forecast baselines also run on fwd_ret_mid_15m, _4h and _1d
+information_set:
+  - base.v1 decision-bar columns and the 1h, 4h and 1d context bars joined on availability
+  - calendar and session columns known in advance (DS-007)
+horizon: 15m, 1h, 4h, 1d (forecast baselines); rule baselines hold until their own signal changes
+timeframe: 15m
+discovery_window:                # the first training window: nothing is tuned on it
+  start: "2021-09-26T21:00:00Z"
+  end: "2024-09-25T21:00:00Z"
+evaluation_window:               # walk-forward test folds (min_train 1095D, 91-day folds)
+  start: "2024-09-25T21:00:00Z"
+  end: "2025-09-25T21:00:00Z"
+primary_metric: >
+  stitched out-of-sample net Sharpe ratio of daily returns after the provisional cost model
+  (screening, placeholder costs), annualized with 252 periods
+success_criteria:
+  - >
+    A baseline has net Sharpe > 0 with one-sided bootstrap p < 0.05 (config/gates.yaml R1
+    conventions: 10,000 resamples, Politis-White block length of at least 5 days) and a deflated
+    Sharpe ratio >= 0.95 with the family's effective trial count
+falsification_criteria:
+  - >
+    No baseline has a one-sided bootstrap p < 0.05 for net Sharpe > 0, or none keeps a deflated
+    Sharpe ratio >= 0.95; either way the result stands as the negative benchmark
+trial_budget: 24                 # 12 rule strategies + 12 forecast-sign strategies, one board run
+planned_tests:
+  - Stationary-bootstrap Sharpe interval and one-sided p-value (gate conventions)
+  - Deflated Sharpe ratio with the effective and raw trial counts
+  - Random-entry null per strategy (1,000 seeds, matched trade count and holding times)
+  - Diebold-Mariano of every regression forecast baseline against zero_return

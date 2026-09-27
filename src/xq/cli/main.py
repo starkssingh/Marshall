@@ -30,10 +30,12 @@ from xq.data.raw_store import ingest, rebuild_mirror, verify_raw_store
 from xq.data.spreads import build_spread_stats
 from xq.datasets.builder import build_dataset, verify_dataset
 from xq.datasets.spec import load_spec
+from xq.models.board import load_board_config, run_baseline_board
 from xq.quality.validate import validate_source
 from xq.tracking.db import current_revision, engine_for, head_revision, upgrade_to_head
 from xq.tracking.hypotheses import register_hypothesis
 from xq.tracking.registry import list_hypotheses
+from xq.tracking.runs import experiment_run
 from xq.tracking.trials import trial_count
 
 EXIT_USAGE_ERROR = 2
@@ -413,6 +415,71 @@ def exp_trials(
     )
 
 
+baselines_app = typer.Typer(
+    help="Walk-forward baseline board (BASE-001, BASE-002, BASE-005).", no_args_is_help=True
+)
+app.add_typer(baselines_app, name="baselines")
+DEFAULT_BOARD = Path("experiments/configs/baselines/board.yaml")
+
+
+@baselines_app.command("run")
+def baselines_run(
+    ctx: typer.Context,
+    dataset: Annotated[str, typer.Option("--dataset", help="Dataset id (ds-...).")],
+    targets: Annotated[
+        list[str] | None,
+        typer.Option("--target", help="Target to forecast (repeatable; default: the board's)."),
+    ] = None,
+    board_path: Annotated[
+        Path, typer.Option("--config", help="Board configuration YAML.")
+    ] = DEFAULT_BOARD,
+    hypothesis: Annotated[
+        str, typer.Option("--hypothesis", help="Registered hypothesis the run belongs to.")
+    ] = "H-0001",
+    seed: Annotated[int, typer.Option("--seed", help="Run seed.")] = 0,
+    exploratory: Annotated[
+        bool,
+        typer.Option(
+            "--exploratory", help="Allow a dirty git tree; the run is then not confirmatory."
+        ),
+    ] = False,
+    jobs: Annotated[int, typer.Option("--jobs", help="Processes for walk-forward folds.")] = 1,
+) -> None:
+    """Put every baseline through walk-forward and the cost model; write the board report.
+
+    Net results are screening results while the cost model is provisional; the report marks them.
+    """
+    with pipeline_run(ctx.obj) as run:
+        board = load_board_config(board_path)
+        chosen = list(targets or board.targets)
+        with experiment_run(
+            run.cfg,
+            run.engine,
+            hypothesis,
+            {"board": board.model_dump(mode="json"), "targets": chosen},
+            kind="baseline_board",
+            seed=seed,
+            dataset_id=dataset,
+            exploratory=exploratory,
+        ) as context:
+            result = run_baseline_board(context, dataset, board, targets=chosen, n_jobs=jobs)
+    summary = result.summary
+    typer.echo(
+        f"baseline board of {dataset} ({result.cost_basis}): {len(result.strategies)} "
+        f"strategies, {len(result.forecasts)} forecast baselines; out of sample "
+        f"{summary['oos_start']} to {summary['oos_end']} ({summary['oos_days']} trading days); "
+        f"trials {summary['trials']['raw']} raw, {summary['trials']['effective']} effective"
+    )
+    for row in result.strategies.to_dict(orient="records"):
+        typer.echo(
+            f"  {row['strategy']}: Sharpe {row['sharpe']:.2f} "
+            f"[{row['sharpe_ci_low']:.2f}, {row['sharpe_ci_high']:.2f}], "
+            f"p {row['sharpe_p']:.3f}, DSR {row['dsr']:.3f}, {row['trade_count']:.0f} trades "
+            f"({row['cost_basis']})"
+        )
+    typer.echo(f"report: {result.report_dir}")
+
+
 db_app = typer.Typer(help="Metadata database migrations.", no_args_is_help=True)
 app.add_typer(db_app, name="db")
 
@@ -449,7 +516,6 @@ def db_current(ctx: typer.Context) -> None:
 # Command groups for later phases. Each is registered now so the CLI surface is stable; the
 # commands arrive in the sprint named in the help text.
 _PLANNED_GROUPS = {
-    "baselines": "Walk-forward baseline board (Sprint 4: BASE-001..006).",
     "research": "Exploratory, statistical and volatility research (Sprints 5-8).",
     "robustness": "Robustness stress tests (Sprint 9: ROB-001..008).",
     "registry": "Model registry and strategy bundles (Sprint 13: MREG-001..005).",
