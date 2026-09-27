@@ -64,6 +64,8 @@ class RunContext:
     cfg: AppConfig
     engine: Engine
     rng: np.random.Generator
+    #: The run this run reproduces (EXP-006): its configurations are not counted as new trials.
+    reproduces: str | None = None
 
     @property
     def run_id(self) -> str:
@@ -120,8 +122,12 @@ def experiment_run(
     dataset_id: str | None = None,
     exploratory: bool = False,
     title: str | None = None,
+    reproduces: str | None = None,
 ) -> Iterator[RunContext]:
     """Record a run of `hypothesis_id` around the enclosed block (see the module docstring).
+
+    Args:
+        reproduces: The id of the run this one reproduces (``xq exp reproduce``, EXP-006).
 
     Raises:
         RunContextError: for a confirmatory run on a dirty or unidentifiable git tree, or without
@@ -167,7 +173,7 @@ def experiment_run(
         seed=seed,
         host=socket.gethostname(),
     )
-    context = RunContext(run, cfg, engine, make_rng(seed))
+    context = RunContext(run, cfg, engine, make_rng(seed), reproduces)
     log.info(
         "experiment_run_started",
         experiment_run_id=run.run_id,

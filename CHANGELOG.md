@@ -616,8 +616,85 @@ IDs from `docs/specs/development-plan.md`.
   forecast-to-fill run on synthetic quotes with a causal stub forecaster (declared calibrated,
   not a model) traces every fill, and with the stub uncalibrated nothing reaches the risk engine.
   ADR 0052.
+- VAL-003: probability of backtest overfitting by combinatorially symmetric cross-validation
+  (`xq.validation.pbo.pbo_cscv`) — 16 contiguous blocks by default, C(16, 8) = 12,870 in-sample
+  halves, the in-sample winner's out-of-sample logit rank, PBO, the probability of loss and the
+  degradation slope. Proven on known truth (`tests/helpers/strategies.py`): a hand-computed case,
+  noise families averaging 0.5, a graded genuine edge at or below the R2 limit, a single-point
+  optimum on noise above it; registered in the recovery registry. ADR 0054.
+- VAL-004: White's Reality Check, Hansen's SPA and the Romano–Wolf step-down across a strategy
+  family (`xq.validation.spa.family_tests`) — one stationary bootstrap for all tests (Politis–White
+  block, at least 5 periods), SPA's consistent p-value with its lower and upper bounds, Romano–Wolf
+  adjusted p-values and survivors. Proven on known truth: about nominal size on noise-only families
+  (iid and GARCH), a graded edge detected with its best configurations surviving, SPA's power over
+  the Reality Check when poor strategies join the family. ADR 0054.
+- VAL-006: multiple-testing control per test family (`xq.validation.multiple_testing`) — Holm
+  (family-wise, the default), Benjamini–Hochberg (false discovery, only where a family declares
+  it) and Bonferroni, adjusted within each family (`adjust_by_family`); the Sprint 6
+  `holm_adjust` now delegates to it. Hand-computed references, agreement with statsmodels, and the
+  controlled error rates on simulated nulls. ADR 0054.
+- ROB-001: parameter perturbation and plateau metrics (`xq.robustness.perturb`) — each parameter
+  moved by ±10/20/30 % (integers to the nearest integer at least one step away, gridded
+  parameters to the neighbouring allowed values), one at a time, jointly and over pairwise heat-map
+  grids; per level the joint neighbourhood's profitable share, median, worst and
+  median-to-nominal ratio; the R2 `parameter_neighbourhood` check read from `config/gates.yaml`
+  (`GatesConfig.criterion`, `GateCheck`). Proven on known truth: a single-point optimum on noise,
+  chosen in sample, fails in about 85 % of replications; a genuine trend edge chosen the same way
+  passes in at least 90 %. ADR 0054.
+- ROB-002: cost and latency stress (`xq.robustness.costs_stress`) — the plan's grid one dimension
+  at a time (spread x1.25/1.5/2 by widening quotes around the mid, slippage x2/3, latency
+  +250 ms/1 s/5 s, financing x1.5 with credits reduced) and the R2 scenario from
+  `config/gates.yaml` (1.5x spread and 2x slippage together), each screened again by
+  `run_vectorized`; the break-even multiplier of all costs, found by the secant method on actual
+  runs. Proven on known truth: the R2 scenario passes exactly when the gross edge covers the
+  stressed costs, a thin edge profitable at baseline fails, the break-even run nets zero, spreads
+  scale exactly, and latency eats a signal priced in over 10 s in proportion to the delay.
+  ADR 0054.
+- ROB-003: stationary block bootstrap of daily returns and trade-order permutation
+  (`xq.robustness.bootstrap`) — percentile intervals of the annualized Sharpe ratio, CAGR and
+  maximum drawdown (Politis–White block, at least 5 days; drawdowns from the starting capital),
+  and the maximum drawdown and longest time under water over shuffled trade orders with the
+  observed order's percentile. Proven on known truth: Sharpe and CAGR coverage at 90 % within
+  0.85–0.95 for iid, GARCH and AR(1) returns (an iid bootstrap under-covers the AR(1) case), the
+  drawdown interval brackets the true drawdown median, unordered trades have uniform
+  percentiles and clustered losses sit at the top. ADR 0054.
+- ROB-006: pre-registered slicing (`xq.robustness.slicing`) — the slices are read from the
+  registered, hash-locked text of the hypothesis version a run tested (`run_slices`); a
+  `DeclaredSlices` cannot be built by a caller. Vocabulary: year, volatility tercile (of the
+  daily sigma-hat known at the start of the day) and session (closed trades by entry session,
+  overlaps named, DST by construction); unknown names are refused and regime slices wait for
+  REG-007. Per slice: net P&L, its share, Sharpe and positive days (or trades, mean trade and win
+  rate); the R2 `max_single_year_pnl_share` check. The hypothesis template's slices use the
+  vocabulary. Proven on planted edges: an edge earned in one year fails the gate, an edge in
+  high volatility lands in the high tercile, sessions follow DST. ADR 0054.
+- ROB-007: execution-delay sensitivity (`xq.robustness.delay`) — the net Sharpe ratio with orders
+  0, 1, 2 and 3 bars late (`delay_curve` for any strategy; `screen_delays` shifts a target series
+  by whole decision bars and screens it), its retention and whether it flips, and the R2
+  `execution_delay` check. Proven on known truth: a genuine trend edge decays smoothly (median
+  retention falling to above 0.8 at three bars) and passes, a bid-ask-bounce edge flips at the
+  first delay and fails, a look-ahead leak collapses. ADR 0054.
+- EXP-006: `xq exp reproduce <run_id>` (`xq.tracking.reproduce`) — rebuilds the run's dataset
+  from the spec `dataset_versions` recorded (`recorded_spec`; altered content is refused, a spec
+  that now builds another id fails), repeats the run in a `reproduction` run with the original's
+  configuration and seed and the walk-forward cache off, and compares every metric within
+  `--rtol`/`--atol` (1e-6/1e-9), showing but not judging metrics that depend on the registry's
+  trial count (the DSR); exit 1 when not reproduced. A reproduction does not count the original's
+  configurations as trials again (`RunContext.reproduces`). Reproducible kinds: `baseline_board`.
+  A fixture board run reproduces; a changed metric, altered dataset bytes and kinds without a
+  reproducer are refused. ADR 0054.
 
 ### Changed
+
+- C-22 (owner's decision, ADR 0053): position sizing scales on the edge per unit of risk instead
+  of the raw calibrated probability — `ev_r = p_lcb x TP/SL - (1 - p_lcb) - round_trip_cost/SL`
+  with `p_lcb` the probability's lower confidence bound, and the multiplier
+  `clip(ev_r / ev_r_full, 0, 1)`; `ev_r_full` (0.25) and `lcb_z` (1.645) are provisional profile
+  values (`risk-2`). The risk engine takes its own bound and prices the round trip with its own cost
+  model (`CostModel.round_trip_cost_bps`, shared with the signal engine); an intent with a
+  probability needs its standard error (`TradeIntent.p_se`) and a target. Tested: 1:1 and 2:1
+  payoffs at break-even get no size, a 2:1 trade at p = 0.45 gets a positive one, costs and
+  uncertainty shrink it, and the limit properties still hold; the forecast-to-fill run uses the
+  default profile.
 
 - EDA-006 holding periods are TGT-002's (ADR 0040, owner review of PR #9): candidates are TGT-002
   horizon labels; from every market-open decision of a 1m bar on a 5-minute grid, the move over h

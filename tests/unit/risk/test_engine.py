@@ -52,7 +52,7 @@ def test_an_entry_risks_half_a_percent_to_its_stop() -> None:
     assert decision.adjusted_stop == 1990.1
     assert decision.decision_id == "D-I000001"
     assert decision.reasons == ("entry: sized by the risk engine",)
-    assert decision.config_version == RISK.config_version == f"risk-1@{profile_hash(RISK.config)}"
+    assert decision.config_version == RISK.config_version == f"risk-2@{profile_hash(RISK.config)}"
     snapshot = decision.limits_snapshot
     assert snapshot["method_lots"] == pytest.approx(0.5)
     assert snapshot["requested_lots"] == pytest.approx(0.5)
@@ -72,17 +72,56 @@ def test_sizing_uses_equity_and_the_drawdown_throttle() -> None:
     assert RISK.evaluate(long(), down, market_state()).size_lots == 0.25
 
 
-def test_only_a_calibrated_probability_scales_the_size() -> None:
-    uncalibrated = RISK.evaluate(long(p_win=0.58), risk_state(), market_state())
+def test_only_a_calibrated_probability_with_its_error_and_target_sizes() -> None:
+    edge = {"p_win": 0.58, "p_se": 0.02, "target": 2020.1}
+    uncalibrated = RISK.evaluate(long(**edge), risk_state(), market_state())
     assert not uncalibrated.approved
     assert uncalibrated.reasons == ("an uncalibrated win probability cannot size a position",)
-    # 0.55 is halfway from 0.5 (no size) to 0.6 (full size)
-    calibrated = RISK.evaluate(long(p_win=0.55, calibrated=True), risk_state(), market_state())
-    assert calibrated.size_lots == 0.25
-    zero = RISK.evaluate(long(p_win=0.5, calibrated=True), risk_state(), market_state())
-    assert zero.approved
-    assert zero.side is None
-    assert zero.reasons[-2:] == ("sized to zero lots", "target unchanged: no order")
+    no_error = RISK.evaluate(
+        long(p_win=0.58, target=2020.1, calibrated=True), risk_state(), market_state()
+    )
+    assert no_error.reasons == ("a win probability needs its standard error (p_se) to size on",)
+    no_target = RISK.evaluate(
+        long(p_win=0.58, p_se=0.02, calibrated=True), risk_state(), market_state()
+    )
+    assert no_target.reasons == ("a win probability needs a target to price the payoff",)
+
+
+def edge_long(p: float, p_se: float, payoff: float, **market: float) -> TradeIntent:
+    """A calibrated long with a stop 10 below the ask and the target `payoff` x 10 above it."""
+    ask = market.get("ask", 2000.1)
+    return long(stop=ask - 10.0, target=ask + 10.0 * payoff, p_win=p, p_se=p_se, calibrated=True)
+
+
+def test_a_two_to_one_trade_at_p_0_45_is_sized_on_its_edge_net_of_costs() -> None:
+    decision = RISK.evaluate(edge_long(0.45, 0.05, 2.0), risk_state(), market_state())
+    snap = decision.limits_snapshot
+    # the placeholder cost model's round trip: 1 bp of spread, 2 x (0.5 bp + 0.1 x the daily
+    # 1 % scaled to one minute, 2.692 bp) of slippage and 2 x 0.175 bp of commission: 2.888 bp
+    cost = float(snap["round_trip_cost"])
+    assert cost == pytest.approx((1.0 + 2 * (0.5 + 0.1 * 0.01 / 1380**0.5 / 1e-4) + 0.35) * 0.2)
+    assert snap["p_lcb"] == pytest.approx(0.36775)
+    ev_r = 0.36775 * 2 - 0.63225 - cost / 10.0
+    assert snap["ev_r"] == pytest.approx(ev_r)
+    assert snap["edge_scale"] == pytest.approx(ev_r / 0.25)
+    # 0.5 lots of risk budget x 0.182, rounded down
+    assert decision.size_lots == 0.09
+    assert decision.size_lots > 0  # raw-p scaling (zero below 0.5) gave this trade nothing
+
+
+def test_payoffs_at_break_even_get_no_size_and_costs_shrink_it() -> None:
+    for p, payoff in ((0.5, 1.0), (1 / 3, 2.0)):
+        at_even = RISK.evaluate(edge_long(p, 0.0, payoff), risk_state(), market_state())
+        assert at_even.approved
+        assert at_even.side is None  # costs push the edge below zero: no order
+        assert at_even.reasons[-2:] == ("sized to zero lots", "target unchanged: no order")
+    tight = RISK.evaluate(edge_long(0.6, 0.0, 1.0), risk_state(), market_state())
+    wide_market = market_state(bid=1999.5, ask=2000.5)  # five times the spread
+    wide = RISK.evaluate(edge_long(0.6, 0.0, 1.0, ask=2000.5), risk_state(), wide_market)
+    assert float(wide.limits_snapshot["round_trip_cost"]) > float(
+        tight.limits_snapshot["round_trip_cost"]
+    )
+    assert 0 < wide.size_lots < tight.size_lots
 
 
 def test_flips_changes_and_unchanged_targets() -> None:
@@ -175,12 +214,12 @@ def test_the_engine_is_pure_and_its_version_names_the_profile() -> None:
     assert state == risk_state(0.1)  # inputs are not changed
     looser = risk_engine(max_lots=21)
     assert looser.config_version != RISK.config_version
-    assert looser.config_version.startswith("risk-1@")
+    assert looser.config_version.startswith("risk-2@")
     assert "PROVISIONAL" in RISK.label
     with pytest.raises(ValueError, match="stamps"):
         RISK.evaluate(TradeIntent(direction="flat"), state, market)
     with pytest.raises(ValueError, match="margin_rate"):
-        RiskEngine(CFG.risk_config(), RISK.instrument, margin_rate=0.0)
+        RiskEngine(CFG.risk_config(), RISK.instrument, margin_rate=0.0, costs=RISK.costs)
 
 
 def test_a_daily_loss_halts_entries_until_the_next_trading_day_but_not_exits() -> None:

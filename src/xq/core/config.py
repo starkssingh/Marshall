@@ -973,23 +973,24 @@ class SizingConfig(FrozenModel):
 
     ``fixed_fractional`` risks `risk_per_trade` of equity to the stop; ``vol_target`` sizes the
     position to `vol_target_annual` of annualized volatility. Either is capped by the strategy's
-    requested exposure, scaled by the calibrated win probability (0 at or below
-    `probability_zero`, 1 at or above `probability_full`) and by the drawdown throttle (1 up to
-    `throttle_start`, falling linearly to 0 at `throttle_end`), then rounded down to the lot step.
+    requested exposure and, for an intent with a calibrated win probability, scaled by its edge
+    per unit of risk (ADR 0053): ``ev_r = p_lcb x TP/SL - (1 - p_lcb) - cost/SL`` with ``p_lcb``
+    the probability's lower confidence bound at `lcb_z` standard errors, and the multiplier
+    ``clip(ev_r / ev_r_full, 0, 1)``. The drawdown throttle scales it too (1 up to
+    `throttle_start`, falling linearly to 0 at `throttle_end`); then it is rounded down to the lot
+    step.
     """
 
     method: Literal["fixed_fractional", "vol_target"]
     risk_per_trade: float = Field(gt=0, le=0.05)
     vol_target_annual: float = Field(gt=0)
-    probability_zero: float = Field(ge=0, lt=1)
-    probability_full: float = Field(gt=0, le=1)
+    ev_r_full: float = Field(gt=0)
+    lcb_z: float = Field(ge=0)
     throttle_start: float = Field(ge=0, lt=1)
     throttle_end: float = Field(gt=0, le=1)
 
     @model_validator(mode="after")
     def _ordered(self) -> SizingConfig:
-        if self.probability_zero >= self.probability_full:
-            raise ValueError("probability_zero must be below probability_full")
         if self.throttle_start >= self.throttle_end:
             raise ValueError("throttle_start must be below throttle_end")
         return self
@@ -1117,6 +1118,31 @@ class GateCriterion:
         if self.op == "<":
             return value < self.threshold
         return value <= self.threshold
+
+    def check(self, value: float) -> GateCheck:
+        """The criterion applied to a measured `value`."""
+        return GateCheck(self, float(value))
+
+
+@dataclass(frozen=True)
+class GateCheck:
+    """A gate criterion applied to a measured value (robustness and validation evidence)."""
+
+    criterion: GateCriterion
+    value: float
+
+    @property
+    def passed(self) -> bool:
+        """Whether the value satisfies the criterion (NaN never does)."""
+        return self.criterion.passes(self.value)
+
+    def describe(self) -> str:
+        """One line: the measure, its value, the rule and the outcome."""
+        c = self.criterion
+        outcome = "pass" if self.passed else "FAIL"
+        return (
+            f"{c.gate} {c.key}: {c.measure} = {self.value:.4g} ({c.op} {c.threshold:g}) {outcome}"
+        )
 
 
 class GateBootstrapConfig(FrozenModel):
@@ -1389,6 +1415,17 @@ class GatesConfig(FrozenModel):
                 r4.unresolved_incidents_max,
             ),
         ]
+
+    def criterion(self, gate: str, key: str) -> GateCriterion:
+        """The criterion of `gate` (``"R2"``) with threshold `key` (a dotted gates.yaml path).
+
+        Raises:
+            KeyError: for an unknown gate or key.
+        """
+        for item in self.criteria():
+            if (item.gate, item.key) == (gate, key):
+                return item
+        raise KeyError(f"no criterion {key!r} in gate {gate!r}")
 
 
 def gates_hash(gates: GatesConfig) -> str:

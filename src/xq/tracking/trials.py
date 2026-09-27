@@ -85,6 +85,9 @@ def record_trial(
 ) -> str:
     """Record one evaluated configuration of a running run; return the trial id.
 
+    In a reproduction (`RunContext.reproduces`), a configuration the original run already
+    recorded in the same family is not recorded again; its original trial id is returned.
+
     Args:
         run: The running experiment run (trials outside a run context are not accepted).
         family_id: Trial family, usually the hypothesis family.
@@ -95,6 +98,12 @@ def record_trial(
             ``data/artifacts/<experiment>/<run>/trials/<trial>.parquet`` for the effective-trial
             estimate.
     """
+    if run.reproduces is not None:
+        # a reproduction re-evaluates the original run's configurations on the same data: they
+        # are already counted, so counting them again would inflate the family's trials (EXP-006)
+        existing = find_trial(run.engine, run.reproduces, family_id, trial_config_hash(config))
+        if existing is not None:
+            return existing
     trial_id = new_ulid()
     relative: str | None = None
     if returns is not None:
@@ -124,6 +133,15 @@ def record_trial(
         )
         session.commit()
     return trial_id
+
+
+def find_trial(engine: Engine, run_id: str, family_id: str, config_hash: str) -> str | None:
+    """The id of a trial of `run_id` with this family and configuration hash, if one exists."""
+    with session_factory(engine)() as session:
+        query = select(Trial.trial_id).where(
+            Trial.run_id == run_id, Trial.family_id == family_id, Trial.config_hash == config_hash
+        )
+        return session.scalars(query.order_by(Trial.created_at)).first()
 
 
 def trial_count(cfg: AppConfig, engine: Engine, family_id: str | None = None) -> TrialStats:

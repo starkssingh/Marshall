@@ -198,3 +198,7 @@ def test_an_intents_probability_belongs_to_an_entry() -> None:
         TradeIntent(direction="flat", p_win=0.6)
     intent = TradeIntent(direction="short", exposure=0.5, stop=2010.0, p_win=0.6)
     assert not intent.calibrated  # a probability is uncalibrated unless declared otherwise
+    with pytest.raises(ValidationError, match="needs p_win"):
+        TradeIntent(direction="short", exposure=0.5, stop=2010.0, p_se=0.05)
+    with pytest.raises(ValidationError, match="flat intent"):
+        TradeIntent(direction="flat", p_se=0.05)

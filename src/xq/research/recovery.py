@@ -1,10 +1,14 @@
-"""Recovery tests every Phase 5 and Phase 6 method passes before anything uses it (ADR 0043).
+"""Recovery tests every Phase 5, 6, 16 and 17 method passes before anything uses it (ADR 0043,
+ADR 0054).
 
 The plan requires every statistical and volatility method to recover a known answer on a simulated
-process before it runs on gold. `RECOVERY_TESTS` names, per method, the tests (pytest node ids,
-relative to the repository root) that prove it; a unit test checks that every named test exists,
-and the verdict report (STAT-008) cites them in each method's evidence. A method without an entry
-here must not be used by a report, a board or the sigma-hat selection.
+process before it runs on gold; Sprint 9's validation and robustness methods (VAL-003, VAL-004,
+VAL-006, ROB-001 ... ROB-007) are held to the same rule on simulated strategies with known truth —
+noise-only families, a single-point optimum on noise, a genuine edge. `RECOVERY_TESTS` names, per
+method, the tests (pytest node ids, relative to the repository root) that prove it; a unit test
+checks that every named test exists, and the verdict report (STAT-008) cites them in each method's
+evidence. A method without an entry here must not be used by a report, a board, the sigma-hat
+selection, a validation report or a robustness report.
 """
 
 from __future__ import annotations
@@ -21,6 +25,14 @@ _BENCHMARKS = "tests/unit/research/test_vol_benchmarks.py"
 _GARCH = "tests/unit/research/test_vol_garch.py"
 _EVALUATE = "tests/unit/research/test_vol_evaluate.py"
 _SELECTION = "tests/unit/models/test_volatility_selection.py"
+_PBO = "tests/unit/validation/test_pbo.py"
+_SPA = "tests/unit/validation/test_spa.py"
+_MULTIPLE = "tests/unit/validation/test_multiple_testing.py"
+_PERTURB = "tests/unit/robustness/test_perturb.py"
+_COST_STRESS = "tests/unit/robustness/test_costs_stress.py"
+_BOOTSTRAP = "tests/unit/robustness/test_bootstrap.py"
+_SLICING = "tests/integration/robustness/test_slicing.py"
+_DELAY = "tests/unit/robustness/test_delay.py"
 
 RECOVERY_TESTS: Mapping[str, tuple[str, ...]] = {
     "ADF": (
@@ -122,6 +134,54 @@ RECOVERY_TESTS: Mapping[str, tuple[str, ...]] = {
         f"{_SELECTION}::test_twelve_null_challengers_promote_in_at_most_about_five_percent_of_samples",
         f"{_SELECTION}::test_ewma_is_kept_end_to_end_when_it_is_the_true_model",
         f"{_SELECTION}::test_sigma_is_served_per_fold_from_training_periods_only",
+    ),
+    "PBO": (
+        f"{_PBO}::test_a_hand_computed_case",
+        f"{_PBO}::test_noise_families_have_a_pbo_near_one_half",
+        f"{_PBO}::test_a_graded_genuine_edge_passes",
+        f"{_PBO}::test_a_single_point_optimum_on_noise_fails",
+    ),
+    "reality_check_spa_romano_wolf": (
+        f"{_SPA}::test_a_noise_only_family_is_rejected_at_about_the_nominal_rate",
+        f"{_SPA}::test_volatility_clustering_keeps_the_size_near_nominal",
+        f"{_SPA}::test_a_genuine_edge_is_detected_and_its_survivors_named",
+        f"{_SPA}::test_spa_keeps_its_power_when_poor_strategies_join_the_family",
+    ),
+    "holm_bh": (
+        f"{_MULTIPLE}::test_hand_computed_reference_values",
+        f"{_MULTIPLE}::test_the_adjustments_match_statsmodels",
+        f"{_MULTIPLE}::test_holm_controls_the_family_wise_error_and_bh_the_false_discovery_rate",
+    ),
+    "parameter_perturbation": (
+        f"{_PERTURB}::test_a_single_point_optimum_on_noise_fails_the_neighbourhood_gate",
+        f"{_PERTURB}::test_a_genuine_trend_edge_passes_the_neighbourhood_gate",
+        f"{_PERTURB}::test_the_designs_evaluate_the_points_they_state",
+    ),
+    "cost_stress": (
+        f"{_COST_STRESS}::test_the_r2_scenario_passes_exactly_when_the_gross_edge_covers_the_stressed_costs",
+        f"{_COST_STRESS}::test_a_thin_edge_profitable_at_baseline_fails_and_a_thick_one_passes",
+        f"{_COST_STRESS}::test_the_break_even_multiplier_leaves_no_net_pnl",
+        f"{_COST_STRESS}::test_latency_eats_a_signal_priced_in_over_seconds_in_proportion_to_the_delay",
+    ),
+    "returns_bootstrap": (
+        f"{_BOOTSTRAP}::test_sharpe_and_cagr_intervals_cover_at_about_the_nominal_rate",
+        f"{_BOOTSTRAP}::test_blocks_keep_the_coverage_under_serial_correlation",
+        f"{_BOOTSTRAP}::test_the_drawdown_interval_brackets_the_true_drawdown_median",
+    ),
+    "trade_permutation": (
+        f"{_BOOTSTRAP}::test_unordered_trades_sit_anywhere_in_the_permutation_distribution",
+        f"{_BOOTSTRAP}::test_clustered_losses_are_at_the_top_of_the_permutation_distribution",
+    ),
+    "pre_registered_slicing": (
+        f"{_SLICING}::test_slices_come_from_the_locked_version_the_run_tested",
+        f"{_SLICING}::test_an_edge_earned_in_one_year_fails_the_single_year_gate",
+        f"{_SLICING}::test_volatility_terciles_find_an_edge_that_lives_in_high_volatility",
+        f"{_SLICING}::test_sessions_follow_dst_and_name_the_overlap",
+    ),
+    "execution_delay": (
+        f"{_DELAY}::test_a_genuine_trend_edge_decays_smoothly_and_passes_the_gate",
+        f"{_DELAY}::test_a_bid_ask_bounce_edge_flips_at_the_first_delay",
+        f"{_DELAY}::test_a_look_ahead_leak_collapses_at_the_first_delay",
     ),
 }
 

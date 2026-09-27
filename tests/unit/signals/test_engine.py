@@ -90,7 +90,8 @@ def test_a_qualifying_forecast_becomes_one_intent_in_sigma_units() -> None:
     assert (intent.direction, intent.exposure, intent.entry_type) == ("long", 1.0, "market")
     assert (intent.stop, intent.target) == (candidate.stop, candidate.target)
     assert intent.time_stop == pd.Timestamp("2024-03-12 18:00", tz="UTC")
-    assert (intent.p_win, intent.calibrated) == (candidate.p_win, True)
+    # the risk engine takes its own lower bound: the intent carries the calibrated p and its error
+    assert (intent.p_win, intent.p_se, intent.calibrated) == (0.6, 0.05, True)
     assert intent.signal_id == record.record_id == "S-template_barrier-000001"
 
 

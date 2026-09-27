@@ -11,15 +11,15 @@ follow are in [`CLAUDE.md`](CLAUDE.md), and decisions are recorded in [`docs/adr
 
 ## Status
 
-Sprints 1 to 6 and 11 are merged; Sprint 12 A (the risk and signal engines, data-independent
-part, ADR 0051) is in review. Sprint 11 ran ahead of Sprints 7-10 while real data is pending
-(ADR 0048). Sprint 2 (clean ticks, bars and data quality) is implemented and tested
-on synthetic data but **not validated**: its quality report must first run on at least one year of
-real broker ticks, followed by the human review (DQ-008); the owner's decisions on its open
-questions are in ADR 0013. Sprint 3 (datasets, leakage harness, experiment registry, forward-return
-targets) and Sprint 4 (walk-forward, cost model and screener, Sharpe inference, DSR, forecast
-comparison, the evidence gates in `config/gates.yaml`, and the baseline board) are implemented and
-tested on synthetic data only. Sprint 5 is build-only because no real broker data exists: the
+Sprints 1 to 6, 11 and 12 A are merged; Sprint 9 (statistical validation and robustness, ADR 0051,
+ADR 0054) is in review. Sprints 11 and 12 A ran ahead of Sprints 7-10 while real data is pending
+(ADR 0048, ADR 0051). Sprint 2 (clean ticks, bars and data quality) is implemented and tested on
+synthetic data but **not validated**: its quality report must first run on at least one year of real
+broker ticks, followed by the human review (DQ-008); the owner's decisions on its open questions are
+in ADR 0013. Sprint 3 (datasets, leakage harness, experiment registry, forward-return targets) and
+Sprint 4 (walk-forward, cost model and screener, Sharpe inference, DSR, forecast comparison, the
+evidence gates in `config/gates.yaml`, and the baseline board) are implemented and tested on
+synthetic data only. Sprint 5 is build-only because no real broker data exists: the
 exploratory-research report (distributions, dependence, seasonality, trend and reversion, cost to
 volatility and horizon admission, all on the discovery window) and experiment conclusions are
 implemented and tested on synthetic data and simulated processes; no EDA report has been generated
@@ -27,17 +27,24 @@ on real data and `config/horizons.yaml` does not exist yet. Sprint 6 (statistica
 research) is build-only too: stationarity, dependence and variance-ratio tests, walk-forward ARMA
 forecasts, the verdict-report framework, range and realized volatility estimators, EWMA/HAR/GARCH
 forecasters, their evaluation on identical folds and the sigma-hat selection are implemented and
-pass recovery tests on simulated processes; nothing has run on real data and no volatility model
-is promoted. Sprint 11 (the event-driven backtester) is implemented and tested on synthetic data
-only: event queue and clock, a broker simulator (brackets, gaps, pessimistic intrabar resolution,
-no fills while closed), FIFO portfolio accounting, a decision ledger linking every order to its
-risk decision, entry blackouts, reconciliation with the screener and a backtest report. Sprint 12
-A adds the risk engine (risk state rebuilt from the ledger, sizing, limits and halts, stop policy,
-kill switch and data-health breakers; every order comes from a decision `RiskEngine.evaluate`
-issued, with a provisional risk profile in `config/risk/default.yaml`) and the signal engine
-(schemas exported to `docs/specs/interfaces/`, EV in sigma units, filters with a placeholder
-pass-through regime filter, YAML-defined strategies, a record for every candidate, forecast to
-fill in the event backtester), tested on synthetic data only. See
+pass recovery tests on simulated processes; nothing has run on real data and no volatility model is
+promoted. Sprint 11 (the event-driven backtester) is implemented and tested on synthetic data only:
+event queue and clock, a broker simulator (brackets, gaps, pessimistic intrabar resolution, no fills
+while closed), FIFO portfolio accounting, a decision ledger linking every order to its risk
+decision, entry blackouts, reconciliation with the screener and a backtest report. Sprint 12 A adds
+the risk engine (risk state rebuilt from the ledger, sizing, limits and halts, stop policy, kill
+switch and data-health breakers; every order comes from a decision `RiskEngine.evaluate` issued,
+with a provisional risk profile in `config/risk/default.yaml`) and the signal engine (schemas
+exported to `docs/specs/interfaces/`, EV in sigma units, filters with a placeholder pass-through
+regime filter, YAML-defined strategies, a record for every candidate, forecast to fill in the event
+backtester), tested on synthetic data only; its review changed sizing to the edge per unit of risk
+(ADR 0053). Sprint 9 adds the probability of backtest overfitting (CSCV), White's Reality Check,
+Hansen's SPA and Romano-Wolf, Holm and Benjamini-Hochberg per test family, and the robustness
+measures: parameter perturbation, cost and latency stress with the break-even multiplier,
+block-bootstrap intervals and trade-order permutation, slicing read from the pre-registered
+hypothesis and execution delay, each checked against `config/gates.yaml` where a gate applies, plus
+`xq exp reproduce`. Every method is proven on simulated strategies with known truth (noise-only
+families, a single-point optimum on noise, a genuine edge); none has run on real data. See
 [`CHANGELOG.md`](CHANGELOG.md) for
 completed backlog tasks and [`docs/STATUS.md`](docs/STATUS.md) for the current sprint, open
 decisions and carry-over items.
@@ -71,6 +78,7 @@ uv run xq baselines run --dataset <ds-id>     # baseline board in reports/baseli
 uv run xq research eda --dataset <ds-id> --hypothesis <H>  # EDA report on the discovery window
 uv run xq exp close <experiment-id> --conclusion <yaml>    # close with a verdict (research log)
 uv run xq exp audit                           # experiments still without a conclusion
+uv run xq exp reproduce <run-id>              # rebuild the dataset, rerun, compare the metrics
 uv run xq verify-raw                          # re-hash every raw file against the manifest
 uv run xq config show                         # resolved configuration, secrets masked
 ```
@@ -79,9 +87,10 @@ The committed fixtures are sparse (one tick every ~90 s), so `xq validate` repor
 missing-minute failures on them; that is the checks working, not a bug. For the same reason
 `xq dataset build experiments/configs/ds_base.yaml` stops at the quality gate (DQ-007), listing
 every failing fixture day and check: a meaningful base dataset needs real broker history for the
-four years before the vault. The dataset, hypothesis, trial, baseline-board, EDA and conclusion
-commands are exercised end to end on dense synthetic weeks in `tests/integration/`. The board's net
-figures are screening results while the cost model is a provisional placeholder (ADR 0032).
+four years before the vault. The dataset, hypothesis, trial, baseline-board, EDA, conclusion and
+reproduce commands are exercised end to end on dense synthetic weeks in `tests/integration/`. The
+board's net figures are screening results while the cost model is a provisional placeholder
+(ADR 0032).
 
 Or in Docker (research profile; `data/`, `logs/` and `reports/` are mounted from the host):
 

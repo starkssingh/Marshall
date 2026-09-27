@@ -47,6 +47,7 @@ from xq.tracking.conclusions import close_experiment, load_conclusion, unconclud
 from xq.tracking.db import current_revision, engine_for, head_revision, upgrade_to_head
 from xq.tracking.hypotheses import register_hypothesis
 from xq.tracking.registry import list_hypotheses
+from xq.tracking.reproduce import DEFAULT_ATOL, DEFAULT_RTOL, describe, reproduce_run
 from xq.tracking.runs import experiment_run
 from xq.tracking.trials import trial_count
 
@@ -379,7 +380,7 @@ def dataset_show(
 
 
 exp_app = typer.Typer(
-    help="Hypotheses, experiment runs, trial counts and conclusions (EXP-001..005).",
+    help="Hypotheses, experiment runs, trial counts, conclusions and reproduction (EXP-001..006).",
     no_args_is_help=True,
 )
 app.add_typer(exp_app, name="exp")
@@ -458,6 +459,36 @@ def exp_audit(ctx: typer.Context) -> None:
         typer.echo(f"{e.experiment_id}\t{e.hypothesis_id} v{e.hypothesis_version}\t{e.title}")
     typer.echo(f"{len(open_experiments)} experiment(s) without a conclusion")
     if open_experiments:
+        raise typer.Exit(1)
+
+
+@exp_app.command("reproduce")
+def exp_reproduce(
+    ctx: typer.Context,
+    run_id: Annotated[str, typer.Argument(help="Id of the finished run to reproduce.")],
+    rtol: Annotated[
+        float, typer.Option("--rtol", help="Relative tolerance of each metric.")
+    ] = DEFAULT_RTOL,
+    atol: Annotated[
+        float, typer.Option("--atol", help="Absolute tolerance of each metric.")
+    ] = DEFAULT_ATOL,
+    exploratory: Annotated[
+        bool,
+        typer.Option(
+            "--exploratory",
+            help="Allow a dirty git tree; the reproduction is then not confirmatory.",
+        ),
+    ] = False,
+) -> None:
+    """Rebuild a run's dataset, repeat the run and compare its metrics (EXP-006); exit 1 unless
+    every judged metric is within tolerance."""
+    with pipeline_run(ctx.obj) as run:
+        result = reproduce_run(
+            run.cfg, run.engine, run_id, rtol=rtol, atol=atol, exploratory=exploratory
+        )
+    for line in describe(result):
+        typer.echo(line)
+    if not result.reproduced:
         raise typer.Exit(1)
 
 

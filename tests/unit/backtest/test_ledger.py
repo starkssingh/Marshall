@@ -124,7 +124,7 @@ def test_every_order_is_linked_to_an_approved_risk_decision(seed: int) -> None:
     # every decision is the risk engine's and names the profile it applied
     config = decisions["detail"].map(lambda d: yaml.safe_load(d)["config_version"])
     assert (config == RISK.config_version).all()
-    assert RISK.config_version.startswith("risk-1@")
+    assert RISK.config_version.startswith("risk-2@")
     # the interim sigma-hat needs 20 signal bars: entries before it are refused, and said so
     rejected = decisions.loc[~decisions["approved"].astype(bool), "reason"]
     assert rejected.str.contains("no sigma-hat").any()

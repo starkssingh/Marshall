@@ -17,9 +17,10 @@ order:
    kill switch off and no data-health breaker tripped (RISK-006, `xq.risk.kill_switch`);
 2. the stop policy (RISK-004, `check_stops`): the stop the decision accepts, possibly widened;
 3. sizing (RISK-002, `size_entry`): the target size from the risk budget to that stop (or the
-   volatility target), capped by the requested exposure, scaled by the calibrated probability and
-   the drawdown throttle, rounded down to the lot step — at the decision's mid, with the equity of
-   the risk state;
+   volatility target), capped by the requested exposure, scaled by the edge per unit of risk of a
+   calibrated probability (its lower confidence bound against the target, the stop and the
+   round-trip cost of the engine's own cost model, ADR 0053) and by the drawdown throttle, rounded
+   down to the lot step — at the decision's mid, with the equity of the risk state;
 4. the halts (RISK-003, `entry_halts`) when the sized target adds exposure;
 5. the caps (RISK-003, `cap_target`) on the target, rounded down to the lot step.
 
@@ -43,13 +44,14 @@ from typing import Any
 
 import numpy as np
 
+from xq.backtest.costs import CostModel
 from xq.backtest.events import clean_lots
 from xq.core.config import AppConfig, InstrumentSpec, RiskConfig
 from xq.core.time import to_ns
 from xq.core.types import Side
 from xq.risk.kill_switch import breaker_reasons
 from xq.risk.limits import CorrelatedExposure, cap_target, entry_halts
-from xq.risk.sizing import size_entry
+from xq.risk.sizing import Edge, size_entry
 from xq.risk.state import MarketState, RiskState
 from xq.risk.stops import check_stops
 from xq.signals.schema import EntryType, RiskDecision, TradeIntent
@@ -83,6 +85,7 @@ class RiskEngine:
         instrument: InstrumentSpec,
         *,
         margin_rate: float,
+        costs: CostModel,
         periods_per_year: int = 252,
         correlated: CorrelatedExposure | None = None,
     ) -> None:
@@ -90,6 +93,7 @@ class RiskEngine:
             raise ValueError("margin_rate must be in (0, 1]")
         self.config = config
         self.instrument = instrument
+        self.costs = costs
         self.margin_rate = float(margin_rate)
         self.periods_per_year = periods_per_year
         self.correlated = correlated
@@ -100,10 +104,14 @@ class RiskEngine:
     def from_config(
         cls, cfg: AppConfig, instrument: str = "xauusd", *, profile: str | None = None
     ) -> RiskEngine:
-        """The engine of risk profile `profile` (default ``backtest.risk_profile``)."""
+        """The engine of risk profile `profile` (default ``backtest.risk_profile``), pricing costs
+        with the configured cost model."""
         event = cfg.backtest_config().event_config()
         return cls(
-            cfg.risk_config(profile), cfg.instrument(instrument), margin_rate=event.margin_rate
+            cfg.risk_config(profile),
+            cfg.instrument(instrument),
+            margin_rate=event.margin_rate,
+            costs=CostModel.from_config(cfg, instrument),
         )
 
     @property
@@ -159,6 +167,18 @@ class RiskEngine:
         snapshot.update(entry_reference=reference, stop_distance=stops.distance)
         if not stops.accepted:
             return self._refuse(base, intent, position, list(stops.reasons), snapshot)
+        edge = None
+        if intent.p_win is not None and intent.p_se is not None and intent.target is not None:
+            cost_bps = self.costs.round_trip_cost_bps(
+                to_ns(intent.created_at), market.bid, market.ask, market.sigma_daily or 0.0
+            )
+            edge = Edge(
+                intent.p_win,
+                intent.p_se,
+                abs(intent.target - reference),
+                cost_bps * 1e-4 * market.mid,
+            )
+            snapshot.update(round_trip_cost=edge.cost, target_distance=edge.target_distance)
         sizing = size_entry(
             self.config.sizing,
             self.instrument,
@@ -168,7 +188,7 @@ class RiskEngine:
             sigma_daily=market.sigma_daily,
             periods_per_year=self.periods_per_year,
             requested_exposure=intent.exposure,
-            p_win=intent.p_win,
+            edge=edge,
             drawdown=state.drawdown,
         )
         snapshot.update(sizing.as_snapshot())
@@ -215,8 +235,13 @@ class RiskEngine:
             if market.kill_reason is not None:
                 blocks.append(market.kill_reason)
             blocks.extend(breaker_reasons(market, self.config.breakers))
-        if intent.p_win is not None and not intent.calibrated:
-            blocks.append("an uncalibrated win probability cannot size a position")
+        if intent.p_win is not None:
+            if not intent.calibrated:
+                blocks.append("an uncalibrated win probability cannot size a position")
+            if intent.p_se is None:
+                blocks.append("a win probability needs its standard error (p_se) to size on")
+            if intent.target is None:
+                blocks.append("a win probability needs a target to price the payoff")
         return blocks
 
     def _refuse(

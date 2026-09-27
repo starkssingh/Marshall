@@ -30,6 +30,6 @@ trial_budget: 20                 # configurations you may evaluate on test folds
 planned_tests:
   - Deflated Sharpe ratio
   - Diebold-Mariano against the best baseline
-slices:                          # pre-declared subsets to report
-  - session
-  - volatility regime
+slices:                          # pre-declared subsets to report (ROB-006): year, session,
+  - session                      # volatility tercile; regime slices wait for REG-007
+  - volatility tercile

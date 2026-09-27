@@ -254,7 +254,8 @@
    model) shows every fill traced, one record per candidate, every signal intent matching its
    record, and the risk engine sizing on the calibrated probability; with the same stub
    uncalibrated nothing reaches the risk engine.
-3. **Open point for the owner — probability scaling and payoffs.** The default risk profile scales
+3. **Open point for the owner — probability scaling and payoffs** (decided in ADR 0053: sizing
+   scales on the edge per unit of risk). The default risk profile scales
    size on the raw calibrated probability (zero at 0.5, full at 0.6), which suits 1:1 payoffs. For
    asymmetric barriers the break-even probability differs (1/3 for 2:1), so a good 2:1 trade with
    p = 0.45 would be sized to zero. The forecast-to-fill test uses a profile matched to its 2:1

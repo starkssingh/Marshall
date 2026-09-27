@@ -54,8 +54,10 @@ class TradeIntent(BaseModel):
     ask for ``exposure`` (> 0, a fraction of equity) on that side, entered by ``entry_type``;
     ``limit``/``stop`` entries need ``limit_price``. ``stop`` and ``target`` form an OCO bracket
     on the whole resulting position; ``time_stop`` closes it at that instant (or at the next
-    open). ``p_win`` is the probability that the trade reaches its target first; the risk engine
-    scales the size by it only when ``calibrated`` is true and refuses an uncalibrated one.
+    open). ``p_win`` is the probability that the trade reaches its target first and ``p_se`` its
+    standard error; the risk engine sizes on the edge they imply (its lower confidence bound
+    against the target, the stop and the costs, ADR 0053) only when ``calibrated`` is true, and
+    refuses an uncalibrated probability, or one without a standard error or a target.
     """
 
     model_config = ConfigDict(frozen=True, extra="forbid")
@@ -68,6 +70,7 @@ class TradeIntent(BaseModel):
     target: float | None = Field(default=None, gt=0)
     time_stop: AwareDatetime | None = None
     p_win: float | None = Field(default=None, ge=0, le=1)
+    p_se: float | None = Field(default=None, ge=0)
     calibrated: bool = False
     strategy_id: str = Field(default="strategy", min_length=1)
     signal_id: str | None = None
@@ -80,7 +83,7 @@ class TradeIntent(BaseModel):
         if self.direction == "flat":
             extras = [
                 name
-                for name in ("limit_price", "stop", "target", "time_stop", "p_win")
+                for name in ("limit_price", "stop", "target", "time_stop", "p_win", "p_se")
                 if getattr(self, name) is not None
             ]
             if self.exposure != 0 or self.entry_type != "market" or extras:
@@ -88,6 +91,8 @@ class TradeIntent(BaseModel):
             return self
         if self.exposure <= 0:
             raise ValueError(f"a {self.direction} intent needs a positive exposure")
+        if self.p_se is not None and self.p_win is None:
+            raise ValueError("p_se is the standard error of p_win: it needs p_win")
         if (self.entry_type == "market") != (self.limit_price is None):
             raise ValueError("limit and stop entries need limit_price; market entries take none")
         below, above = (self.stop, self.target)
