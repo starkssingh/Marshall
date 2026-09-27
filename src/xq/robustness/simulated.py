@@ -17,14 +17,17 @@ must correct for.
 
 - **genuine**: returns carry a slowly varying drift (a persistent AR(1) mean) plus noise. The
   strategy is a trend rule: the sign of the t-statistic of the mean of the last ``lookback``
-  returns, flat while it lies within +/- ``deadband``. Grid: six lookbacks times three deadbands
-  (18 configurations). The edge is real, survives nearby parameters and decays smoothly with
+  returns, flat while it lies within +/- ``deadband``. Grid: eight lookbacks from 2 to 80 days
+  times three deadbands (24 configurations). Lookbacks of a few days see mostly noise and pay for
+  their turnover, so the family has weaker members and the in-sample choice carries information,
+  as in a real search. The edge is real, survives nearby parameters and decays smoothly with
   delay.
 - **overfit**: returns are pure noise. The strategy at a parameter point ``(a, b)`` holds random
   +/-1 positions for geometric spells of mean ``a`` days, drawn from a generator seeded by the
   point, so every configuration is independent noise. Grid: ``a`` in 5 ... 14 and ``b`` in
   1 ... 5 (50 configurations). The in-sample winner is a single-point optimum on noise.
 
+Their baseline is buy-and-hold on the same asset with the same costs (R1: beat the best baseline).
 A `SimulationSpec` fixes everything, so a simulated run can be rebuilt exactly from its recorded
 configuration (`simulated_subject`).
 """
@@ -56,7 +59,7 @@ from xq.validation.sharpe import sharpe_ratio
 FloatArray = npt.NDArray[np.float64]
 Truth = Literal["genuine", "overfit"]
 _BPS = 1e-4
-GENUINE_LOOKBACKS = (20, 30, 40, 50, 60, 80)
+GENUINE_LOOKBACKS = (2, 3, 5, 10, 20, 40, 60, 80)
 GENUINE_DEADBANDS = (0.25, 0.5, 1.0)
 OVERFIT_A = tuple(float(a) for a in range(5, 15))
 OVERFIT_B = (1.0, 2.0, 3.0, 4.0, 5.0)
@@ -329,8 +332,9 @@ def simulated_subject(
     """The candidate of a simulated family, as a validation subject (module docstring).
 
     Args:
-        trials: The family's trials as the registry counts them; by default the grid itself
-            (raw = effective = its size, the variance of its annualized Sharpe ratios).
+        trials: The family's trials as the registry counts them (a recorded run's, or
+            `family_trials` of the subject's family). By default every configuration counts as
+            an independent trial (raw), the most conservative count.
     """
     market = _Market(spec)
     strategy = _Strategy(market)
@@ -349,7 +353,7 @@ def simulated_subject(
         trials = TrialSummary(len(grid), float(len(grid)), float(np.var(annual, ddof=1)), "raw")
 
     def evaluate(values: Mapping[str, float]) -> FloatArray:
-        return market.pnl(strategy.positions(values))
+        return market.pnl(strategy.positions({**chosen, **values}))
 
     noisy: dict[NoiseKind, NoisyEvaluate] = {}
     not_applicable: dict[NoiseKind, str] = {}
@@ -382,6 +386,7 @@ def simulated_subject(
         delayed=lambda bars: market.pnl(_delayed(positions, bars)),
         noisy=noisy,
         noise_not_applicable=not_applicable,
+        baselines=pd.DataFrame({"buy_and_hold": market.pnl(np.ones(spec.days))}, index=market.days),
         sigma_daily=pd.Series(market.sigma, index=market.days, name="sigma_daily"),
         slices=slices,
         sessions=sessions,

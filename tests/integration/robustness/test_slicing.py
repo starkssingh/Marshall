@@ -177,6 +177,20 @@ def test_volatility_terciles_find_an_edge_that_lives_in_high_volatility(
     assert (table["days"] - len(days) / 3).abs().max() <= 1
     assert table.loc["high", "pnl_share"] > 0.8
     assert table.loc["high", "sharpe"] > 5 * max(table.loc["low", "sharpe"], 0.1)
+    warm_up = sigma.copy()
+    warm_up.iloc[:10] = np.nan  # the estimator's warm-up: no sigma-hat yet, nothing back-filled
+    early = slice_pnl(
+        slices,
+        pnl,
+        pd.DataFrame(),
+        capital=CAPITAL,
+        periods_per_year=252,
+        sessions=cfg.sessions_config(),
+        sigma=warm_up,
+    ).tables["volatility_tercile"]
+    assert list(early.index) == ["low", "mid", "high", "no_sigma_hat"]
+    assert early.loc["no_sigma_hat", "days"] == 10
+    assert early["days"].sum() == len(days)
     with pytest.raises(SliceError, match="sigma-hat"):
         slice_pnl(
             slices,

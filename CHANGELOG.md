@@ -721,6 +721,38 @@ IDs from `docs/specs/development-plan.md`.
   Proven: the genuine edge passes every robustness gate and the overfit strategy fails. ADR 0056.
   The risk state tracker caches the trading day of an instant (a pure function) so Monte Carlo
   replays do not recompute it.
+- `xq validate-strategy <run_id>` (Phase 17's acceptance; `xq.validation.report`,
+  `xq.validation.strategy`): the combined significance and robustness report of a recorded
+  strategy against `config/gates.yaml`, with R1 and R2 verdicts (`pass`, `fail` or `incomplete`,
+  never a pass by default). The significance tests are:
+  - the Sharpe bootstrap (R1);
+  - the new paired block bootstrap against the best baseline (R1, `xq.validation.paired`);
+  - the closed trades (R1);
+  - the deflated Sharpe ratio with the registry's gated trial count;
+  - PBO;
+  - SPA with its per-sample size check and warning, the Reality Check, Romano–Wolf and Holm
+    within the family;
+  - the new decay-trend test (`xq.validation.decay`: a Newey–West slope of daily returns on
+    time);
+  - the minimum track record.
+
+  Combined with ROB-008's seven robustness gates. It runs in a run of kind `validation` (no
+  trials: it selects nothing), writes `report.md`/`report.json` under `reports/validation/`, and
+  records the plan's `stat_tests` and `robustness_results` tables (migration 0010).
+  `xq robustness simulate --truth genuine|overfit` records a known-truth simulated strategy as a
+  run (synthetic, always exploratory, its configurations the family's trials). Subject adapters:
+  `simulated_strategy` runs; other kinds are refused by name. Proven end to end: a recorded
+  genuine trend edge passes R1 and R2, and a recorded single-point optimum on noise fails R2 (DSR,
+  PBO, SPA, neighbourhood). Also:
+  - The simulated genuine family now spans lookbacks of 2–80 days (24 configurations). With
+    near-identical configurations PBO is about 0.5 even for a real edge, and with mirror-image
+    ones the deflated Sharpe ratio's benchmark explodes (ADR 0056).
+  - ROB-006 volatility terciles put days without a known sigma-hat (the estimator's warm-up) in
+    a `no_sigma_hat` bucket instead of refusing the report.
+  - `FamilyTest` gains each strategy's own bootstrap p-value (`single_p`) for the per-family
+    correction.
+
+  ADR 0056.
 
 ### Changed
 

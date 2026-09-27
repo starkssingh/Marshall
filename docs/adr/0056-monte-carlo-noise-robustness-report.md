@@ -156,3 +156,90 @@ everywhere they appear.
 - The subjects rebuild identically from their spec. The candidate is the family's best. The
   re-evaluation functions reproduce the recorded returns at level 0, delay 0 and the nominal
   parameters. The overfit configurations are uncorrelated.
+
+## `xq validate-strategy <run_id>` — the combined significance and robustness report
+
+1. **What it judges.** Every criterion of R1 and R2 that a recorded strategy's evidence can
+   support, read from `config/gates.yaml` (thresholds are read, never set).
+   - **R1:**
+     - the net Sharpe ratio;
+     - its one-sided stationary-bootstrap p-value;
+     - the paired block bootstrap against the best baseline (new, below);
+     - at least 100 closed trades.
+   - **R2 significance:**
+     - the deflated Sharpe ratio, with the registry's gated (effective) trial count and the
+       variance of the family's trial Sharpe ratios;
+     - PBO by CSCV over the family (16 blocks);
+     - SPA with its per-sample size check and warning (ADR 0055). The Reality Check and the
+       Romano–Wolf adjusted p-values are reported with it, and every configuration's bootstrap
+       p-value is Holm-adjusted within the family (VAL-006);
+     - the decay trend (new, below);
+     - the minimum track record.
+   - **R2 robustness:** ROB-008's seven gates.
+
+   Each of R1 and R2 gets a verdict: `pass`, `fail`, or `incomplete` with the reason.
+   **Incomplete is never a pass.**
+2. **The R1 test against the best baseline** (`xq.validation.paired`), missing until now (it was
+   a known issue in STATUS).
+   - The best baseline is the one with the highest Sharpe ratio on the same days, chosen after
+     the fact, which only makes the test harder.
+   - The candidate and the baseline are resampled with the same stationary-bootstrap indices, so
+     their correlation is kept. The block follows the gates' convention on their difference.
+   - The p-value of a positive Sharpe difference imposes the null by centring. The margin
+     criterion is the Sharpe difference itself.
+   - Known truth: a candidate that adds only noise to the same edge is rejected at about the
+     nominal rate, and a small, consistent, tightly paired improvement is detected.
+3. **The R2 decay trend** (`xq.validation.decay`), also missing until now.
+   - The test regresses daily net returns on time in years, with a Newey–West standard error at
+     VAL-001's default lag. The one-sided p-value of a negative slope must be at least 0.05.
+   - Known truth: stable edges (iid, and AR(1) φ = 0.3) are rejected at about 5 %, and an edge
+     falling from 20 bp to −10 bp a day over four years is detected in more than 80 % of samples.
+4. **Where it runs.**
+   - A run of kind `validation` under the validated run's hypothesis.
+   - It writes `report.md` and `report.json` under `reports/validation/<run>/<validation run>/`
+     as artifacts.
+   - It records every test in the plan's `stat_tests` table and every robustness measure in
+     `robustness_results` (migration 0010). A robustness measure that is reported without a gate
+     stores `passed` as null.
+   - It logs the verdicts as metrics.
+   - **It records no trials.** It selects nothing: the candidate was chosen by the run it
+     validates, whose configurations are already counted. Perturbed, stressed and delayed
+     variants are diagnostics; picking one of them would be a new selection and needs its own
+     run. **Open point for the owner:** this is Claude's reading of "every research run is
+     counted by the trial counter". The run is counted as a run; it adds no configurations.
+5. **Subject adapters.** The strategy is rebuilt from the run's recorded configuration.
+   - Today only runs of kind `simulated_strategy` have an adapter. Other kinds are refused by
+     name, as reproductions are.
+   - The baseline board's adapter needs the board's screening context (its quotes, cost model,
+     clock, sigma-hat and rule parameters) rebuilt from the run. It is the next task, and it
+     needs real data to mean anything.
+6. **`xq robustness simulate --truth genuine|overfit`** records a known-truth simulated strategy as
+   such a run.
+   - Its configurations become trials of the hypothesis's family, with their daily returns, as
+     the board's strategies do.
+   - It is always exploratory, never confirmatory, and labelled synthetic in every report.
+   - It should use a hypothesis of its own, so its trials never mix with a real family's.
+7. **Two known-truth findings from building it.**
+   - **PBO judges the choice among configurations, not the edge.** A family of near-identical
+     configurations (the first genuine family: 18 trend rules, lookbacks 20–80, 2–4 effective
+     trials) has a PBO of 0.16–0.81 even though every configuration has the edge. Which one wins
+     in sample is a coin toss there, and PBO measures exactly that.
+   - **Mirror-image configurations break the deflated Sharpe ratio.** A family with both trend
+     and reversal versions of the rule gets a PBO near 0, but its deflated Sharpe ratio collapses
+     (0.07–0.56). The variance of its trial Sharpe ratios, which sets the DSR's benchmark, then
+     measures the mirror, not luck.
+   - The simulated genuine family therefore spans lookbacks from 2 to 80 days (24
+     configurations). The short lookbacks see mostly noise and pay for their turnover, as the
+     weaker members of a real search do. PBO is then 0.00–0.06 and the DSR 0.92–1.00 over seeds
+     0–5.
+   - **Open point for the owner:** with R2 requiring both PBO ≤ 0.20 and DSR ≥ 0.95, a genuine
+     edge whose family is homogeneous fails PBO. The report shows PBO's probability of loss next
+     to it. The gates are unchanged.
+8. **ROB-006 change.** Volatility terciles need the daily sigma-hat known at each day's start, so
+   the estimator's warm-up days have none. They now form a `no_sigma_hat` bucket; before, the
+   whole report was refused. Nothing is back-filled. The cut points use the days that have a
+   sigma-hat.
+9. **Speed.** A validation of a 20-year daily strategy with the default settings takes a few
+   minutes. The Monte Carlo (1,000 paths through the risk engine), the SPA size check (500 null
+   families) and the 10,000-resample bootstraps dominate. The tests lower the paths, draws and
+   families through `--set validation....`, never the gates.

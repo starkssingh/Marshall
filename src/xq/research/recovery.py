@@ -37,6 +37,9 @@ _DELAY = "tests/unit/robustness/test_delay.py"
 _MONTE_CARLO = "tests/unit/robustness/test_montecarlo.py"
 _NOISE = "tests/unit/robustness/test_noise.py"
 _REPORT = "tests/unit/robustness/test_report.py"
+_DECAY = "tests/unit/validation/test_decay.py"
+_PAIRED = "tests/unit/validation/test_paired.py"
+_VALIDATE = "tests/integration/validation/test_validate_strategy.py"
 
 RECOVERY_TESTS: Mapping[str, tuple[str, ...]] = {
     "ADF": (
@@ -208,6 +211,18 @@ RECOVERY_TESTS: Mapping[str, tuple[str, ...]] = {
         f"{_REPORT}::test_a_genuine_edge_passes_every_robustness_gate",
         f"{_REPORT}::test_a_single_point_optimum_on_noise_fails",
         f"{_REPORT}::test_a_gate_that_cannot_be_evaluated_makes_the_verdict_incomplete",
+    ),
+    "decay_trend": (
+        f"{_DECAY}::test_a_stable_edge_is_rejected_at_about_the_nominal_rate",
+        f"{_DECAY}::test_a_fading_edge_is_detected_and_fails_the_gate",
+    ),
+    "best_baseline_paired_bootstrap": (
+        f"{_PAIRED}::test_a_candidate_that_adds_nothing_is_rejected_at_about_the_nominal_rate",
+        f"{_PAIRED}::test_pairing_detects_a_small_consistent_improvement",
+    ),
+    "validate_strategy": (
+        f"{_VALIDATE}::test_a_recorded_genuine_edge_passes_r1_and_r2",
+        f"{_VALIDATE}::test_a_recorded_single_point_optimum_on_noise_fails_r2",
     ),
 }
 

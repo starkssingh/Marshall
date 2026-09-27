@@ -74,6 +74,9 @@ class FamilyTest:
     spa_p_lower: float
     spa_p_upper: float
     stepm_p: FloatArray
+    #: Each strategy's own one-sided bootstrap p-value of a positive mean (studentized, from the
+    #: same resamples): the raw p-values a per-family correction (VAL-006, Holm) adjusts.
+    single_p: FloatArray
 
     def survivors(self, level: float) -> tuple[str, ...]:
         """Strategies whose Romano-Wolf adjusted p-value is at most `level`."""
@@ -82,7 +85,12 @@ class FamilyTest:
     def table(self) -> pd.DataFrame:
         """One row per strategy: mean differential, studentized statistic, adjusted p-value."""
         return pd.DataFrame(
-            {"mean": self.means, "t_stat": self.t_stats, "romano_wolf_p": self.stepm_p},
+            {
+                "mean": self.means,
+                "t_stat": self.t_stats,
+                "p": self.single_p,
+                "romano_wolf_p": self.stepm_p,
+            },
             index=pd.Index(self.names, name="strategy"),
         )
 
@@ -182,6 +190,7 @@ def family_tests(
         spa_ps[name] = _p_value(np.maximum(z.max(axis=1), 0.0), spa_stat)
 
     stepm = _romano_wolf(t_stats, centred / omega)
+    single = np.array([_p_value(centred[:, j] / omega[j], float(t_stats[j])) for j in range(k)])
     return FamilyTest(
         names=names,
         n=n,
@@ -196,6 +205,7 @@ def family_tests(
         spa_p_lower=spa_ps["lower"],
         spa_p_upper=spa_ps["upper"],
         stepm_p=stepm,
+        single_p=single,
     )
 
 

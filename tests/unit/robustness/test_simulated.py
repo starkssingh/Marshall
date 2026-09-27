@@ -34,7 +34,7 @@ def test_a_spec_rebuilds_the_same_strategy_and_its_candidate_is_the_best(truth: 
         simulated_family_returns(SimulationSpec(truth=truth, seed=0)),  # type: ignore[arg-type]
         first.family,
     )
-    assert len(first.family.columns) == (18 if truth == "genuine" else 50)
+    assert len(first.family.columns) == (24 if truth == "genuine" else 50)
     assert first.synthetic
 
 

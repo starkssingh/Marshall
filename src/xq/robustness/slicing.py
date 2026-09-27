@@ -14,7 +14,9 @@ underscores):
 - ``volatility_tercile`` (also ``volatility tercile``, ``vol_tercile``): the tercile (low, mid,
   high) of the daily sigma-hat known at the start of each trading day, cut at the 1/3 and 2/3
   quantiles of the sliced days' sigma-hat. This is an after-the-fact grouping for reporting; it
-  never feeds a decision, and its table is labelled "descriptive, cut ex post" (C-24);
+  never feeds a decision, and its table is labelled "descriptive, cut ex post" (C-24). Days
+  whose sigma-hat is not known yet (the estimator's warm-up) form a ``no_sigma_hat`` bucket;
+  nothing is back-filled;
 - ``session``: closed trades by the session they were entered in, per ``config/sessions.yaml``
   converted to UTC per date (DST by construction): a configured overlap's name when the entry lies
   in exactly its sessions, the session's name when in one, ``+``-joined names for any other
@@ -80,6 +82,7 @@ __all__ = [
 ]
 
 TERCILES = ("low", "mid", "high")
+NO_SIGMA = "no_sigma_hat"
 OFF_SESSION = "off_session"
 _ISSUED = object()
 
@@ -130,18 +133,21 @@ def year_slices(daily_pnl: pd.Series) -> pd.Series:
 
 
 def volatility_terciles(daily_pnl: pd.Series, sigma: pd.Series) -> pd.Series:
-    """Low, mid or high sigma-hat tercile of each trading day (module docstring).
+    """Low, mid or high sigma-hat tercile of each trading day (module docstring). A day whose
+    sigma-hat is not known yet (the estimator's warm-up) is ``no_sigma_hat``; the cut points use
+    the days that have one.
 
     Raises:
-        SliceError: if a sliced day has no sigma-hat.
+        SliceError: if no sliced day has a sigma-hat.
     """
-    known = sigma.reindex(daily_pnl.index)
-    if known.isna().any():
-        missing = list(known.index[known.isna()][:3])
-        raise SliceError(f"no sigma-hat for trading days {missing} ...")
-    cuts = np.quantile(known.to_numpy(np.float64), [1 / 3, 2 / 3])
-    codes = np.searchsorted(cuts, known.to_numpy(np.float64), side="right")
-    return pd.Series(np.array(TERCILES)[codes], index=daily_pnl.index, name=VOLATILITY)
+    known = sigma.reindex(daily_pnl.index).to_numpy(np.float64)
+    finite = np.isfinite(known)
+    if not finite.any():
+        raise SliceError("no sliced trading day has a sigma-hat")
+    cuts = np.quantile(known[finite], [1 / 3, 2 / 3])
+    codes = np.searchsorted(cuts, np.where(finite, known, 0.0), side="right")
+    labels = np.where(finite, np.array(TERCILES)[codes], NO_SIGMA)
+    return pd.Series(labels, index=daily_pnl.index, name=VOLATILITY)
 
 
 def session_buckets(times: pd.DatetimeIndex, sessions: SessionsConfig) -> pd.Series:
@@ -211,7 +217,8 @@ def slice_pnl(
         sigma: Daily sigma-hat known at the start of each trading day (for volatility terciles).
 
     Raises:
-        SliceError: for a regime slice (until REG-007), or a volatility slice without sigma-hat.
+        SliceError: for a regime slice (until REG-007), or a volatility slice without any
+            sigma-hat.
     """
     regimes = [name for name in declared.names if is_regime_slice(name)]
     if regimes:
@@ -230,7 +237,7 @@ def slice_pnl(
                 raise SliceError("a volatility slice needs the daily sigma-hat")
             labels = volatility_terciles(daily_pnl, sigma)
             table = _daily_table(daily_pnl, labels, total, capital, periods_per_year)
-            tables[name] = table.reindex([t for t in TERCILES if t in table.index])
+            tables[name] = table.reindex([t for t in (*TERCILES, NO_SIGMA) if t in table.index])
         else:
             closed = trades.loc[~trades["open"].astype(bool)] if len(trades) else trades
             tables[name] = _trade_table(closed, sessions, total)

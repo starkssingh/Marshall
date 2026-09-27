@@ -22,11 +22,14 @@ import numpy as np
 import numpy.typing as npt
 import pandas as pd
 
-from xq.core.config import GatesConfig, SessionsConfig
+from xq.core.config import GatesConfig, SessionsConfig, TrialClusteringConfig
+from xq.core.time import trading_day_bounds
 from xq.robustness.costs_stress import CostStressResult
 from xq.robustness.noise import NoiseKind, NoisyEvaluate
 from xq.robustness.perturb import Evaluate, Parameter
 from xq.robustness.slicing import DeclaredSlices
+from xq.tracking.trials import effective_trials
+from xq.validation.sharpe import sharpe_ratio
 
 #: Columns of `StrategySubject.trades`, one row per closed trade.
 TRADE_COLUMNS = (
@@ -58,6 +61,31 @@ class TrialSummary:
     def n_gated(self) -> float:
         """The trial count the gates read."""
         return self.n_effective if self.gated == "effective" else float(self.n_raw)
+
+
+def family_trials(
+    family: pd.DataFrame,
+    *,
+    clustering: TrialClusteringConfig,
+    gated: Literal["effective", "raw"],
+    periods_per_year: int,
+) -> TrialSummary:
+    """The trials of a family counted the way the registry counts them (EXP-004): every
+    configuration is a raw trial, the effective count clusters their daily returns by
+    correlation, and the variance is that of their annualized Sharpe ratios."""
+    starts = pd.DatetimeIndex([trading_day_bounds(d)[0] for d in family.index])
+    series = {
+        str(c): pd.Series(family[c].to_numpy(np.float64), index=starts) for c in family.columns
+    }
+    root = np.sqrt(periods_per_year)
+    sharpes = np.array([sharpe_ratio(s.to_numpy()) * root for s in series.values()])
+    variance = float(np.var(sharpes, ddof=1)) if len(sharpes) > 1 else 0.0
+    return TrialSummary(
+        n_raw=len(series),
+        n_effective=float(effective_trials(series, clustering)),
+        sharpe_variance=variance,
+        gated=gated,
+    )
 
 
 @dataclass(frozen=True)
@@ -95,6 +123,8 @@ class StrategySubject:
     noisy: Mapping[NoiseKind, NoisyEvaluate]
     #: Why a kind of noise does not apply (for the report).
     noise_not_applicable: Mapping[NoiseKind, str] = field(default_factory=dict)
+    #: Daily net returns of the baselines on the same days (R1: beat the best of them).
+    baselines: pd.DataFrame | None = None
     #: Daily sigma-hat known at each evaluated day's start (volatility-tercile slices).
     sigma_daily: pd.Series | None = None
     #: The slices the tested hypothesis declared (ROB-006); None when there is no hypothesis.
@@ -113,6 +143,8 @@ class StrategySubject:
         missing = [c for c in TRADE_COLUMNS if c not in self.trades.columns]
         if missing:
             raise ValueError(f"trades lack columns {missing}")
+        if self.baselines is not None and not self.baselines.index.equals(self.returns.index):
+            raise ValueError("the baselines must cover the strategy's days")
         if self.parameters and self.evaluate is None:
             raise ValueError("a strategy with parameters needs an evaluate function")
 
