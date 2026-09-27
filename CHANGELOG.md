@@ -447,6 +447,15 @@ IDs from `docs/specs/development-plan.md`.
   run. Recovery: HAR and EWMA scored with QLIKE on identical folds and refit by hand; the true
   GARCH variance ranks first, stays in the MCS and passes Mincer-Zarnowitz while a doubled
   forecast fails. ADR 0044.
+- VOL-006: sigma-hat selection and serving (`xq.models.volatility`) — `select_forecaster` keeps
+  `ewma_0.94` unless a model is in the 90 % MCS and beats it by one-sided Diebold-Mariano on QLIKE
+  (p < 0.05), then picks the lowest QLIKE among such models, recording every candidate's reason;
+  `serve_sigma` serves the selected forecaster's sigma-hat per fold, fitted on training periods
+  only; `board_forecasters` is the volatility board (four benchmarks, nine GARCH-family models).
+  Tested: the rule defaults to EWMA when nothing beats it, promotes only an eligible model, and
+  keeps EWMA end to end when EWMA is the true model; served sigma-hat matches a per-fold refit and
+  ignores later data. Nothing is promoted: sigma-hat stays the interim EWMA of `fwd_returns.v1`.
+  ADR 0044.
 
 ### Changed
 

@@ -69,3 +69,16 @@ before any real result; changing one afterwards needs an ADR.
    mean RV with cut-offs from each fold's training rows only). Inside a run each model is one trial
    on test folds. A recovery test ranks the true GARCH variance first and in the MCS, passes it on
    Mincer-Zarnowitz and rejects a doubled forecast.
+8. **VOL-006 selection defaults to EWMA.** `select_forecaster` applies the plan's rule to a
+   volatility board: a model is selected only if it is in the 90 % MCS **and** beats the default
+   `ewma_0.94` by a one-sided Diebold-Mariano test on QLIKE with p below `dm_alpha` (0.05); among
+   such models the lowest mean QLIKE wins; otherwise — including when only the default is on the
+   board — `ewma_0.94` stays. The owner asked for EWMA as the fallback; the plan's "or EWMA/HAR" is
+   read as: HAR can be selected like any other model, but only by beating EWMA. Every candidate's
+   reason is recorded. `serve_sigma` serves the selected forecaster's sigma-hat per walk-forward
+   fold, fitted on each fold's training periods only. The volatility board (`board_forecasters`)
+   holds the four benchmarks and the nine GARCH-family models, deseasonalized on hourly periods.
+9. **Nothing is promoted in Sprint 6.** The selection is a record: no code writes it into a
+   configuration or a target set. The platform's sigma-hat stays the interim EWMA (span 96 base
+   bars) of `fwd_returns.v1` until a volatility board runs on the discovery and evaluation windows
+   of real data, the owner approves the selection, and an ADR records the switch.

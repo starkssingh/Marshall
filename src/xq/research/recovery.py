@@ -20,6 +20,7 @@ _REALIZED = "tests/unit/research/test_vol_realized.py"
 _BENCHMARKS = "tests/unit/research/test_vol_benchmarks.py"
 _GARCH = "tests/unit/research/test_vol_garch.py"
 _EVALUATE = "tests/unit/research/test_vol_evaluate.py"
+_SELECTION = "tests/unit/models/test_volatility_selection.py"
 
 RECOVERY_TESTS: Mapping[str, tuple[str, ...]] = {
     "ADF": (
@@ -113,6 +114,12 @@ RECOVERY_TESTS: Mapping[str, tuple[str, ...]] = {
         f"{_EVALUATE}::test_the_true_variance_ranks_first_and_a_biased_forecast_is_rejected",
         f"{_EVALUATE}::test_mincer_zarnowitz_matches_ols_with_white_errors",
         f"{_EVALUATE}::test_regime_cut_offs_come_from_training_rows_only",
+    ),
+    "vol_selection": (
+        f"{_SELECTION}::test_nothing_beats_the_default_so_ewma_stays",
+        f"{_SELECTION}::test_the_best_eligible_model_is_selected",
+        f"{_SELECTION}::test_ewma_is_kept_end_to_end_when_it_is_the_true_model",
+        f"{_SELECTION}::test_sigma_is_served_per_fold_from_training_periods_only",
     ),
 }
 

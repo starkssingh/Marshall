@@ -12,17 +12,34 @@ each period's tz-aware decision time, in time order. The plan's interface:
 
 Forecasters never size positions (CLAUDE.md): sigma-hat scales targets, stops and costs; sizing
 is the risk engine's.
+
+**Selection** (`select_forecaster`, the plan's promotion rule): a model is selected only if it is
+in the 90 % Model Confidence Set **and** beats the default (``ewma_0.94``) by a one-sided
+Diebold-Mariano test on QLIKE with p below ``dm_alpha``; among such models the lowest mean QLIKE
+wins. When nothing beats the default — including when nothing else was evaluated — the default
+stays. The selection is a record, not a switch: nothing here writes it anywhere. Replacing the
+platform's sigma-hat (the interim EWMA of ``fwd_returns.v1``) needs the owner's approval, an ADR
+and a configuration change after a board on real data (Sprint 6 is build-only; no model is
+promoted, ADR 0044).
+
+**Serving** (`serve_sigma`): the selected forecaster serves sigma-hat per walk-forward fold — fitted
+on each fold's training periods only, forecasting its test periods — so every sigma-hat a later
+stage reads was produced without the data it is used on.
 """
 
 from __future__ import annotations
 
+import math
 from abc import ABC, abstractmethod
+from collections.abc import Callable
+from dataclasses import dataclass
 from typing import Self
 
 import numpy as np
 import pandas as pd
 
 from xq.core.errors import NaiveTimestampError
+from xq.validation.splitters import WalkForwardConfig, WalkForwardSplitter
 
 #: Columns every periods frame carries (`xq.research.volatility.realized.REALIZED_COLUMNS`).
 PERIOD_COLUMNS = ("period_start", "ret", "rv")
@@ -81,3 +98,97 @@ def check_periods(periods: pd.DataFrame) -> None:
     missing = [c for c in PERIOD_COLUMNS if c not in periods.columns]
     if missing:
         raise ValueError(f"periods lack columns {missing}")
+
+
+def realized_target(periods: pd.DataFrame, horizon: int) -> tuple[pd.Series, pd.Series]:
+    """``rv_{t+1} + ... + rv_{t+horizon}`` and its ``label_end`` per row (missing at the end)."""
+    rv = periods["rv"].to_numpy(np.float64)
+    n = len(rv)
+    cumulative = np.r_[0.0, np.cumsum(rv)]
+    y = np.full(n, np.nan)
+    ends = pd.Series(pd.NaT, index=periods.index, dtype="datetime64[ns, UTC]")
+    if n > horizon:
+        y[: n - horizon] = cumulative[horizon + 1 :] - cumulative[1 : n - horizon + 1]
+        ends.iloc[: n - horizon] = periods.index[horizon:]
+    return pd.Series(y, index=periods.index, name="target"), ends
+
+
+@dataclass(frozen=True)
+class Selection:
+    """Which forecaster serves sigma-hat, and why every candidate was or was not selected."""
+
+    selected: str
+    default: str
+    beats_default: bool
+    eligible: tuple[str, ...]
+    reasons: dict[str, str]
+
+
+def select_forecaster(metrics: pd.DataFrame, *, default: str, dm_alpha: float) -> Selection:
+    """Apply the selection rule (module docstring) to a volatility board's metrics.
+
+    Args:
+        metrics: One row per model with ``model``, ``qlike``, ``in_mcs`` and
+            ``dm_vs_default_p_less`` (`xq.research.volatility.evaluate.VolBoard.metrics`).
+
+    Raises:
+        ValueError: if the default is not on the board.
+    """
+    table = metrics.set_index("model")
+    if default not in table.index:
+        raise ValueError(f"the default {default!r} is not on the board")
+    reasons: dict[str, str] = {default: "the default: kept unless a model beats it"}
+    eligible: list[str] = []
+    for name, row in table.iterrows():
+        model = str(name)
+        if model == default:
+            continue
+        p = float(row["dm_vs_default_p_less"])
+        if not bool(row["in_mcs"]):
+            reasons[model] = "not in the model confidence set"
+        elif not (math.isfinite(p) and p < dm_alpha):
+            reasons[model] = f"does not beat {default} (one-sided DM p {p:.3g} >= {dm_alpha:g})"
+        else:
+            eligible.append(model)
+            reasons[model] = f"in the MCS and beats {default} (one-sided DM p {p:.3g})"
+    if not eligible:
+        return Selection(default, default, False, (), reasons)
+    qlike = table["qlike"].astype(float)
+    winner = min(eligible, key=lambda m: float(qlike[m]))
+    reasons[winner] += "; lowest mean QLIKE among eligible models: selected"
+    return Selection(winner, default, True, tuple(eligible), reasons)
+
+
+def serve_sigma(
+    periods: pd.DataFrame,
+    factory: Callable[[], VolForecaster],
+    horizon: int,
+    splitter: WalkForwardConfig,
+) -> pd.DataFrame:
+    """Sigma-hat of the next `horizon` periods on every test period, fitted per fold.
+
+    Returns:
+        Indexed by decision time: ``fold_id``, ``train_end`` (the last training decision) and
+        ``sigma_hat``.
+
+    Raises:
+        ValueError: if the splitter gives no fold.
+    """
+    check_periods(periods)
+    _, label_end = realized_target(periods, horizon)
+    folds = WalkForwardSplitter(splitter).split(pd.DatetimeIndex(periods.index), label_end)
+    if not folds:
+        raise ValueError("the walk-forward splitter gives no fold on these periods")
+    frames = []
+    for fold in folds:
+        train = periods.iloc[fold.train_idx]
+        model = factory().fit(train)
+        upto = periods.iloc[: int(fold.test_idx[-1]) + 1]
+        sigma = model.predict(upto, horizon).to_numpy(np.float64)[fold.test_idx]
+        frames.append(
+            pd.DataFrame(
+                {"fold_id": fold.fold_id, "train_end": train.index[-1], "sigma_hat": sigma},
+                index=periods.index[fold.test_idx],
+            )
+        )
+    return pd.concat(frames)

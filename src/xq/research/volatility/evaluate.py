@@ -35,6 +35,7 @@ from __future__ import annotations
 import math
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
+from functools import partial
 from typing import TYPE_CHECKING, Any
 
 import numpy as np
@@ -42,9 +43,12 @@ import numpy.typing as npt
 import pandas as pd
 from scipy.stats import chi2
 
-from xq.core.config import VolEvaluationConfig
+from xq.core.config import VolatilityConfig, VolEvaluationConfig
 from xq.core.seeds import derive_seed
-from xq.models.volatility import VolForecaster, check_periods
+from xq.core.types import Timeframe
+from xq.models.volatility import VolForecaster, check_periods, realized_target
+from xq.research.volatility.benchmarks import Deseasonalized, benchmark_forecasters
+from xq.research.volatility.garch import garch_forecasters
 from xq.validation.forecast_eval import (
     ModelConfidenceSet,
     diebold_mariano,
@@ -80,17 +84,19 @@ class VolBoard:
     default: str
 
 
-def realized_target(periods: pd.DataFrame, horizon: int) -> tuple[pd.Series, pd.Series]:
-    """``rv_{t+1} + ... + rv_{t+horizon}`` and its ``label_end`` per row (missing at the end)."""
-    rv = periods["rv"].to_numpy(np.float64)
-    n = len(rv)
-    cumulative = np.r_[0.0, np.cumsum(rv)]
-    y = np.full(n, np.nan)
-    ends = pd.Series(pd.NaT, index=periods.index, dtype="datetime64[ns, UTC]")
-    if n > horizon:
-        y[: n - horizon] = cumulative[horizon + 1 :] - cumulative[1 : n - horizon + 1]
-        ends.iloc[: n - horizon] = periods.index[horizon:]
-    return pd.Series(y, index=periods.index, name="target"), ends
+def board_forecasters(cfg: VolatilityConfig, period: Timeframe, *, seed: int) -> dict[str, Factory]:
+    """The volatility board: the VOL-003 benchmarks and the VOL-004 GARCH family by name.
+
+    On hourly periods every model is deseasonalized with the train-only diurnal factor.
+    """
+    garch = garch_forecasters(cfg.garch, seed=seed)
+    if period == Timeframe("1h"):
+        garch = {name: partial(_deseasonalized, make, cfg) for name, make in garch.items()}
+    return {**benchmark_forecasters(cfg, period), **garch}
+
+
+def _deseasonalized(make: Factory, cfg: VolatilityConfig) -> VolForecaster:
+    return Deseasonalized(make(), cfg.realized.diurnal)
 
 
 def mincer_zarnowitz(
