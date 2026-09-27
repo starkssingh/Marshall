@@ -267,6 +267,11 @@ IDs from `docs/specs/development-plan.md`.
   and its duration, Calmar, recovery factor, CVaR 95/99, worst day, time in market, average
   exposure, turnover, trade count, win rate, average win and loss, expectancy and profit factor;
   hand-computed tests and independent pandas cross-checks. ADR 0030.
+- BASE-006: forecast evaluation (`xq.validation.forecast_eval`) — log loss, Brier, expected
+  calibration error and reliability curves (equal-width bins), AUC (Mann–Whitney, ties halved),
+  MSE, MAE, QLIKE, and `loss_series` per-observation losses for Diebold–Mariano tests; matches the
+  scikit-learn documentation examples and scipy's Mann–Whitney statistic. Walk-forward fold
+  metrics and validation selection now use it.
 
 ### Changed
 

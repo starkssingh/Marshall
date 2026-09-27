@@ -47,9 +47,9 @@ rate; overlapping labels with no signal give chance-level results under purging.
    strictly after its fold's `train_end + embargo`. The file is a run artifact with its SHA-256.
    `model_version` is `<model>@<code_version>:<config hash>`; `feature_set_version` comes from the
    dataset manifest.
-7. **Interim metrics.** Folds report `n`, MSE, MAE, sign hit rate and mean forecast (regression),
-   or log loss, Brier score and accuracy (classification), until BASE-006 supplies the full
-   forecast evaluation.
+7. **Fold metrics** come from `xq.validation.forecast_eval` (BASE-006): `n`, MSE, MAE, sign hit
+   rate and mean forecast for regression; `n`, log loss, Brier score, ECE, AUC and accuracy for
+   classification. Validation selection uses MSE or log loss.
 
 ## Consequences
 

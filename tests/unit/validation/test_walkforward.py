@@ -163,7 +163,7 @@ def test_classification_forecasts_probabilities_of_a_positive_target() -> None:
     assert set(predictions["y_true"].unique()) <= {0.0, 1.0}
     assert predictions["p_raw"].between(0, 1).all()
     np.testing.assert_array_equal(predictions["y_pred"], (predictions["p_raw"] > 0.5).astype(float))
-    assert set(out.folds[0].metrics) == {"n", "log_loss", "brier", "accuracy"}
+    assert set(out.folds[0].metrics) == {"n", "log_loss", "brier", "ece", "auc", "accuracy"}
 
 
 def test_inputs_are_validated() -> None:

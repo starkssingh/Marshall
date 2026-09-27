@@ -41,6 +41,12 @@ import pandas as pd
 from xq.core.errors import NaiveTimestampError
 from xq.core.seeds import derive_seed, make_rng
 from xq.models.base import ModelConfig, ModelSpec, Task, model_targets
+from xq.validation.forecast_eval import (
+    classification_metrics,
+    log_loss,
+    mse,
+    regression_metrics,
+)
 from xq.validation.splitters import Fold, WalkForwardConfig, WalkForwardSplitter
 
 if TYPE_CHECKING:
@@ -49,7 +55,6 @@ if TYPE_CHECKING:
 #: Columns of a walk-forward prediction frame (indexed by ``decision_time``).
 PREDICTION_COLUMNS = ("fold_id", "y_true", "y_pred", "p_raw", "p_cal", "train_end")
 CACHE_DIR = "cache/walkforward"
-_EPS = 1e-15
 
 
 @dataclass(frozen=True)
@@ -270,32 +275,17 @@ def run_walk_forward(
 
 
 def forecast_metrics(predictions: pd.DataFrame, task: Task) -> dict[str, float]:
-    """Summary metrics of predictions with a known ``y_true``.
+    """Summary metrics (BASE-006) of predictions with a known ``y_true``.
 
-    Regression: ``n``, ``mse``, ``mae``, ``hit_rate`` (sign agreement where neither the forecast
-    nor the outcome is zero) and ``mean_pred``. Classification: ``n``, ``log_loss``, ``brier`` and
-    ``accuracy``. Missing when there is no labelled prediction.
+    Regression: ``n``, ``mse``, ``mae``, ``hit_rate`` and ``mean_pred``. Classification: ``n``,
+    ``log_loss``, ``brier``, ``ece``, ``auc`` and ``accuracy``. NaN when undefined.
     """
     known = predictions.loc[predictions["y_true"].notna()]
     y = known["y_true"].to_numpy(np.float64)
-    n = float(len(y))
     if task == "regression":
-        pred = known["y_pred"].to_numpy(np.float64)
-        signed = (pred != 0) & (y != 0)
-        return {
-            "n": n,
-            "mse": _mean((pred - y) ** 2),
-            "mae": _mean(np.abs(pred - y)),
-            "hit_rate": _mean((np.sign(pred) == np.sign(y))[signed].astype(np.float64)),
-            "mean_pred": _mean(pred),
-        }
-    p = np.clip(known["p_raw"].to_numpy(np.float64), _EPS, 1 - _EPS)
-    return {
-        "n": n,
-        "log_loss": _mean(-(y * np.log(p) + (1 - y) * np.log(1 - p))),
-        "brier": _mean((p - y) ** 2),
-        "accuracy": _mean(((p > 0.5) == (y == 1)).astype(np.float64)),
-    }
+        return {"n": float(len(y)), **regression_metrics(y, known["y_pred"].to_numpy(np.float64))}
+    p = known["p_raw"].to_numpy(np.float64)
+    return {"n": float(len(y)), **classification_metrics(y, p)}
 
 
 def _fit_fold(task: _FoldTask) -> tuple[pd.DataFrame, FoldResult]:
@@ -353,16 +343,10 @@ def _execute(tasks: Sequence[_FoldTask], n_jobs: int) -> list[tuple[pd.DataFrame
 
 
 def _loss(task: Task, y: pd.Series, pred: npt.NDArray[np.float64]) -> float:
+    """Validation loss for selection: MSE, or log loss for classification."""
     actual = y.to_numpy(np.float64)
     forecast = np.asarray(pred, dtype=np.float64)
-    if task == "regression":
-        return _mean((forecast - actual) ** 2)
-    p = np.clip(forecast, _EPS, 1 - _EPS)
-    return _mean(-(actual * np.log(p) + (1 - actual) * np.log(1 - p)))
-
-
-def _mean(values: npt.NDArray[Any]) -> float:
-    return float(np.mean(values)) if len(values) else math.nan
+    return mse(actual, forecast) if task == "regression" else log_loss(actual, forecast)
 
 
 def _cache_key(model_hash: str, task: _FoldTask) -> str:
