@@ -1,7 +1,10 @@
 """EXP-006: `xq exp reproduce <run_id>` rebuilds a fixture board run's dataset, repeats the run and
 matches every judged metric within tolerance without counting its trials again; a result that
-changed, altered dataset content and runs without a reproducer are refused."""
+changed, altered dataset content and runs without a reproducer are refused; a deleted dataset is
+rebuilt from the spec the registry recorded."""
 
+import json
+import shutil
 from collections.abc import Iterator
 from pathlib import Path
 
@@ -129,6 +132,19 @@ def test_a_board_run_reproduces_within_tolerance(
     assert any(name.endswith("/sharpe_p") for name in metrics)
     for name, value in metrics.items():
         assert again[name] == pytest.approx(value, rel=1e-9, abs=1e-12), name
+
+
+def test_a_deleted_dataset_is_rebuilt_from_its_recorded_spec(
+    root: Path, cfg: AppConfig, dataset: DatasetRef, board_run: str
+) -> None:
+    directory = datasets_root(cfg) / dataset.dataset_id
+    manifest = json.loads((directory / "manifest.json").read_text())
+    shutil.rmtree(directory)
+    code, output = xq(root, "exp", "reproduce", board_run, "--exploratory")
+    assert code == 0, output
+    assert "REPRODUCED" in output
+    rebuilt = json.loads((directory / "manifest.json").read_text())
+    assert rebuilt["sha256"] == manifest["sha256"]  # the same content from the recorded spec
 
 
 def test_a_changed_result_is_not_reproduced(root: Path, engine: Engine, board_run: str) -> None:
