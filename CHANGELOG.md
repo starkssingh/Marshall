@@ -381,6 +381,13 @@ IDs from `docs/specs/development-plan.md`.
   reads as stationary; a level shift is found near its date. Adds `arch` and `statsmodels` as
   runtime dependencies (unit-root tests, GARCH, ARMA; statsmodels was a development dependency)
   and the recovery registry `xq.research.recovery`. Simulated data only. ADR 0043.
+- STAT-002: dependence tests (`xq.research.stats.dependence`) — Ljung-Box on returns, absolute
+  and squared returns, the heteroskedasticity-robust portmanteau Q* on returns (robust
+  autocorrelation standard errors of EDA-003) and ARCH-LM, at the lags of `config/stats.yaml`,
+  with Holm-adjusted p-values across the lags of each family. Matches statsmodels. Recovery: on a
+  GARCH(1,1) simulation Ljung-Box on squared returns and ARCH-LM reject; Q* keeps its size on GARCH
+  returns (at most 10 % rejections at 5 % over 150 draws) where the plain Ljung-Box over-rejects;
+  an AR(1) is detected. ADR 0043.
 
 ### Changed
 

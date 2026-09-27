@@ -12,6 +12,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 
 _STATIONARITY = "tests/unit/research/test_stats_stationarity.py"
+_DEPENDENCE = "tests/unit/research/test_stats_dependence.py"
 
 RECOVERY_TESTS: Mapping[str, tuple[str, ...]] = {
     "ADF": (
@@ -28,6 +29,19 @@ RECOVERY_TESTS: Mapping[str, tuple[str, ...]] = {
         f"{_STATIONARITY}::test_stationary_ar1_is_stationary_and_its_returns_too",
     ),
     "ZA": (f"{_STATIONARITY}::test_zivot_andrews_finds_a_level_shift_near_its_date",),
+    "LB": (
+        f"{_DEPENDENCE}::test_ljung_box_and_arch_lm_match_statsmodels",
+        f"{_DEPENDENCE}::test_garch_squared_returns_reject_and_arch_lm_rejects",
+        f"{_DEPENDENCE}::test_iid_returns_show_no_arch_effects",
+    ),
+    "Q*": (
+        f"{_DEPENDENCE}::test_robust_portmanteau_keeps_its_size_under_garch_where_ljung_box_does_not",
+        f"{_DEPENDENCE}::test_ar1_returns_are_detected_by_the_robust_test",
+    ),
+    "ARCH-LM": (
+        f"{_DEPENDENCE}::test_ljung_box_and_arch_lm_match_statsmodels",
+        f"{_DEPENDENCE}::test_garch_squared_returns_reject_and_arch_lm_rejects",
+    ),
 }
 
 
