@@ -11,7 +11,8 @@ import pytest
 from helpers.event_backtest import (
     CAPITAL,
     CLOCK,
-    INSTRUMENT,
+    RISK,
+    SIGMA,
     CallRecorder,
     RandomStrategy,
     ScriptedStrategy,
@@ -26,7 +27,7 @@ from xq.backtest.engine import EventEngine, MarketData, Strategy
 from xq.backtest.events import Event, Fill, Quote
 from xq.backtest.portfolio import Portfolio, daily_frame, fills_frame
 from xq.core.types import Timeframe
-from xq.risk.placeholder import PassThroughRiskApprover
+from xq.risk.state import SeriesSigma
 from xq.signals.schema import TradeIntent
 
 
@@ -73,11 +74,12 @@ def wire(
         strategy,
         data,
         broker=broker,
-        risk=PassThroughRiskApprover(INSTRUMENT, CAPITAL),
+        risk=RISK,
         account=portfolio,
         recorder=recorder,
         costs=costs,
         clock=CLOCK,
+        sigma=SeriesSigma(SIGMA),
         observer=observer if observe else None,
     )
     return engine, portfolio, checks
@@ -123,6 +125,12 @@ def test_a_flip_closes_the_lots_and_opens_the_rest_on_the_other_side() -> None:
     assert portfolio.realized == pytest.approx(-0.5 * 10 * 100)
 
 
+#: Stops of the financing runs: 10 below the ask sizes the long at 0.5 lots (0.5 % of 100,000 USD
+#: over 10 x 100 oz, as the requested exposure); the short's, 30.1 above the bid and never
+#: reached, at 0.16 lots (500 / 3,010, rounded down).
+FINANCED = {"long": (1990.1, 0.5), "short": (2030.0, 0.16)}
+
+
 def financing_run(direction: str) -> tuple[Portfolio, pd.DataFrame]:
     costs = exact_costs(long_rate=6.0, short_rate=2.0)
     q = quotes(
@@ -134,7 +142,8 @@ def financing_run(direction: str) -> tuple[Portfolio, pd.DataFrame]:
         ("2024-03-14 14:00:00", 2019.9, 2020.1),  # Thursday
         ("2024-03-14 14:15:02", 2019.9, 2020.1),  # the exit
     )
-    intent = TradeIntent(direction=direction, exposure=1.0)  # type: ignore[arg-type]
+    stop = FINANCED[direction][0]
+    intent = TradeIntent(direction=direction, exposure=1.0, stop=stop)  # type: ignore[arg-type]
     strategy = ScriptedStrategy(
         {"2024-03-12 14:15": [intent], "2024-03-14 14:15": [TradeIntent(direction="flat")]}
     )
@@ -158,8 +167,9 @@ def test_financing_over_the_triple_rollover_is_charged_on_both_sides(
     charges = portfolio.charges
     assert [c.ts for c in charges] == [ns("2024-03-12 21:00"), ns("2024-03-13 21:00")]
     assert [c.multiplier for c in charges] == [1, 3]
-    # 0.5 lots x 100 oz at the mid of the last quote before each rollover, act/360
-    expected = [0.5 * 100 * 2010.0 * rate / 360, 3 * 0.5 * 100 * 2020.0 * rate / 360]
+    # the lots x 100 oz at the mid of the last quote before each rollover, act/360
+    lots = FINANCED[direction][1]
+    expected = [lots * 100 * 2010.0 * rate / 360, 3 * lots * 100 * 2020.0 * rate / 360]
     np.testing.assert_allclose([c.amount for c in charges], expected)
     assert all(c.amount > 0 for c in charges)  # a cost on longs and on shorts (ADR 0032)
     assert daily.index.tolist() == [date(2024, 3, 12), date(2024, 3, 13), date(2024, 3, 14)]
@@ -168,7 +178,7 @@ def test_financing_over_the_triple_rollover_is_charged_on_both_sides(
     assert trade["financing"] == pytest.approx(sum(expected))
     assert trade["pnl"] == pytest.approx(portfolio.equity - CAPITAL)
     np.testing.assert_allclose(
-        daily["position_lots"], [0.5 if direction == "long" else -0.5] * 2 + [0.0]
+        daily["position_lots"], [lots if direction == "long" else -lots] * 2 + [0.0]
     )
 
 

@@ -1,23 +1,25 @@
 # Golden event backtest, computed by hand (BT-007). Tick mode, 15-minute signal bars, Tuesday
 # 2024-03-12 (EDT: 17:00 New York is 21:00 UTC, so no rollover is crossed).
 # Costs: 3.5 USD per lot per side, 0.5 bp slippage on market and stop fills, no financing crossed,
-# 1 s latency in market time. Capital 100,000 USD; 100 oz per lot; lot step 0.01. The PLACEHOLDER
-# approver sizes at the mid of the latest quote known at the decision, rounded down to the step.
+# 1 s latency in market time. Capital 100,000 USD; 100 oz per lot; lot step 0.01. The risk engine
+# (default profile, RISK-005) sizes the smaller of 0.5 % of equity to the stop (from the entry
+# quote) and the requested exposure of equity at the decision's mid, rounded down to the step;
+# daily sigma-hat 1 %, so a stop may be up to 5 x 1 % x price away.
 quotes:  # [UTC time, bid, ask]
   - ["2024-03-12 14:00:00", 1999.9, 2000.1]
   - ["2024-03-12 14:10:00", 1999.9, 2000.1]
-  - ["2024-03-12 14:15:00", 1999.9, 2000.1]    # known at 14:15: mid 2000 -> 100,000/(2000x100) = 0.50 lots
+  - ["2024-03-12 14:15:00", 1999.9, 2000.1]    # at 14:15: min(0.005x100,000/(5.1x100) = 0.98, 100,000/(2000x100) = 0.50) = 0.50 lots
   - ["2024-03-12 14:15:02", 1999.9, 2000.1]    # first quote after arrival (14:15:01): buy 0.50 at 2000.1 x 1.00005
   - ["2024-03-12 14:20:00", 2004.9, 2005.1]
   - ["2024-03-12 14:25:00", 2009.9, 2010.1]    # bid >= 2008: the target fills at 2008 (no improvement); OCO cancels the stop
-  - ["2024-03-12 14:30:00", 2007.9, 2008.1]    # known at 14:30: mid 2008 -> 100,000/(2008x100) = 0.498 -> 0.49 lots
+  - ["2024-03-12 14:30:00", 2007.9, 2008.1]    # at 14:30, equity 100,386.49975: min(501.93/(10.1x100) = 0.497, 100,386.5/(2008x100) = 0.4999) -> 0.49 lots
   - ["2024-03-12 14:30:03", 2007.9, 2008.1]    # sell 0.49 at 2007.9 x 0.99995
   - ["2024-03-12 14:45:00", 1999.9, 2000.1]
   - ["2024-03-12 15:00:00", 1999.9, 2000.1]
   - ["2024-03-12 15:00:01.5", 1999.9, 2000.1]  # buy back 0.49 at 2000.1 x 1.00005
 intents:  # decision time (a signal bar's availability) -> intent
   "2024-03-12 14:15": {direction: long, exposure: 1.0, stop: 1995.0, target: 2008.0}
-  "2024-03-12 14:30": {direction: short, exposure: 1.0}
+  "2024-03-12 14:30": {direction: short, exposure: 1.0, stop: 2018.0}
   "2024-03-12 15:00": {direction: flat}
 expected:
   fills:  # [UTC time, signed lots, price, role]
@@ -48,7 +50,9 @@ expected:
     - [decision, D-I000002]
     - [order, O-I000002]
     - [fill, F-O-I000002]
+    - [order, O-I000002-SL]                # the short's stop at 2018 (never reached)
     - [intent, I000003]
     - [decision, D-I000003]
     - [order, O-I000003]
+    - [order_cancelled, O-I000002-SL]      # replaced when the exit reaches the broker
     - [fill, F-O-I000003]

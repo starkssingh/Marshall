@@ -537,6 +537,85 @@ IDs from `docs/specs/development-plan.md`.
   artifacts and records the backtest in the new `backtests` table (migration 0009). Tested on a
   baseline rule through both tiers, bar-mode ambiguity, determinism and an experiment run.
   ADR 0049.
+- RISK-001: risk state (`xq.risk.state`) — `RiskState` (equity, peak, drawdown and its sticky
+  worst, the trading day's starting equity and P&L, position, notional, margin, consecutive losing
+  round trips, entries today) updated by `RiskStateTracker` from equity observations at every
+  decision and trading day's end and from fills; the event engine records each observation as an
+  `account` ledger row, and `rebuild_risk_state` replays the ledger into the same state, equal to
+  the live state at every decision (tested). `MarketState` carries the latest quote, its age, the
+  daily sigma-hat, a reference spread, the sessions and the kill switch for the risk engine.
+  ADR 0052.
+- RISK-002: position sizing (`xq.risk.sizing`) and risk profiles (`config/risk/default.yaml`,
+  `RiskConfig`, `backtest.risk_profile`) — fixed-fractional (0.5 % of equity to the stop, the
+  owner's default) or volatility-targeted size, capped by the strategy's requested exposure,
+  scaled by the calibrated win probability and the drawdown throttle (5 % → 15 %), rounded down
+  to the lot step. Hand-computed cases and hypothesis properties: never above the request or the
+  risk budget, lot-step multiples within the lot range, monotone scales. ADR 0052.
+- RISK-003: limits and halts (`xq.risk.limits`) — halts on new exposure (sticky drawdown halt,
+  daily loss halt, cooldown after consecutive losing round trips, entries per day), each
+  triggering exactly at its threshold (tested at and a hair below every one), and caps on every
+  target (lots, notional with a correlated-exposure hook, margin use, per-session exposure),
+  rounded down to the lot step; a hypothesis property shows a capped target never exceeds any
+  limit or the requested size and keeps its side. ADR 0052.
+- RISK-004: stop policy (`xq.risk.stops.check_stops`) — every long or short intent needs a stop
+  on the losing side of its entry reference (the side's quote, or the order's price); a stop
+  closer than 3 spreads (at least a tick) is widened outward to the tick and becomes the adjusted
+  stop; one farther than 5 daily sigmas, or any stop without a sigma-hat, is refused; targets must
+  be on the winning side and time stops after the decision (allowed in addition to the price
+  stop). Tested on hand-computed bounds, inclusive at the sigma bound. ADR 0052.
+- RISK-005: the risk engine (`xq.risk.engine.RiskEngine`) and the `OrderIntent` construction
+  rule — `evaluate(intent, state, market)` is pure and deterministic: exits always approved; new
+  exposure passes the data checks (a quote, a calibrated win probability), the stop policy,
+  sizing, the halts and the caps; a refused intent still closes a position on the other side
+  (reason `risk rule: …`); every decision carries the full limits snapshot and
+  `config_version` = profile version @ profile hash. Decisions carry a private *issued* mark set
+  only by the engine; `OrderIntent` refuses a decision that is not approved or not issued (a
+  hand-built, revalidated or copied one), and `model_construct` / `model_copy(update=)` are
+  disabled; an AST architectural test fails on any `OrderIntent`, `RiskDecision` or
+  issue call under `src/` outside the risk engine (planted violations caught). The event
+  engine takes only a `RiskEngine`, assembles the market state (quote, daily sigma-hat from a
+  supplied series or the interim EWMA of signal bars, capped sessions) and hands the same
+  sigma-hat to strategies; `ExposureStrategy` and `RuleStrategy` attach stops in sigma-hat
+  units; `TradeIntent` gains `p_win` and `calibrated`; `RiskDecision` gains `order_type` and
+  `price`. Reconciliation labels exits a risk rule forced as event rules. ADR 0052.
+- RISK-006: kill switch and data-health breakers (`xq.risk.kill_switch`) — a kill switch on
+  while a file exists, an environment variable (`XQ_KILL_SWITCH`) is true or it is engaged by
+  hand, and breakers for a stale quote (older than 120 s) and an abnormal spread (above 5 x the
+  median of the last 500 quotes); all block new exposure in `RiskEngine.evaluate`, never an exit.
+  The event engine reads the switch at every decision, keeps the spread reference, and with the
+  `flatten` policy sends a `flat` intent while the switch is on; backtests honour a kill switch
+  only when given one. Tested at the thresholds and end to end (stale and wide quotes refused, a
+  switch turned on mid-run, with and without flattening). ADR 0052.
+- SIGNAL-001: signal schemas (`xq.signals.schema`) — `Forecast`, `RegimeState`,
+  `SignalCandidate` and `SignalRecord` in the plan's shapes (plus ids, `p_se`, the barrier target
+  and side, the calibration id), frozen and validated; JSON Schemas of all seven decision-chain
+  interfaces exported to `docs/specs/interfaces/` (`write_json_schemas`), kept in sync by a test;
+  JSON round trips, and an audit-completeness test of the record against the plan's list.
+  ADR 0052.
+- SIGNAL-002: expected value in sigma units (`xq.signals.ev`) — EV_gross = p·TP − (1 − p)·SL,
+  EV_net = EV_gross − round-trip cost, a candidate qualifying only if EV_net > θ and p > p_min
+  (strict); the conservative variant uses the lower bound p − z·p_se; costs in basis points
+  convert to sigma units. Golden cases for both variants and the strict thresholds. ADR 0052.
+- SIGNAL-003: signal filters (`xq.signals.filters`) — the regime filter as an interface
+  (`RegimeFilter`, taking the filtered `RegimeState`) with only a clearly marked PLACEHOLDER
+  pass-through until REG-007; session and blackout filters on a per-minute session calendar
+  (checked against the dataset calendar columns across DST); an inclusive daily sigma-hat band;
+  the spread strictly below k x its causal New York hour-of-week median (overall median as a
+  fallback, blocked without one). ADR 0052.
+- SIGNAL-004: the signal engine (`xq.signals.engine.SignalEngine`) — a strategy defined entirely
+  by YAML (`StrategySpec`, `experiments/configs/strategies/template_barrier.yaml`, a template
+  for synthetic tests); every forecast of its model and target becomes a candidate with stop,
+  target and time stop in sigma-hat units; uncalibrated, stale and filtered forecasts and
+  unqualified EV are rejected with reasons; the best remaining candidate becomes the one
+  `TradeIntent`; a `SignalRecord` for every candidate. Tested on hand-computed stops, costs and
+  EV. ADR 0052.
+- SIGNAL-005: the signal engine in the event backtester (`xq.backtest.strategies.SignalStrategy`)
+  — forecasts made at each decision go through the signal engine, the risk engine and the
+  simulated broker; every forecast and signal record is kept, and `SignalStrategy.audit` traces
+  every fill through its order, risk decision and intent to its record and forecasts. A
+  forecast-to-fill run on synthetic quotes with a causal stub forecaster (declared calibrated,
+  not a model) traces every fill, and with the stub uncalibrated nothing reaches the risk engine.
+  ADR 0052.
 
 ### Changed
 
@@ -656,9 +735,33 @@ IDs from `docs/specs/development-plan.md`.
 - `CLAUDE.md` no longer marks `docs/specs/project-instructions.md` as missing: the owner committed
   it together with the revised development plan (backlog tables back in section 9, STAT-008
   dependencies, Sprint 13 ordering, critical-path note).
+- BT-009 reconciliation applies the 5 %-of-costs tolerance after the separately reported sizing
+  effect (owner's decision, ADR 0050): a *sized* screen replays the screener's decisions with the
+  event tier's lots where only sizing differs, `sizing_effect` = sized - screener and
+  `within_tolerance` compares |event - sized| with the tolerance; event-only rules and their
+  follow-ons stay inside the check, and the mechanical residual must still be below one cent.
+  An exposure schedule on 100,000 USD now passes, its sizing effect alone above 5 % of costs.
+- BT-005 limit orders (limit entries and take-profit legs) fill only when the price trades
+  through the limit by at least one tick (`instrument.tick_size`): the bid a tick above a sell
+  limit, the ask a tick below a buy limit, in tick mode and at a bar's open or over its range; a
+  touch is not a fill, and the fill stays at the limit, never better. The bar-mode ambiguity
+  check and the tick-mode ambiguous-bar diagnostic use the same rule (owner's decision, ADR 0050).
+- RISK-005 replaces the Sprint 11 placeholder risk approver everywhere: `xq.risk.placeholder` is
+  removed, `run_event_backtest` requires a `RiskEngine` (and takes an optional daily sigma-hat),
+  the report's summary names the risk engine and its profile version, and the event-tier tests
+  run through the real engine — the golden trade's short now carries a stop (its ledger chain
+  gains the stop leg and its cancellation), the financing, constraint and reconciliation tests
+  give their intents stops and, where halts would interrupt another mechanism under test, use the
+  real engine with halts that cannot bind.
 
 ### Fixed
 
+- TGT-002 forward returns: a quote while the market is closed (a stray quote in the daily break,
+  within the fill delay) is never an entry or exit fill; the fill is the first quote at or after
+  the intended time that lies in market hours, or there is no label, as in both backtest tiers.
+  The forward-return code version goes from 4 to 5, which changes dataset ids (no real dataset
+  exists; owner's go-ahead, ADR 0050, C-21). The screener and the targets share
+  `MarketClock.first_open`.
 - BT-002 screener: a quote while the market is closed (a stray quote in the daily break, for
   example) is never a fill quote; the fill is the first quote at or after the intended time that
   lies in market hours, or the trade is missed. Before, a closed-market quote within the fill

@@ -6,14 +6,16 @@ it to the rest of the chain:
 - ``intent`` — a strategy (or engine: time stop, weekend exit) intent, with its decision time;
 - ``refusal`` — an intent refused before the risk decision (market closed, entry blackout),
   with the reason;
-- ``decision`` — the risk decision on an intent: approved or rejected, the size, the reasons and
-  the approver's configuration version (the Sprint 11 placeholder says so in both);
+- ``decision`` — the risk engine's decision on an intent: approved or rejected, the order, the
+  reasons, the limits snapshot and the risk profile's version (RISK-005);
 - ``order`` — an order sent to the broker (``decision_id`` and ``intent_id`` of the decision that
   approved it) or a bracket leg placed when its parent filled (``parent_order_id``; it carries
   the parent's decision, which approved its stop and target);
 - ``order_rejected`` / ``order_cancelled`` / ``order_expired`` — what happened to an order that
   did not fill, with the reason;
-- ``fill`` — an execution, with its order, decision and intent.
+- ``fill`` — an execution, with its order, decision and intent;
+- ``account`` — the account the risk state observed, at every risk decision and at every trading
+  day's end, so the risk state can be rebuilt from the ledger (RISK-001).
 
 `Ledger.check_links` lists every row whose links are broken — above all, every order that is not
 backed by an approved risk decision — so a test (and any later audit) can require that list to be
@@ -24,12 +26,13 @@ reason) next to it.
 from __future__ import annotations
 
 import json
+import math
 from pathlib import Path
 from typing import Any
 
 import pandas as pd
 
-from xq.backtest.events import Fill
+from xq.backtest.events import AccountState, Fill
 from xq.core.time import from_ns, to_ns
 from xq.core.types import Side
 from xq.signals.schema import OrderIntent, RiskDecision, TradeIntent
@@ -64,6 +67,7 @@ KINDS = (
     "order_cancelled",
     "order_expired",
     "fill",
+    "account",
 )
 
 
@@ -174,6 +178,25 @@ class Ledger:
                 "slippage_cost": fill.slippage_cost,
                 "commission": fill.commission,
                 "position_after": fill.position_after,
+            },
+        )
+
+    def account(self, account: AccountState, event: str) -> None:
+        """The account the risk state observed (``event``: ``decision`` or ``day_end``)."""
+        self._add(
+            account.ts,
+            "account",
+            lots=account.position_lots,
+            reason=event,
+            detail={
+                "event": event,
+                "capital": account.capital,
+                "cash": account.cash,
+                "unrealized": account.unrealized,
+                "equity": account.equity,
+                "position_lots": account.position_lots,
+                "margin_used": account.margin_used,
+                "mark": account.mark if math.isfinite(account.mark) else None,
             },
         )
 

@@ -17,9 +17,10 @@ and the brackets, and turns market data into fills. The rules:
 - **Stop orders** trigger when the bid (sell stop) falls to or below, or the ask (buy stop) rises
   to or above, the stop price, and fill at **that first quote beyond the stop** plus slippage: a
   gap through the stop fills at the gapped price, not at the stop.
-- **Limit orders** trigger when the bid (sell limit) reaches or exceeds, or the ask (buy limit)
-  reaches or falls below, the limit, and fill at the limit price: never better (no price
-  improvement, the pessimistic choice) and without slippage. Their reference quote is the limit
+- **Limit orders** fill only when the price trades *through* the limit by at least one tick — the
+  bid at least a tick above a sell limit, the ask at least a tick below a buy limit; a touch is not
+  a fill (ADR 0050) — and fill at the limit price: never better (no price improvement, the
+  pessimistic choice) and without slippage. Their reference quote is the limit
   on the order's side with the triggering quote's spread, so the fill pays the half-spread and
   nothing else.
 - **Brackets.** An order with a stop and/or target gets an OCO bracket on the whole resulting
@@ -29,12 +30,13 @@ and the brackets, and turns market data into fills. The rules:
   wait for the reopen and then fill at the first quote beyond their level (a weekend gap fills at
   the gapped price).
 - **Bar mode** (one-minute bid/ask bars, no ticks). At a bar's open: market orders that arrived at
-  or before the bar's start fill at the open; stops and limits the open has already passed fill
-  at the open (gap). Over the bar's range: a stop touched by the bar's low (sell) or high (buy)
-  fills at the stop price plus slippage; a limit touched fills at the limit. **If both legs of a
-  bracket are touched in the same bar, the stop loss is assumed to have come first** (pessimistic)
-  and the bar is counted as ambiguous; with ticks the quotes decide. Fills over a range are stamped
-  just before the bar's end and carry the bar's start.
+  or before the bar's start fill at the open; a stop the open has already passed fills at the
+  open (gap), a limit it has gone a tick through at the limit. Over the bar's range: a stop
+  touched by the bar's low (sell) or high (buy) fills at the stop price plus slippage; a limit
+  the range goes a tick through fills at the limit. **If a bar reaches the stop and goes through
+  the target, the stop loss is assumed to have come first** (pessimistic) and the bar is counted
+  as ambiguous; with ticks the quotes decide. Fills over a range are stamped just before the
+  bar's end and carry the bar's start.
 
 Every fill carries its cost decomposition against the reference mid (`xq.backtest.events.Fill`):
 the half-spread, the slippage and fill-rule cost, and the commission (`CostModel.commission_usd`
@@ -172,6 +174,7 @@ class SimulatedBroker:
         self.equity = equity
         self.entry_blackout = entry_blackout
         self.contract = float(costs.instrument.contract_size)
+        self.tick = float(costs.instrument.tick_size)
         self.position = 0.0
         self.orders: dict[str, WorkingOrder] = {}
         self.brackets: list[BracketRecord] = []
@@ -309,7 +312,7 @@ class SimulatedBroker:
                 fill_price, slip = self._slipped(order, side_price, order.decided_at, tick.ts)
             else:
                 assert order.price is not None
-                if not _triggered(order, tick.bid, tick.ask):
+                if not _triggered(order, tick.bid, tick.ask, self.tick):
                     continue
                 if order.role == "entry" and self._blackout(tick.ts) is not None:
                     continue  # entries wait out a blackout
@@ -340,7 +343,7 @@ class SimulatedBroker:
                 fill_price, slip = self._slipped(order, side_price, order.decided_at, ts)
             else:
                 assert order.price is not None
-                if not _triggered(order, bar.bid_open, bar.ask_open):
+                if not _triggered(order, bar.bid_open, bar.ask_open, self.tick):
                     continue
                 if order.role == "entry" and self._blackout(ts) is not None:
                     continue
@@ -360,7 +363,7 @@ class SimulatedBroker:
         legs = [o for o in working if o.is_bracket]
         if legs:
             self.bracket_bars += 1
-        touched = {o.order_id for o in working if _touched(o, bar)}
+        touched = {o.order_id for o in working if _touched(o, bar, self.tick)}
         ambiguous_parents = {
             o.parent_order_id
             for o in legs
@@ -565,24 +568,38 @@ def _quote_at(side: Side, level: float, spread: float) -> tuple[float, float]:
     return (level, level + spread) if side is Side.SELL else (level - spread, level)
 
 
-def _triggered(order: WorkingOrder, bid: float, ask: float) -> bool:
-    """Whether a stop or limit order triggers at this quote."""
+def through(price: float, level: float, tick: float, *, above: bool) -> bool:
+    """Whether `price` trades through `level` by at least one tick (above it, or below it).
+
+    A touch is not a fill (ADR 0050); the tolerance absorbs float noise, not a fraction of a tick.
+    """
+    distance = price - level if above else level - price
+    return distance >= tick * (1 - 1e-6)
+
+
+def _triggered(order: WorkingOrder, bid: float, ask: float, tick: float) -> bool:
+    """Whether a stop or limit order triggers at this quote.
+
+    A stop triggers when the price reaches it; a limit only when the price trades through it by
+    at least one tick (a sell limit needs the bid a tick above it, a buy limit the ask a tick
+    below it).
+    """
     assert order.price is not None
     if order.order_type == "stop":
         return ask >= order.price if order.side is Side.BUY else bid <= order.price
-    return ask <= order.price if order.side is Side.BUY else bid >= order.price
-
-
-def _touched(order: WorkingOrder, bar: ExecutionBar) -> bool:
-    """Whether a stop or limit order's level lies within the bar's range on its side."""
-    assert order.price is not None
     if order.side is Side.BUY:
-        return (
-            bar.ask_high >= order.price
-            if order.order_type == "stop"
-            else bar.ask_low <= order.price
-        )
-    return bar.bid_low <= order.price if order.order_type == "stop" else bar.bid_high >= order.price
+        return through(ask, order.price, tick, above=False)
+    return through(bid, order.price, tick, above=True)
+
+
+def _touched(order: WorkingOrder, bar: ExecutionBar, tick: float) -> bool:
+    """Whether a bar's range reaches a stop, or goes a tick through a limit, on its side."""
+    assert order.price is not None
+    if order.order_type == "stop":
+        return bar.ask_high >= order.price if order.side is Side.BUY else bar.bid_low <= order.price
+    if order.side is Side.BUY:
+        return through(bar.ask_low, order.price, tick, above=False)
+    return through(bar.bid_high, order.price, tick, above=True)
 
 
 def _sigma_arrays(sigma: pd.Series | None) -> tuple[np.ndarray, np.ndarray]:

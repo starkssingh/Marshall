@@ -1,6 +1,6 @@
 """BT-007: the decision ledger and the event backtest result — a golden hand-computed run, every
-order linked to an approved risk decision, broken links detected, the placeholder marked on every
-decision, Parquet round trip and determinism."""
+order linked to an approved decision of the risk engine, broken links detected, the risk
+profile's version on every decision, Parquet round trip and determinism."""
 
 from pathlib import Path
 from typing import Any
@@ -13,6 +13,8 @@ import yaml
 from helpers.event_backtest import (
     CAPITAL,
     CLOCK,
+    RISK,
+    SIGMA,
     RandomStrategy,
     ScriptedStrategy,
     exact_costs,
@@ -23,7 +25,6 @@ from xq.backtest.engine import EventBacktestResult, MarketData, run_event_backte
 from xq.backtest.ledger import Ledger
 from xq.backtest.metrics import performance_metrics
 from xq.core.types import Timeframe
-from xq.risk.placeholder import PLACEHOLDER_CONFIG_VERSION, PLACEHOLDER_REASON
 from xq.signals.schema import TradeIntent
 
 GOLDEN = REPO / "tests" / "fixtures" / "golden_trades" / "bracket_target_then_short.yaml"
@@ -48,6 +49,8 @@ def golden() -> tuple[dict[str, Any], EventBacktestResult]:
         CLOCK,
         capital=CAPITAL,
         margin_rate=0.05,
+        risk=RISK,
+        sigma_daily=SIGMA,
     )
     return case["expected"], result
 
@@ -77,11 +80,12 @@ def test_a_golden_run_matches_the_hand_computation() -> None:
     chain = [
         [kind, row[ID_COLUMN[kind]]]
         for kind, row in zip(rows["kind"], rows.to_dict("records"), strict=True)
+        if kind != "account"  # the risk state's equity observations (RISK-001)
     ]
     assert chain == expected["ledger"]
     assert result.link_problems == ()
     assert result.cost_basis == "screening, placeholder costs"
-    assert "PLACEHOLDER" in result.risk_label
+    assert result.risk_label == f"RiskEngine {RISK.config_version} (PROVISIONAL risk profile)"
     metrics = performance_metrics(result, 252)  # the BT-003 metrics apply to the event tier
     assert metrics["trade_count"] == 2
     assert metrics["net_profit"] == pytest.approx(expected["final_equity"] - CAPITAL)
@@ -97,6 +101,7 @@ def random_run(seed: int) -> EventBacktestResult:
         CLOCK,
         capital=CAPITAL,
         margin_rate=0.05,
+        risk=RISK,
     )
 
 
@@ -116,10 +121,13 @@ def test_every_order_is_linked_to_an_approved_risk_decision(seed: int) -> None:
     fills = ledger.loc[ledger["kind"] == "fill"]
     assert set(fills["order_id"]) <= set(orders["order_id"])
     assert len(fills) == len(result.fills)
-    # every decision is the placeholder's and says so
-    assert (decisions["reason"].str.startswith(PLACEHOLDER_REASON)).all()
+    # every decision is the risk engine's and names the profile it applied
     config = decisions["detail"].map(lambda d: yaml.safe_load(d)["config_version"])
-    assert (config == PLACEHOLDER_CONFIG_VERSION).all()
+    assert (config == RISK.config_version).all()
+    assert RISK.config_version.startswith("risk-1@")
+    # the interim sigma-hat needs 20 signal bars: entries before it are refused, and said so
+    rejected = decisions.loc[~decisions["approved"].astype(bool), "reason"]
+    assert rejected.str.contains("no sigma-hat").any()
     # refusals (decisions at the close) are recorded with their reason and no decision
     refusals = ledger.loc[ledger["kind"] == "refusal"]
     assert refusals["reason"].str.startswith("market closed").all()
@@ -136,10 +144,14 @@ def test_broken_links_are_reported() -> None:
     for row in ledger.rows:
         row["ts"] = pd.Timestamp(row["ts"]).value
     assert ledger.check_links() == []
-    orphan = dict(ledger.rows[2], seq=99, order_id="O-X", decision_id="D-X")  # no decision
-    rejected = {**ledger.rows[1], "seq": 100, "decision_id": "D-R", "approved": False}
-    backed = dict(ledger.rows[2], seq=101, order_id="O-R", decision_id="D-R")
-    stray = dict(ledger.rows[3], seq=102, order_id="O-missing")  # a fill without an order
+    first = {
+        kind: next(r for r in ledger.rows if r["kind"] == kind)
+        for kind in ("decision", "order", "fill")
+    }
+    orphan = dict(first["order"], seq=99, order_id="O-X", decision_id="D-X")  # no decision
+    rejected = {**first["decision"], "seq": 100, "decision_id": "D-R", "approved": False}
+    backed = dict(first["order"], seq=101, order_id="O-R", decision_id="D-R")
+    stray = dict(first["fill"], seq=102, order_id="O-missing")  # a fill without an order
     ledger.rows += [orphan, rejected, backed, stray]
     problems = ledger.check_links()
     assert "row 99 (order): order O-X has no risk decision" in problems

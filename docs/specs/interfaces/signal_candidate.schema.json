@@ -1,0 +1,179 @@
+{
+  "$defs": {
+    "RegimeState": {
+      "additionalProperties": false,
+      "description": "The filtered regime at ``ts`` (never a smoothed or Viterbi state; plan Phase 15).\n\n``probs`` are the regime probabilities given data up to ``ts`` (summing to one), ``label``\nthe regime they assign and ``age_bars`` how many bars that label has held.",
+      "properties": {
+        "age_bars": {
+          "minimum": 0,
+          "title": "Age Bars",
+          "type": "integer"
+        },
+        "label": {
+          "minLength": 1,
+          "title": "Label",
+          "type": "string"
+        },
+        "model_version": {
+          "minLength": 1,
+          "title": "Model Version",
+          "type": "string"
+        },
+        "probs": {
+          "additionalProperties": {
+            "type": "number"
+          },
+          "title": "Probs",
+          "type": "object"
+        },
+        "ts": {
+          "format": "date-time",
+          "title": "Ts",
+          "type": "string"
+        }
+      },
+      "required": [
+        "ts",
+        "model_version",
+        "probs",
+        "label",
+        "age_bars"
+      ],
+      "title": "RegimeState",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "description": "A possible trade built from forecasts at ``ts`` (plan Phase 15), before the filters.\n\nPrices (``entry_ref``, ``stop``, ``target``) are absolute levels set in sigma-hat units at the\ndecision; ``p_win`` is the calibrated probability used for EV (the conservative lower bound\nwhen the strategy asks for it, ``p_forecast`` the forecast's own), ``payoff_ratio`` the\ntake-profit over the stop-loss distance, and ``ev_gross``, ``ev_costs`` and ``ev_net`` the EV\nterms in sigma-hat units over the horizon. ``sigma_hat`` is that horizon sigma-hat (a fraction\nof price).",
+  "properties": {
+    "candidate_id": {
+      "minLength": 1,
+      "title": "Candidate Id",
+      "type": "string"
+    },
+    "direction": {
+      "enum": [
+        "long",
+        "short"
+      ],
+      "title": "Direction",
+      "type": "string"
+    },
+    "entry_ref": {
+      "exclusiveMinimum": 0,
+      "title": "Entry Ref",
+      "type": "number"
+    },
+    "ev_costs": {
+      "minimum": 0,
+      "title": "Ev Costs",
+      "type": "number"
+    },
+    "ev_gross": {
+      "title": "Ev Gross",
+      "type": "number"
+    },
+    "ev_net": {
+      "title": "Ev Net",
+      "type": "number"
+    },
+    "forecast_ids": {
+      "items": {
+        "type": "string"
+      },
+      "minItems": 1,
+      "title": "Forecast Ids",
+      "type": "array"
+    },
+    "horizon": {
+      "format": "duration",
+      "title": "Horizon",
+      "type": "string"
+    },
+    "instrument": {
+      "minLength": 1,
+      "title": "Instrument",
+      "type": "string"
+    },
+    "p_forecast": {
+      "maximum": 1,
+      "minimum": 0,
+      "title": "P Forecast",
+      "type": "number"
+    },
+    "p_win": {
+      "maximum": 1,
+      "minimum": 0,
+      "title": "P Win",
+      "type": "number"
+    },
+    "payoff_ratio": {
+      "exclusiveMinimum": 0,
+      "title": "Payoff Ratio",
+      "type": "number"
+    },
+    "regime": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/RegimeState"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "sigma_hat": {
+      "exclusiveMinimum": 0,
+      "title": "Sigma Hat",
+      "type": "number"
+    },
+    "stop": {
+      "exclusiveMinimum": 0,
+      "title": "Stop",
+      "type": "number"
+    },
+    "strategy_id": {
+      "minLength": 1,
+      "title": "Strategy Id",
+      "type": "string"
+    },
+    "strategy_version": {
+      "minLength": 1,
+      "title": "Strategy Version",
+      "type": "string"
+    },
+    "target": {
+      "exclusiveMinimum": 0,
+      "title": "Target",
+      "type": "number"
+    },
+    "ts": {
+      "format": "date-time",
+      "title": "Ts",
+      "type": "string"
+    }
+  },
+  "required": [
+    "candidate_id",
+    "ts",
+    "instrument",
+    "strategy_id",
+    "strategy_version",
+    "direction",
+    "entry_ref",
+    "stop",
+    "target",
+    "horizon",
+    "p_forecast",
+    "p_win",
+    "payoff_ratio",
+    "ev_gross",
+    "ev_costs",
+    "ev_net",
+    "sigma_hat",
+    "forecast_ids"
+  ],
+  "title": "SignalCandidate",
+  "type": "object"
+}

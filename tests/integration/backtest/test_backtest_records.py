@@ -18,6 +18,7 @@ from xq.backtest.vectorized import run_vectorized
 from xq.core.config import AppConfig
 from xq.core.types import Timeframe
 from xq.models.baselines import RuleStrategyConfig, rule_exposure
+from xq.risk.engine import RiskEngine
 from xq.tracking import registry
 from xq.tracking.db import create_db_engine, upgrade_to_head
 from xq.tracking.runs import experiment_run
@@ -57,6 +58,7 @@ def test_both_tiers_are_recorded_with_report_and_ledger(cfg: AppConfig, engine: 
         CLOCK,
         capital=capital,
         margin_rate=cfg.backtest_config().event_config().margin_rate,
+        risk=RiskEngine.from_config(cfg),
     )
     with experiment_run(
         cfg, engine, "H-0001", {}, kind="backtest", seed=1, exploratory=True

@@ -18,7 +18,7 @@ waits). A same-side intent that changes the size is decided and sized first; the
 knows whether its order increases the exposure.
 
 **Flat before the weekend** (optional, ``flat_before_weekend``): the engine closes every position
-``flat_before_weekend_min`` minutes before each weekly close, through the risk approver like any
+``flat_before_weekend_min`` minutes before each weekly close, through the risk engine like any
 other intent.
 
 The windows are computed once as exact UTC intervals over the market clock's range — clock

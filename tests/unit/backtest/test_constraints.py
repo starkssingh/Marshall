@@ -11,6 +11,8 @@ from helpers.event_backtest import (
     CFG,
     CLOCK,
     SESSIONS,
+    SIGMA,
+    UNHALTED,
     RandomStrategy,
     ScriptedStrategy,
     exact_costs,
@@ -43,7 +45,9 @@ def run(
         CLOCK,
         capital=CAPITAL,
         margin_rate=0.05,
+        risk=UNHALTED,  # the risk engine's halts would interrupt the many random entries
         constraints=rules,
+        sigma_daily=SIGMA,
     )
 
 
@@ -118,7 +122,7 @@ def test_a_market_entry_meeting_the_rollover_window_is_cancelled() -> None:
         ("2024-03-12 20:45:00.5", 1999.9, 2000.1),  # the first quote after arrival: inside it
         ("2024-03-12 20:46:00", 1999.9, 2000.1),
     )
-    script = {"2024-03-12 20:44": [TradeIntent(direction="long", exposure=1.0)]}
+    script = {"2024-03-12 20:44": [TradeIntent(direction="long", exposure=1.0, stop=1990.0)]}
     result = run(ScriptedStrategy(script), q, rules, Timeframe.M1)
     assert result.fills.empty
     ledger = result.ledger
@@ -147,7 +151,9 @@ def test_a_resting_entry_waits_out_the_blackout() -> None:
         ("2024-03-12 22:05:00", 1983.9, 1984.1),  # reopen, still in the window: waits
         ("2024-03-12 22:16:00", 1983.9, 1984.1),  # after 18:15 New York: fills at its price
     )
-    limit = TradeIntent(direction="long", exposure=0.5, entry_type="limit", limit_price=1985.0)
+    limit = TradeIntent(
+        direction="long", exposure=0.5, entry_type="limit", limit_price=1985.0, stop=1975.0
+    )
     result = run(ScriptedStrategy({"2024-03-12 20:30": [limit]}), q, constraints())
     [fill] = result.fills.itertuples()
     assert fill.fill_time == pd.Timestamp("2024-03-12 22:16", tz="UTC")
@@ -162,7 +168,7 @@ def test_a_resting_entry_waits_out_the_blackout() -> None:
 
 def test_flat_before_the_weekend_closes_the_position_before_the_weekly_close() -> None:
     q = random_quotes("2024-03-14 00:00", "2024-03-19 00:00", seed=4, every_s=60)
-    script = {"2024-03-15 14:00": [TradeIntent(direction="long", exposure=1.0)]}
+    script = {"2024-03-15 14:00": [TradeIntent(direction="long", exposure=1.0, stop=1950.0)]}
     kept = run(ScriptedStrategy(script), q, constraints())
     assert kept.fills["role"].tolist() == ["entry"]
     flat = run(ScriptedStrategy(script), q, constraints(flat_before_weekend=True))

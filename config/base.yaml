@@ -83,6 +83,7 @@ backtest:
   # to `capital_usd`; daily returns are P&L over that capital. The cost model is PROVISIONAL until
   # the broker is named.
   cost_model: placeholder      # config/costs/placeholder.yaml
+  risk_profile: default        # config/risk/default.yaml (the event tier's RiskEngine, Phase 14)
   capital_usd: 100000
   periods_per_year: 252        # annualization of daily (trading-day) statistics
   event:

@@ -1,0 +1,38 @@
+# Default risk profile of the RiskEngine (Phase 14, ADR 0052). PROVISIONAL: the owner's plan
+# defaults are the 0.5 % risk per trade and the halt at 15 % drawdown; every other value is a
+# provisional choice of ADR 0052, to be reviewed with paper trading. Changes need an ADR.
+version: risk-1
+provisional: true
+sizing:
+  method: fixed_fractional     # risk `risk_per_trade` of equity to the stop; or vol_target
+  risk_per_trade: 0.005        # 0.5 % of equity lost if the stop fills (owner's plan default)
+  vol_target_annual: 0.10      # vol_target: 10 % annualized (the baseline board's target)
+  probability_zero: 0.5        # calibrated win probability giving zero size ...
+  probability_full: 0.6        # ... and full size (linear between, capped at 1)
+  throttle_start: 0.05         # full size up to a 5 % drawdown ...
+  throttle_end: 0.15           # ... falling linearly to zero at the 15 % halt
+limits:
+  max_lots: 20                 # never more than 20 lots
+  max_notional: 3.0            # notional at most 3 x equity
+  max_margin_use: 0.5          # margin after the order at most 50 % of equity
+  max_daily_loss: 0.03         # a 3 % loss in the trading day: no new exposure until the next day
+  max_drawdown: 0.15           # 15 % below the peak: no new exposure until a manual reset (owner)
+  max_consecutive_losses: 5    # after 5 losing round trips in a row ...
+  cooldown_minutes: 240        # ... no new exposure for 4 hours
+  max_trades_per_day: 12       # entries filled per trading day
+  session_max_exposure: {}     # e.g. {tokyo: 0.5}: at most 0.5 x equity during Tokyo
+stops:
+  required: true               # every entry carries a stop
+  min_spread_multiple: 3.0     # a stop closer than 3 x the current spread is widened to it
+  max_sigma_multiple: 5.0      # a stop farther than 5 x the daily sigma-hat is refused
+kill_switch:
+  file: null                   # a path whose existence stops new exposure
+  env_var: XQ_KILL_SWITCH      # "1"/"true" stops new exposure
+  flatten: false               # when on, also close open positions
+breakers:
+  stale_quote_s: 120           # the latest quote older than this: no new exposure (DQ stale limit)
+  spread_multiple: 5.0         # spread above 5 x the recent median: no new exposure
+  spread_window: 500           # quotes in that median
+sigma:
+  span_bars: 96                # interim daily sigma-hat: EWMA of signal-bar returns (ADR 0044 span)
+  min_bars: 20                 # returns needed before it is known

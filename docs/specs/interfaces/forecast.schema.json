@@ -1,0 +1,164 @@
+{
+  "additionalProperties": false,
+  "description": "A model's forecast at decision time ``ts`` (plan Phase 15), the input of the signal engine.\n\n``p_tp_first`` is the probability that a trade on ``side`` reaches its take-profit before its\nstop-loss within ``horizon`` (the barrier target the model was trained on, ``target_id``);\n``p_up`` the probability of a positive return over the horizon; ``exp_return`` and\n``quantiles`` (keys in (0, 1)) the expected return and its quantiles, as fractions of price.\nAt least one must be given. ``sigma_hat`` is the model's sigma-hat over the horizon (a\nfraction of price). ``calibrated`` says whether the probabilities went through a calibration\nfitted on training or validation data only (``calibration_id``); ``p_se`` is the standard error\nof ``p_tp_first`` for the conservative EV variant. The signal engine refuses uncalibrated\nforecasts (SIGNAL-004).",
+  "properties": {
+    "calibrated": {
+      "title": "Calibrated",
+      "type": "boolean"
+    },
+    "calibration_id": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Calibration Id"
+    },
+    "exp_return": {
+      "anyOf": [
+        {
+          "type": "number"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Exp Return"
+    },
+    "feature_set_version": {
+      "minLength": 1,
+      "title": "Feature Set Version",
+      "type": "string"
+    },
+    "forecast_id": {
+      "minLength": 1,
+      "title": "Forecast Id",
+      "type": "string"
+    },
+    "horizon": {
+      "format": "duration",
+      "title": "Horizon",
+      "type": "string"
+    },
+    "instrument": {
+      "minLength": 1,
+      "title": "Instrument",
+      "type": "string"
+    },
+    "model_id": {
+      "minLength": 1,
+      "title": "Model Id",
+      "type": "string"
+    },
+    "model_version": {
+      "minLength": 1,
+      "title": "Model Version",
+      "type": "string"
+    },
+    "p_se": {
+      "anyOf": [
+        {
+          "minimum": 0,
+          "type": "number"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "P Se"
+    },
+    "p_tp_first": {
+      "anyOf": [
+        {
+          "maximum": 1,
+          "minimum": 0,
+          "type": "number"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "P Tp First"
+    },
+    "p_up": {
+      "anyOf": [
+        {
+          "maximum": 1,
+          "minimum": 0,
+          "type": "number"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "P Up"
+    },
+    "quantiles": {
+      "anyOf": [
+        {
+          "additionalProperties": {
+            "type": "number"
+          },
+          "type": "object"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Quantiles"
+    },
+    "side": {
+      "default": "long",
+      "enum": [
+        "long",
+        "short"
+      ],
+      "title": "Side",
+      "type": "string"
+    },
+    "sigma_hat": {
+      "exclusiveMinimum": 0,
+      "title": "Sigma Hat",
+      "type": "number"
+    },
+    "target_id": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Target Id"
+    },
+    "ts": {
+      "format": "date-time",
+      "title": "Ts",
+      "type": "string"
+    }
+  },
+  "required": [
+    "forecast_id",
+    "ts",
+    "instrument",
+    "horizon",
+    "model_id",
+    "model_version",
+    "feature_set_version",
+    "sigma_hat",
+    "calibrated"
+  ],
+  "title": "Forecast",
+  "type": "object"
+}

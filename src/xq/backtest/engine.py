@@ -3,11 +3,20 @@
 `EventEngine(strategy, data, broker, risk, clock, ...)` replays market data through the decision
 chain the plan prescribes (section 6, Phase 15):
 
-    strategy.on_bar -> TradeIntent -> session constraints -> risk approver -> RiskDecision
-        -> OrderIntent (only from an approved decision) -> broker -> Fill -> account
+    strategy.on_bar -> TradeIntent -> session constraints -> RiskEngine.evaluate -> RiskDecision
+        -> OrderIntent (only from an approved, issued decision) -> broker -> Fill -> account
 
-Nothing reaches the broker without a risk decision, and every step is written to the recorder
-(the decision ledger, BT-007).
+Nothing reaches the broker without a decision of the risk engine (`xq.risk.engine.RiskEngine`,
+RISK-005), and every step is written to the recorder (the decision ledger, BT-007).
+
+**Risk and market state.** At every decision the engine observes the account into the risk state
+(`RiskStateTracker`, RISK-001) and assembles the market state (`MarketState`): the latest quote,
+the daily sigma-hat known at the decision (a supplied series or the interim EWMA of signal-bar
+returns, `xq.risk.state`), the median spread of the last quotes (the abnormal-spread breaker's
+reference), the sessions the risk profile caps and the kill switch's reason, if one is given and
+on (RISK-006). The strategy's context carries the same sigma-hat, so stops are set in volatility
+units. With a kill switch whose profile says ``flatten``, the engine sends a ``flat`` intent at
+every signal bar while the switch is on and a position is open.
 
 **Data** (`MarketData`) is either quotes (*tick mode*: the broker executes on every quote and
 signal bars are built from the same quotes by the DATA-008 bar builder) or bars only (*bar mode*:
@@ -22,7 +31,8 @@ taken while the market is closed places no order (ADR 0032); it is refused and r
 **Timers.** The engine schedules financing at every rollover (`CostModel.rollovers`), a snapshot
 at the end of every trading day with data, the expiry of market orders that find no quote within
 the maximum fill delay, time stops and, when configured, the flat-before-weekend exit. Time stops
-and weekend exits are intents like any other: they go through the risk approver.
+and weekend exits are intents like any other: they go through the risk engine (which always
+approves an exit).
 
 The loop merges the data stream with the event queue by ``(ts, rank)`` (`xq.backtest.events`),
 so the whole run is deterministic: the same inputs give the same events in the same order.
@@ -32,6 +42,7 @@ from __future__ import annotations
 
 import itertools
 from abc import ABC, abstractmethod
+from collections import deque
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass, field
 from datetime import date
@@ -40,7 +51,7 @@ from typing import Literal, Protocol
 import numpy as np
 import pandas as pd
 
-from xq.backtest.broker_sim import BracketRecord, SimulatedBroker
+from xq.backtest.broker_sim import BracketRecord, SimulatedBroker, through
 from xq.backtest.costs import CostModel
 from xq.backtest.events import (
     AccountState,
@@ -63,11 +74,21 @@ from xq.backtest.ledger import Ledger
 from xq.backtest.portfolio import Portfolio, daily_frame, fills_frame
 from xq.backtest.vectorized import BacktestResult
 from xq.core.errors import NaiveTimestampError
-from xq.core.time import from_ns, trading_day_bounds, trading_days
+from xq.core.time import from_ns, trading_day, trading_day_bounds, trading_days
 from xq.core.types import Side, Timeframe
 from xq.data.bars import build_bars
-from xq.data.calendar import NAT_NS, MarketClock
-from xq.risk.placeholder import PassThroughRiskApprover
+from xq.data.calendar import NAT_NS, MarketClock, regular_trading_day
+from xq.data.sessions import build_session_table
+from xq.risk.engine import RiskEngine
+from xq.risk.kill_switch import MIN_SPREAD_QUOTES, KillSwitch
+from xq.risk.state import (
+    EwmaSigma,
+    MarketState,
+    RiskState,
+    RiskStateTracker,
+    SeriesSigma,
+    SigmaSource,
+)
 from xq.signals.schema import OrderIntent, RiskDecision, TradeIntent
 
 #: Execution bars in bar mode are one-minute bars (the plan keeps 1m data for execution).
@@ -308,11 +329,13 @@ def _execution_bars(bars: pd.DataFrame) -> Iterator[ExecutionBar]:
 
 @dataclass(frozen=True)
 class StrategyContext:
-    """What a strategy may know when it decides: the time, its account and the latest quote."""
+    """What a strategy may know when it decides: the time, its account, the latest quote and the
+    daily sigma-hat (a fraction of price) the risk engine will use, None while unknown."""
 
     now: int
     account: AccountState
     quote: Quote | None
+    sigma_daily: float | None = None
 
     @property
     def time(self) -> pd.Timestamp:
@@ -340,21 +363,6 @@ class Strategy(ABC):
 
 
 # --- engine components --------------------------------------------------------------------------
-
-
-class RiskApprover(Protocol):
-    """Decides every intent (RISK-005 in Sprint 12; the Sprint 11 placeholder until then)."""
-
-    @property
-    def label(self) -> str:
-        """How results produced with this approver are labelled."""
-        ...
-
-    def evaluate(
-        self, intent: TradeIntent, account: AccountState, quote: Quote | None
-    ) -> RiskDecision:
-        """The decision for `intent`, given the account and the latest known quote."""
-        ...
 
 
 class Broker(Protocol):
@@ -422,11 +430,15 @@ class Recorder(Protocol):
         ...
 
     def decision(self, decision: RiskDecision) -> None:
-        """The risk approver decided an intent."""
+        """The risk engine decided an intent."""
         ...
 
     def order(self, order: OrderIntent, *, submitted_at: int, arrival: int | None) -> None:
         """An order was sent to the broker (the broker records what happens to it)."""
+        ...
+
+    def account(self, account: AccountState, event: str) -> None:
+        """The account the risk state observed (at a decision or a trading day's end)."""
         ...
 
 
@@ -479,6 +491,7 @@ class EngineOutput:
     day_states: list[DaySnapshot] = field(default_factory=list)
     financing: list[tuple[int, int, float]] = field(default_factory=list)
     refused: list[tuple[int, str, str]] = field(default_factory=list)
+    risk_states: list[RiskState] = field(default_factory=list)
     events: int = 0
 
 
@@ -486,7 +499,12 @@ class EngineOutput:
 
 
 class EventEngine:
-    """Replays `data` through strategy, constraints, risk approver, broker and account."""
+    """Replays `data` through strategy, constraints, risk engine, broker and account.
+
+    `sigma` gives the daily sigma-hat known at each instant; by default the interim EWMA of the
+    signal bars with the risk profile's span (`xq.risk.state.EwmaSigma`). `kill_switch` is read at
+    every decision and signal bar (none by default: module docstring of `xq.risk.kill_switch`).
+    """
 
     def __init__(
         self,
@@ -494,14 +512,22 @@ class EventEngine:
         data: MarketData,
         *,
         broker: Broker,
-        risk: RiskApprover,
+        risk: RiskEngine,
         account: Account,
         recorder: Recorder,
         costs: CostModel,
         clock: MarketClock,
         constraints: Constraints | None = None,
+        sigma: SigmaSource | None = None,
+        kill_switch: KillSwitch | None = None,
         observer: Callable[[Event, int], None] | None = None,
     ) -> None:
+        if not isinstance(risk, RiskEngine):
+            raise TypeError("every intent is decided by RiskEngine.evaluate (RISK-005)")
+        known = {*costs.sessions.sessions, *costs.sessions.overlaps}
+        unknown = sorted(set(risk.watched_sessions) - known)
+        if unknown:
+            raise ValueError(f"the risk profile caps unknown sessions {unknown}")
         self.strategy = strategy
         self.data = data
         self.broker = broker
@@ -520,6 +546,16 @@ class EventEngine:
         self._orders: dict[str, OrderIntent] = {}
         self._position_intent: str | None = None
         self._ran = False
+        self.risk_state = RiskStateTracker(
+            account.state(self.clock.now).capital, float(costs.instrument.contract_size)
+        )
+        if sigma is None:
+            per_day = regular_trading_day(costs.sessions) / data.timeframe.duration
+            sigma = EwmaSigma(risk.config.sigma.span_bars, risk.config.sigma.min_bars, per_day)
+        self.sigma = sigma
+        self.kill_switch = kill_switch
+        self._spreads: deque[float] = deque(maxlen=risk.config.breakers.spread_window)
+        self._session_windows: dict[date, dict[str, tuple[int, int]]] = {}
 
     def run(self) -> EngineOutput:
         """Process every event once (an engine runs once)."""
@@ -597,6 +633,7 @@ class EventEngine:
 
     def _on_quote(self, quote: Quote) -> None:
         self.last_quote = quote
+        self._spreads.append(quote.ask - quote.bid)
         self.account.mark(quote)
 
     def _push_fills(self, fills: list[Fill]) -> None:
@@ -605,6 +642,7 @@ class EventEngine:
 
     def _on_fill(self, fill: Fill) -> None:
         self.account.book(fill)
+        self.risk_state.on_fill(fill)
         self.output.fills.append(fill)
         order = self._orders.get(fill.order_id)
         if order is not None:  # an order the engine sent (not a bracket leg)
@@ -617,6 +655,21 @@ class EventEngine:
         self.strategy.on_fill(fill, self._context())
 
     def _on_bar(self, event: BarEvent) -> None:
+        self.sigma.update(event.bar.close)
+        switch = self.kill_switch
+        if (
+            switch is not None
+            and switch.flatten
+            and self.broker.position_lots != 0
+            and switch.reason() is not None
+        ):
+            self._push_intent(
+                TradeIntent(
+                    direction="flat",
+                    strategy_id=self.strategy.strategy_id,
+                    reason="kill switch: flatten",
+                )
+            )
         context = self._context()
         self.output.bar_states.append(context.account)
         for intent in self.strategy.on_bar(event.bar, context):
@@ -634,7 +687,16 @@ class EventEngine:
     def _on_intent(self, intent: TradeIntent) -> None:
         now = self.clock.now
         self.recorder.intent(intent)
+        account = self.account.state(now)
+        self.risk_state.observe(account)
+        self.recorder.account(account, "decision")
+        state = self.risk_state.state()
+        self.output.risk_states.append(state)
         position = self.broker.position_lots
+        if state.position_lots != position:
+            raise RuntimeError(
+                f"the risk state holds {state.position_lots} lots, the broker {position}"
+            )
         if not bool(self.market_clock.is_open(np.array([now], dtype=np.int64))[0]):
             reason: str | None = "market closed at the decision time: no order (ADR 0032)"
         else:
@@ -643,7 +705,7 @@ class EventEngine:
             self.recorder.refusal(intent, reason)
             self.output.refused.append((now, str(intent.intent_id), reason))
             return
-        decision = self.risk.evaluate(intent, self.account.state(now), self.last_quote)
+        decision = self.risk.evaluate(intent, state, self._market(now))
         self.recorder.decision(decision)
         if not decision.approved:
             return
@@ -663,7 +725,10 @@ class EventEngine:
             self.output.financing.append((event.ts, event.multiplier, charge))
         elif event.name == "day_end":
             day = date.fromisoformat(str(event.ref))
-            self.output.day_states.append(DaySnapshot(day, self.account.state(event.ts)))
+            account = self.account.state(event.ts)
+            self.risk_state.close_day(account)
+            self.recorder.account(account, "day_end")
+            self.output.day_states.append(DaySnapshot(day, account))
         elif event.name == "expire":
             self.broker.expire(str(event.ref), event.ts)
         elif event.name == "time_stop":
@@ -688,7 +753,42 @@ class EventEngine:
 
     def _context(self) -> StrategyContext:
         now = self.clock.now
-        return StrategyContext(now, self.account.state(now), self.last_quote)
+        return StrategyContext(now, self.account.state(now), self.last_quote, self.sigma.at(now))
+
+    def _market(self, now: int) -> MarketState | None:
+        quote = self.last_quote
+        if quote is None:
+            return None
+        spreads = self._spreads
+        return MarketState(
+            ts=now,
+            bid=quote.bid,
+            ask=quote.ask,
+            quote_ts=quote.ts,
+            sigma_daily=self.sigma.at(now),
+            spread_reference=(
+                float(np.median(spreads)) if len(spreads) >= MIN_SPREAD_QUOTES else None
+            ),
+            sessions=self._sessions(now),
+            kill_reason=None if self.kill_switch is None else self.kill_switch.reason(),
+        )
+
+    def _sessions(self, now: int) -> tuple[str, ...]:
+        """The sessions the risk profile caps that are in force at `now`."""
+        names = self.risk.watched_sessions
+        if not names:
+            return ()
+        day = trading_day(from_ns(now))
+        windows = self._session_windows.get(day)
+        if windows is None:
+            row = build_session_table(self.costs.sessions, day, day).iloc[0]
+            windows = {}
+            for name in names:
+                opens, closes = row[f"{name}_open_utc"], row[f"{name}_close_utc"]
+                if not (pd.isna(opens) or pd.isna(closes)):
+                    windows[name] = (pd.Timestamp(opens).value, pd.Timestamp(closes).value)
+            self._session_windows[day] = windows
+        return tuple(name for name, (o, c) in windows.items() if o <= now < c)
 
 
 # --- running a backtest -------------------------------------------------------------------------
@@ -704,8 +804,7 @@ class EventBacktestResult(BacktestResult):
     decision ledger (BT-007) and `link_problems` its broken links (empty when every order is backed
     by an approved risk decision). `equity` has the account at every signal bar; `ambiguity`
     reports how often a bar touched both legs of a bracket (resolved by ticks in tick mode, by the
-    pessimistic rule in bar mode). `risk_label` names the risk approver — the Sprint 11 placeholder
-    says it performs no risk checks.
+    pessimistic rule in bar mode). `risk_label` names the risk engine and its profile version.
     """
 
     ledger: pd.DataFrame
@@ -730,9 +829,11 @@ def run_event_backtest(
     *,
     capital: float,
     margin_rate: float,
-    risk: RiskApprover | None = None,
+    risk: RiskEngine,
     constraints: Constraints | None = None,
     sigma_1m_bps: pd.Series | None = None,
+    sigma_daily: pd.Series | None = None,
+    kill_switch: KillSwitch | None = None,
     observer: Callable[[Event, int], None] | None = None,
 ) -> EventBacktestResult:
     """Run `strategy` on `data` through the simulated broker, portfolio and ledger.
@@ -744,9 +845,13 @@ def run_event_backtest(
         clock: Market clock covering the data's trading days and a week after them.
         capital: Starting capital (USD).
         margin_rate: Margin per unit of notional (`backtest.event.margin_rate`).
-        risk: The risk approver; default the Sprint 11 PLACEHOLDER pass-through approver.
+        risk: The risk engine (RISK-005); its margin rate should be `margin_rate`.
         constraints: Session constraints (BT-008); default none beyond the closed-market rule.
         sigma_1m_bps: Sigma-hat of one-minute returns in bps, known at each instant (slippage).
+        sigma_daily: Daily sigma-hat (fraction of price) indexed by when each value is known,
+            for stops and sizing; default the interim EWMA of the signal bars.
+        kill_switch: A kill switch to honour (RISK-006); default none, since a flag on the
+            machine running a historical simulation says nothing about the past.
         observer: Called after every event with the event and the clock.
     """
     portfolio = Portfolio(costs, capital=capital, margin_rate=margin_rate)
@@ -761,17 +866,18 @@ def run_event_backtest(
         entry_blackout=rules.entry_blackout,
         sigma_1m_bps=sigma_1m_bps,
     )
-    approver = risk if risk is not None else PassThroughRiskApprover(costs.instrument, capital)
     engine = EventEngine(
         strategy,
         data,
         broker=broker,
-        risk=approver,
+        risk=risk,
         account=portfolio,
         recorder=ledger,
         costs=costs,
         clock=clock,
         constraints=rules,
+        sigma=None if sigma_daily is None else SeriesSigma(sigma_daily),
+        kill_switch=kill_switch,
         observer=observer,
     )
     output = engine.run()
@@ -809,7 +915,7 @@ def run_event_backtest(
         ambiguity=_ambiguity(broker, data),
         refusals=refusals,
         mode=data.mode,
-        risk_label=approver.label,
+        risk_label=risk.label,
         strategy_id=strategy.strategy_id,
         strategy_version=strategy.version,
         events=output.events,
@@ -869,8 +975,8 @@ def _ambiguity(broker: SimulatedBroker, data: MarketData) -> dict[str, float | s
     """How often one bar touched both legs of a bracket (the share the plan asks every report for).
 
     Bar mode: the broker's own count, each resolved to the stop loss. Tick mode: the one-minute
-    bars in which a bracket ended and whose range reached both its stop and its target — bars
-    alone could not have told which came first; the ticks did.
+    bars in which a bracket ended and whose range reached its stop and went a tick through its
+    target — bars alone could not have told which came first; the ticks did.
     """
     exits = sum(b.exit_role in ("stop_loss", "take_profit") for b in broker.brackets)
     if data.mode == "bars":
@@ -891,9 +997,13 @@ def _ambiguity(broker: SimulatedBroker, data: MarketData) -> dict[str, float | s
                 continue
             row = minute.iloc[last]
             if bracket.side is Side.BUY:  # a long: sell legs against the bid
-                both = row["bid_low"] <= bracket.stop and row["bid_high"] >= bracket.target
+                both = row["bid_low"] <= bracket.stop and through(
+                    row["bid_high"], bracket.target, broker.tick, above=True
+                )
             else:
-                both = row["ask_high"] >= bracket.stop and row["ask_low"] <= bracket.target
+                both = row["ask_high"] >= bracket.stop and through(
+                    row["ask_low"], bracket.target, broker.tick, above=False
+                )
             ambiguous += int(both)
         resolution = "ticks"
     return {
