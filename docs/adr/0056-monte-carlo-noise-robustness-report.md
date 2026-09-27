@@ -190,10 +190,20 @@ everywhere they appear.
    - Known truth: a candidate that adds only noise to the same edge is rejected at about the
      nominal rate, and a small, consistent, tightly paired improvement is detected.
 3. **The R2 decay trend** (`xq.validation.decay`), also missing until now.
-   - The test regresses daily net returns on time in years, with a Newey–West standard error at
-     VAL-001's default lag. The one-sided p-value of a negative slope must be at least 0.05.
-   - Known truth: stable edges (iid, and AR(1) φ = 0.3) are rejected at about 5 %, and an edge
-     falling from 20 bp to −10 bp a day over four years is detected in more than 80 % of samples.
+   - It regresses the strategy's mean daily net return **per walk-forward test fold** on the
+     fold's midpoint in years, with ordinary least squares and a Student t on K − 2 degrees of
+     freedom. The one-sided p-value of a negative slope must be at least 0.05. A strategy with
+     fewer than four folds is not evaluated.
+   - **Why fold means.** The first version regressed daily returns on time with a Newey–West
+     standard error at VAL-001's default lag (7 on 20 years). It kept its size on iid and AR(1)
+     returns, but the characterization of the simulated genuine edge showed it failing genuine
+     seeds. A real edge's strength drifts in slow regimes, which that standard error does not
+     capture. On 100 genuine seeds it rejected at 14 % at a 5 % level, and at 10 % even with
+     `sqrt(n)` lags. Averaging within folds (batch means) absorbs the slow variation. The fold
+     test rejects 300 genuine seeds at 6 % and iid returns at 4 %, and detects an edge falling
+     from 20 bp to −10 bp a day over 1,000 days in about 80 % of samples, with ten folds.
+   - Known truth (tests): iid stable edges near 5 %, 80 genuine seeds at most 11 %, and a fading
+     edge detected in more than 65 % of 200 samples.
 4. **Where it runs.**
    - A run of kind `validation` under the validated run's hypothesis.
    - It writes `report.md` and `report.json` under `reports/validation/<run>/<validation run>/`

@@ -732,8 +732,9 @@ IDs from `docs/specs/development-plan.md`.
   - PBO;
   - SPA with its per-sample size check and warning, the Reality Check, Romano–Wolf and Holm
     within the family;
-  - the new decay-trend test (`xq.validation.decay`: a Newey–West slope of daily returns on
-    time);
+  - the new decay-trend test (`xq.validation.decay`: the slope of walk-forward fold means on
+    time, Student t on K − 2 degrees of freedom; a daily Newey–West regression over-rejected
+    genuine edges whose strength drifts in regimes, 14 % at 5 %);
   - the minimum track record.
 
   Combined with ROB-008's seven robustness gates. It runs in a run of kind `validation` (no

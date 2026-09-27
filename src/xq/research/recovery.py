@@ -214,6 +214,7 @@ RECOVERY_TESTS: Mapping[str, tuple[str, ...]] = {
     ),
     "decay_trend": (
         f"{_DECAY}::test_a_stable_edge_is_rejected_at_about_the_nominal_rate",
+        f"{_DECAY}::test_a_genuine_edge_with_regimes_keeps_the_size",
         f"{_DECAY}::test_a_fading_edge_is_detected_and_fails_the_gate",
     ),
     "best_baseline_paired_bootstrap": (

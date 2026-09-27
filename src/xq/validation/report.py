@@ -20,8 +20,8 @@ bootstrap convention):
   check's warning "test over-rejects on this sample" when the simulated size exceeds 1.5 times
   the level (ADR 0055). The Reality Check and the Romano-Wolf survivors are reported with it, and
   every configuration's bootstrap p-value is Holm-adjusted within the family (VAL-006).
-- R2 ``decay_trend``: no significantly negative slope of performance over time
-  (`xq.validation.decay`).
+- R2 ``decay_trend``: no significantly negative slope of the walk-forward folds' performance
+  over time (`xq.validation.decay`).
 - R2 ``min_track_record``: the evaluated days cover the minimum track record length at 95 %
   confidence.
 
@@ -130,7 +130,7 @@ class SignificanceReport:
     size: SizeCheck
     #: Per configuration of the family: raw bootstrap p-value and its Holm adjustment.
     holm: pd.DataFrame
-    decay: DecayTrend
+    decay: DecayTrend | None
     baseline: BaselineTest | None
     checks: tuple[GateCheck, ...]
     #: ``"R1 key"`` -> why that criterion could not be evaluated.
@@ -190,15 +190,18 @@ class SignificanceReport:
                 None,
                 {"min_track_record_days": _num(self.min_track_record_days), "days": self.n_days},
             ),
-            StatTest(
-                "decay_trend",
-                family,
-                _num(self.decay.t_stat),
-                _num(self.decay.p_value),
-                None,
-                {"slope_per_year": self.decay.slope_per_year, "lags": self.decay.lags},
-            ),
         ]
+        if self.decay is not None:
+            rows.append(
+                StatTest(
+                    "decay_trend",
+                    family,
+                    _num(self.decay.t_stat),
+                    _num(self.decay.p_value),
+                    None,
+                    {"slope_per_year": self.decay.slope_per_year, "folds": self.decay.n_folds},
+                )
+            )
         if self.pbo is not None:
             rows.append(
                 StatTest(
@@ -297,9 +300,12 @@ class SignificanceReport:
             f"upper {self.family_test.spa_p_upper:.4g}); "
             f"simulated size at {self.size.level:.0%}: SPA {self.size.spa_size:.1%}, Reality "
             f"Check {self.size.reality_check_size:.1%} ({self.size.n_sim} null families).",
-            f"- Decay: slope {self.decay.slope_per_year:.3g} a year, one-sided p = "
-            f"{self.decay.p_value:.4g}.",
         ]
+        if self.decay is not None:
+            out.append(
+                f"- Decay over {self.decay.n_folds} folds: slope {self.decay.slope_per_year:.3g} "
+                f"a year, one-sided p = {self.decay.p_value:.4g}."
+            )
         warning = self.size.warning("reality_check")
         if warning is not None:
             out.append(f"- WARNING (Reality Check, reported): {warning}.")
@@ -381,8 +387,12 @@ def significance_report(
     checks["R2 spa_p_max"] = test.gate_check(gates, size)
     holm = test.table().assign(holm_p=adjust(test.single_p, "holm"))
 
-    decay = decay_trend(r, periods_per_year=periods)
-    checks["R2 decay_trend.significance"] = decay.gate_check(gates)
+    decay = None
+    try:
+        decay = decay_trend(r, subject.folds.to_numpy(), periods_per_year=periods)
+        checks["R2 decay_trend.significance"] = decay.gate_check(gates)
+    except ValueError as exc:
+        not_evaluated["R2 decay_trend.significance"] = str(exc)
 
     confidence = gates.r2_validated.min_track_record.confidence
     trl = (
