@@ -11,7 +11,7 @@ follow are in [`CLAUDE.md`](CLAUDE.md), and decisions are recorded in [`docs/adr
 
 ## Status
 
-Sprints 1 to 4 are merged. Sprint 2 (clean ticks, bars and data quality) is implemented and tested
+Sprints 1 to 5 are merged. Sprint 2 (clean ticks, bars and data quality) is implemented and tested
 on synthetic data but **not validated**: its quality report must first run on at least one year of
 real broker ticks, followed by the human review (DQ-008); the owner's decisions on its open
 questions are in ADR 0013. Sprint 3 (datasets, leakage harness, experiment registry, forward-return
