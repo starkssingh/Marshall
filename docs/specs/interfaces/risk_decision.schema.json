@@ -1,0 +1,144 @@
+{
+  "$defs": {
+    "Side": {
+      "description": "Trade direction. Buys fill at the ask and sells at the bid (never at mid).",
+      "enum": [
+        "buy",
+        "sell"
+      ],
+      "title": "Side",
+      "type": "string"
+    }
+  },
+  "additionalProperties": false,
+  "description": "The risk engine's answer to one intent (plan RISK-005 fields plus the approved order).\n\n``target_lots`` is the signed position the decision approves after the order;\n``size_lots``, ``side``, ``order_type`` and ``price`` are the order that gets there from the\nposition the decision saw. An approved decision with ``size_lots == 0`` needs no order. A\nrejected one has no size. Only decisions issued by the risk engine can back an order (module\ndocstring): `issued` says whether this one was.",
+  "properties": {
+    "adjusted_stop": {
+      "anyOf": [
+        {
+          "exclusiveMinimum": 0,
+          "type": "number"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Adjusted Stop"
+    },
+    "approved": {
+      "title": "Approved",
+      "type": "boolean"
+    },
+    "config_version": {
+      "minLength": 1,
+      "title": "Config Version",
+      "type": "string"
+    },
+    "decided_at": {
+      "format": "date-time",
+      "title": "Decided At",
+      "type": "string"
+    },
+    "decision_id": {
+      "minLength": 1,
+      "title": "Decision Id",
+      "type": "string"
+    },
+    "intent_id": {
+      "minLength": 1,
+      "title": "Intent Id",
+      "type": "string"
+    },
+    "limits_snapshot": {
+      "additionalProperties": {
+        "anyOf": [
+          {
+            "type": "number"
+          },
+          {
+            "type": "string"
+          }
+        ]
+      },
+      "default": {},
+      "title": "Limits Snapshot",
+      "type": "object"
+    },
+    "order_type": {
+      "default": "market",
+      "enum": [
+        "market",
+        "limit",
+        "stop"
+      ],
+      "title": "Order Type",
+      "type": "string"
+    },
+    "price": {
+      "anyOf": [
+        {
+          "exclusiveMinimum": 0,
+          "type": "number"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Price"
+    },
+    "reasons": {
+      "default": [],
+      "items": {
+        "type": "string"
+      },
+      "title": "Reasons",
+      "type": "array"
+    },
+    "side": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/Side"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "size_lots": {
+      "default": 0.0,
+      "minimum": 0,
+      "title": "Size Lots",
+      "type": "number"
+    },
+    "target": {
+      "anyOf": [
+        {
+          "exclusiveMinimum": 0,
+          "type": "number"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Target"
+    },
+    "target_lots": {
+      "default": 0.0,
+      "title": "Target Lots",
+      "type": "number"
+    }
+  },
+  "required": [
+    "decision_id",
+    "intent_id",
+    "decided_at",
+    "approved",
+    "config_version"
+  ],
+  "title": "RiskDecision",
+  "type": "object"
+}

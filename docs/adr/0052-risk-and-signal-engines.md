@@ -158,3 +158,23 @@
    provisional and apply in the event tier; the plan's "abnormal spread" is read as relative to
    the recent median rather than to an hour-of-week profile, which is the signal filter's job
    (SIGNAL-003).
+
+## SIGNAL-001 — schemas and JSON Schema export
+
+1. **The plan's shapes, plus what audit and linking need.** `Forecast` (plan fields plus
+   `forecast_id`, the barrier `target_id` and `side` its `p_tp_first` refers to, the standard
+   error `p_se` for the conservative EV, and `calibration_id`, required when `calibrated`),
+   `RegimeState` (filtered probabilities summing to one; the label is one of them),
+   `SignalCandidate` (plan fields plus `candidate_id` and `p_forecast` next to the `p_win` used
+   for EV) and `SignalRecord` (the candidate, the forecasts themselves, model and feature-set
+   versions, sigma-hat, spread, every filter's outcome, the EV check, the outcome — `intent`,
+   `rejected`, `not selected` — with reasons, and the intent it produced). The size is not in the
+   record: it is the risk engine's, in the decision ledger, reached through the intent's
+   `signal_id` (= `record_id`). `TradeIntent` carries `p_win` and `calibrated` (RISK-005).
+2. **Horizons are durations** (ISO 8601 in JSON); all instants are tz-aware; all schemas are
+   frozen and refuse unknown fields.
+3. **JSON Schemas** of the seven interfaces are written to `docs/specs/interfaces/` by
+   `write_json_schemas` (`uv run python -m xq.signals.schema docs/specs/interfaces`) and a test
+   fails when a committed file differs from the models. A `RiskDecision` round-trips as data but
+   comes back *not issued*, so an `OrderIntent` cannot be revived from JSON without the risk
+   engine.

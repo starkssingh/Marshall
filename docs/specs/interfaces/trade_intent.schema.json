@@ -1,0 +1,155 @@
+{
+  "additionalProperties": false,
+  "description": "The position a strategy wants, before any risk decision (module docstring).\n\n``flat`` closes the position (market order, no exposure, no bracket). ``long`` and ``short``\nask for ``exposure`` (> 0, a fraction of equity) on that side, entered by ``entry_type``;\n``limit``/``stop`` entries need ``limit_price``. ``stop`` and ``target`` form an OCO bracket\non the whole resulting position; ``time_stop`` closes it at that instant (or at the next\nopen). ``p_win`` is the probability that the trade reaches its target first; the risk engine\nscales the size by it only when ``calibrated`` is true and refuses an uncalibrated one.",
+  "properties": {
+    "calibrated": {
+      "default": false,
+      "title": "Calibrated",
+      "type": "boolean"
+    },
+    "created_at": {
+      "anyOf": [
+        {
+          "format": "date-time",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Created At"
+    },
+    "direction": {
+      "enum": [
+        "long",
+        "short",
+        "flat"
+      ],
+      "title": "Direction",
+      "type": "string"
+    },
+    "entry_type": {
+      "default": "market",
+      "enum": [
+        "market",
+        "limit",
+        "stop"
+      ],
+      "title": "Entry Type",
+      "type": "string"
+    },
+    "exposure": {
+      "default": 0.0,
+      "minimum": 0,
+      "title": "Exposure",
+      "type": "number"
+    },
+    "intent_id": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Intent Id"
+    },
+    "limit_price": {
+      "anyOf": [
+        {
+          "exclusiveMinimum": 0,
+          "type": "number"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Limit Price"
+    },
+    "p_win": {
+      "anyOf": [
+        {
+          "maximum": 1,
+          "minimum": 0,
+          "type": "number"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "P Win"
+    },
+    "reason": {
+      "default": "",
+      "title": "Reason",
+      "type": "string"
+    },
+    "signal_id": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Signal Id"
+    },
+    "stop": {
+      "anyOf": [
+        {
+          "exclusiveMinimum": 0,
+          "type": "number"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Stop"
+    },
+    "strategy_id": {
+      "default": "strategy",
+      "minLength": 1,
+      "title": "Strategy Id",
+      "type": "string"
+    },
+    "target": {
+      "anyOf": [
+        {
+          "exclusiveMinimum": 0,
+          "type": "number"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Target"
+    },
+    "time_stop": {
+      "anyOf": [
+        {
+          "format": "date-time",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Time Stop"
+    }
+  },
+  "required": [
+    "direction"
+  ],
+  "title": "TradeIntent",
+  "type": "object"
+}

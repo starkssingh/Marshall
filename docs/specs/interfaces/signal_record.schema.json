@@ -1,0 +1,614 @@
+{
+  "$defs": {
+    "Forecast": {
+      "additionalProperties": false,
+      "description": "A model's forecast at decision time ``ts`` (plan Phase 15), the input of the signal engine.\n\n``p_tp_first`` is the probability that a trade on ``side`` reaches its take-profit before its\nstop-loss within ``horizon`` (the barrier target the model was trained on, ``target_id``);\n``p_up`` the probability of a positive return over the horizon; ``exp_return`` and\n``quantiles`` (keys in (0, 1)) the expected return and its quantiles, as fractions of price.\nAt least one must be given. ``sigma_hat`` is the model's sigma-hat over the horizon (a\nfraction of price). ``calibrated`` says whether the probabilities went through a calibration\nfitted on training or validation data only (``calibration_id``); ``p_se`` is the standard error\nof ``p_tp_first`` for the conservative EV variant. The signal engine refuses uncalibrated\nforecasts (SIGNAL-004).",
+      "properties": {
+        "calibrated": {
+          "title": "Calibrated",
+          "type": "boolean"
+        },
+        "calibration_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Calibration Id"
+        },
+        "exp_return": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Exp Return"
+        },
+        "feature_set_version": {
+          "minLength": 1,
+          "title": "Feature Set Version",
+          "type": "string"
+        },
+        "forecast_id": {
+          "minLength": 1,
+          "title": "Forecast Id",
+          "type": "string"
+        },
+        "horizon": {
+          "format": "duration",
+          "title": "Horizon",
+          "type": "string"
+        },
+        "instrument": {
+          "minLength": 1,
+          "title": "Instrument",
+          "type": "string"
+        },
+        "model_id": {
+          "minLength": 1,
+          "title": "Model Id",
+          "type": "string"
+        },
+        "model_version": {
+          "minLength": 1,
+          "title": "Model Version",
+          "type": "string"
+        },
+        "p_se": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "P Se"
+        },
+        "p_tp_first": {
+          "anyOf": [
+            {
+              "maximum": 1,
+              "minimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "P Tp First"
+        },
+        "p_up": {
+          "anyOf": [
+            {
+              "maximum": 1,
+              "minimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "P Up"
+        },
+        "quantiles": {
+          "anyOf": [
+            {
+              "additionalProperties": {
+                "type": "number"
+              },
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Quantiles"
+        },
+        "side": {
+          "default": "long",
+          "enum": [
+            "long",
+            "short"
+          ],
+          "title": "Side",
+          "type": "string"
+        },
+        "sigma_hat": {
+          "exclusiveMinimum": 0,
+          "title": "Sigma Hat",
+          "type": "number"
+        },
+        "target_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Target Id"
+        },
+        "ts": {
+          "format": "date-time",
+          "title": "Ts",
+          "type": "string"
+        }
+      },
+      "required": [
+        "forecast_id",
+        "ts",
+        "instrument",
+        "horizon",
+        "model_id",
+        "model_version",
+        "feature_set_version",
+        "sigma_hat",
+        "calibrated"
+      ],
+      "title": "Forecast",
+      "type": "object"
+    },
+    "RegimeState": {
+      "additionalProperties": false,
+      "description": "The filtered regime at ``ts`` (never a smoothed or Viterbi state; plan Phase 15).\n\n``probs`` are the regime probabilities given data up to ``ts`` (summing to one), ``label``\nthe regime they assign and ``age_bars`` how many bars that label has held.",
+      "properties": {
+        "age_bars": {
+          "minimum": 0,
+          "title": "Age Bars",
+          "type": "integer"
+        },
+        "label": {
+          "minLength": 1,
+          "title": "Label",
+          "type": "string"
+        },
+        "model_version": {
+          "minLength": 1,
+          "title": "Model Version",
+          "type": "string"
+        },
+        "probs": {
+          "additionalProperties": {
+            "type": "number"
+          },
+          "title": "Probs",
+          "type": "object"
+        },
+        "ts": {
+          "format": "date-time",
+          "title": "Ts",
+          "type": "string"
+        }
+      },
+      "required": [
+        "ts",
+        "model_version",
+        "probs",
+        "label",
+        "age_bars"
+      ],
+      "title": "RegimeState",
+      "type": "object"
+    },
+    "SignalCandidate": {
+      "additionalProperties": false,
+      "description": "A possible trade built from forecasts at ``ts`` (plan Phase 15), before the filters.\n\nPrices (``entry_ref``, ``stop``, ``target``) are absolute levels set in sigma-hat units at the\ndecision; ``p_win`` is the calibrated probability used for EV (the conservative lower bound\nwhen the strategy asks for it, ``p_forecast`` the forecast's own), ``payoff_ratio`` the\ntake-profit over the stop-loss distance, and ``ev_gross``, ``ev_costs`` and ``ev_net`` the EV\nterms in sigma-hat units over the horizon. ``sigma_hat`` is that horizon sigma-hat (a fraction\nof price).",
+      "properties": {
+        "candidate_id": {
+          "minLength": 1,
+          "title": "Candidate Id",
+          "type": "string"
+        },
+        "direction": {
+          "enum": [
+            "long",
+            "short"
+          ],
+          "title": "Direction",
+          "type": "string"
+        },
+        "entry_ref": {
+          "exclusiveMinimum": 0,
+          "title": "Entry Ref",
+          "type": "number"
+        },
+        "ev_costs": {
+          "minimum": 0,
+          "title": "Ev Costs",
+          "type": "number"
+        },
+        "ev_gross": {
+          "title": "Ev Gross",
+          "type": "number"
+        },
+        "ev_net": {
+          "title": "Ev Net",
+          "type": "number"
+        },
+        "forecast_ids": {
+          "items": {
+            "type": "string"
+          },
+          "minItems": 1,
+          "title": "Forecast Ids",
+          "type": "array"
+        },
+        "horizon": {
+          "format": "duration",
+          "title": "Horizon",
+          "type": "string"
+        },
+        "instrument": {
+          "minLength": 1,
+          "title": "Instrument",
+          "type": "string"
+        },
+        "p_forecast": {
+          "maximum": 1,
+          "minimum": 0,
+          "title": "P Forecast",
+          "type": "number"
+        },
+        "p_win": {
+          "maximum": 1,
+          "minimum": 0,
+          "title": "P Win",
+          "type": "number"
+        },
+        "payoff_ratio": {
+          "exclusiveMinimum": 0,
+          "title": "Payoff Ratio",
+          "type": "number"
+        },
+        "regime": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/RegimeState"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "sigma_hat": {
+          "exclusiveMinimum": 0,
+          "title": "Sigma Hat",
+          "type": "number"
+        },
+        "stop": {
+          "exclusiveMinimum": 0,
+          "title": "Stop",
+          "type": "number"
+        },
+        "strategy_id": {
+          "minLength": 1,
+          "title": "Strategy Id",
+          "type": "string"
+        },
+        "strategy_version": {
+          "minLength": 1,
+          "title": "Strategy Version",
+          "type": "string"
+        },
+        "target": {
+          "exclusiveMinimum": 0,
+          "title": "Target",
+          "type": "number"
+        },
+        "ts": {
+          "format": "date-time",
+          "title": "Ts",
+          "type": "string"
+        }
+      },
+      "required": [
+        "candidate_id",
+        "ts",
+        "instrument",
+        "strategy_id",
+        "strategy_version",
+        "direction",
+        "entry_ref",
+        "stop",
+        "target",
+        "horizon",
+        "p_forecast",
+        "p_win",
+        "payoff_ratio",
+        "ev_gross",
+        "ev_costs",
+        "ev_net",
+        "sigma_hat",
+        "forecast_ids"
+      ],
+      "title": "SignalCandidate",
+      "type": "object"
+    },
+    "TradeIntent": {
+      "additionalProperties": false,
+      "description": "The position a strategy wants, before any risk decision (module docstring).\n\n``flat`` closes the position (market order, no exposure, no bracket). ``long`` and ``short``\nask for ``exposure`` (> 0, a fraction of equity) on that side, entered by ``entry_type``;\n``limit``/``stop`` entries need ``limit_price``. ``stop`` and ``target`` form an OCO bracket\non the whole resulting position; ``time_stop`` closes it at that instant (or at the next\nopen). ``p_win`` is the probability that the trade reaches its target first; the risk engine\nscales the size by it only when ``calibrated`` is true and refuses an uncalibrated one.",
+      "properties": {
+        "calibrated": {
+          "default": false,
+          "title": "Calibrated",
+          "type": "boolean"
+        },
+        "created_at": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Created At"
+        },
+        "direction": {
+          "enum": [
+            "long",
+            "short",
+            "flat"
+          ],
+          "title": "Direction",
+          "type": "string"
+        },
+        "entry_type": {
+          "default": "market",
+          "enum": [
+            "market",
+            "limit",
+            "stop"
+          ],
+          "title": "Entry Type",
+          "type": "string"
+        },
+        "exposure": {
+          "default": 0.0,
+          "minimum": 0,
+          "title": "Exposure",
+          "type": "number"
+        },
+        "intent_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Intent Id"
+        },
+        "limit_price": {
+          "anyOf": [
+            {
+              "exclusiveMinimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Limit Price"
+        },
+        "p_win": {
+          "anyOf": [
+            {
+              "maximum": 1,
+              "minimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "P Win"
+        },
+        "reason": {
+          "default": "",
+          "title": "Reason",
+          "type": "string"
+        },
+        "signal_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Signal Id"
+        },
+        "stop": {
+          "anyOf": [
+            {
+              "exclusiveMinimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Stop"
+        },
+        "strategy_id": {
+          "default": "strategy",
+          "minLength": 1,
+          "title": "Strategy Id",
+          "type": "string"
+        },
+        "target": {
+          "anyOf": [
+            {
+              "exclusiveMinimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Target"
+        },
+        "time_stop": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Time Stop"
+        }
+      },
+      "required": [
+        "direction"
+      ],
+      "title": "TradeIntent",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "description": "The audit record of one candidate, kept whatever happened to it (plan Phase 15).\n\nIt holds the timestamp, instrument, direction, entry, stop, target, expected return (EV and the\nforecasts' expected return), probability, regime, volatility, risk/reward, model and feature\nversions \u2014 everything needed to explain the signal later \u2014 with every filter's outcome\n(``filters``: name -> ``pass`` or the blocking reason), the EV check, the ``outcome`` and its\n``reasons``. A candidate that became a trade intent names it (``intent_id`` is the engine's\nstamp, filled when the runtime stamps the intent; ``signal_id`` of the intent is this\n``record_id``). The size is the risk engine's: it is in the decision ledger, not here.",
+  "properties": {
+    "candidate": {
+      "$ref": "#/$defs/SignalCandidate"
+    },
+    "ev_reasons": {
+      "default": [],
+      "items": {
+        "type": "string"
+      },
+      "title": "Ev Reasons",
+      "type": "array"
+    },
+    "feature_set_versions": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Feature Set Versions",
+      "type": "array"
+    },
+    "filters": {
+      "additionalProperties": {
+        "type": "string"
+      },
+      "title": "Filters",
+      "type": "object"
+    },
+    "forecasts": {
+      "items": {
+        "$ref": "#/$defs/Forecast"
+      },
+      "minItems": 1,
+      "title": "Forecasts",
+      "type": "array"
+    },
+    "intent": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/TradeIntent"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "model_versions": {
+      "additionalProperties": {
+        "type": "string"
+      },
+      "title": "Model Versions",
+      "type": "object"
+    },
+    "outcome": {
+      "enum": [
+        "intent",
+        "rejected",
+        "not selected"
+      ],
+      "title": "Outcome",
+      "type": "string"
+    },
+    "reasons": {
+      "default": [],
+      "items": {
+        "type": "string"
+      },
+      "title": "Reasons",
+      "type": "array"
+    },
+    "record_id": {
+      "minLength": 1,
+      "title": "Record Id",
+      "type": "string"
+    },
+    "sigma_daily": {
+      "anyOf": [
+        {
+          "exclusiveMinimum": 0,
+          "type": "number"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Sigma Daily"
+    },
+    "spread": {
+      "anyOf": [
+        {
+          "minimum": 0,
+          "type": "number"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Spread"
+    }
+  },
+  "required": [
+    "record_id",
+    "candidate",
+    "forecasts",
+    "model_versions",
+    "feature_set_versions",
+    "filters",
+    "outcome"
+  ],
+  "title": "SignalRecord",
+  "type": "object"
+}

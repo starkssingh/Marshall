@@ -586,6 +586,12 @@ IDs from `docs/specs/development-plan.md`.
   `flatten` policy sends a `flat` intent while the switch is on; backtests honour a kill switch
   only when given one. Tested at the thresholds and end to end (stale and wide quotes refused, a
   switch turned on mid-run, with and without flattening). ADR 0052.
+- SIGNAL-001: signal schemas (`xq.signals.schema`) — `Forecast`, `RegimeState`,
+  `SignalCandidate` and `SignalRecord` in the plan's shapes (plus ids, `p_se`, the barrier target
+  and side, the calibration id), frozen and validated; JSON Schemas of all seven decision-chain
+  interfaces exported to `docs/specs/interfaces/` (`write_json_schemas`), kept in sync by a test;
+  JSON round trips, and an audit-completeness test of the record against the plan's list.
+  ADR 0052.
 
 ### Changed
 

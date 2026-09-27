@@ -1,0 +1,42 @@
+{
+  "additionalProperties": false,
+  "description": "The filtered regime at ``ts`` (never a smoothed or Viterbi state; plan Phase 15).\n\n``probs`` are the regime probabilities given data up to ``ts`` (summing to one), ``label``\nthe regime they assign and ``age_bars`` how many bars that label has held.",
+  "properties": {
+    "age_bars": {
+      "minimum": 0,
+      "title": "Age Bars",
+      "type": "integer"
+    },
+    "label": {
+      "minLength": 1,
+      "title": "Label",
+      "type": "string"
+    },
+    "model_version": {
+      "minLength": 1,
+      "title": "Model Version",
+      "type": "string"
+    },
+    "probs": {
+      "additionalProperties": {
+        "type": "number"
+      },
+      "title": "Probs",
+      "type": "object"
+    },
+    "ts": {
+      "format": "date-time",
+      "title": "Ts",
+      "type": "string"
+    }
+  },
+  "required": [
+    "ts",
+    "model_version",
+    "probs",
+    "label",
+    "age_bars"
+  ],
+  "title": "RegimeState",
+  "type": "object"
+}
