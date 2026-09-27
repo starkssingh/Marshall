@@ -3,7 +3,7 @@
 Layers, from lowest to highest precedence:
 
 1. ``config/base.yaml`` plus the section files next to it (``instruments/<id>.yaml``,
-   ``sessions.yaml``, ``quality.yaml``)
+   ``costs/<model>.yaml``, ``sessions.yaml``, ``quality.yaml``, ``targets.yaml``)
 2. ``config/<profile>.yaml`` (for example ``dev``, ``research``, ``paper``, ``prod``)
 3. environment variables prefixed ``XQ_``; nested keys are separated by ``__``,
    e.g. ``XQ_LOGGING__LEVEL=DEBUG``
@@ -58,7 +58,7 @@ DEFAULT_CONFIG_DIR = Path("config")
 BASE_FILE = "base.yaml"
 SECRETS_SECTION = "secrets"
 # Sections kept in their own files: one YAML per entry in a directory (keyed by file stem).
-FRAGMENT_DIRS = {"instruments": "instruments"}
+FRAGMENT_DIRS = {"instruments": "instruments", "costs": "costs"}
 # Sections kept in a single YAML file next to base.yaml.
 FRAGMENT_FILES = {
     "sessions": "sessions.yaml",
@@ -506,6 +506,74 @@ class DatasetsConfig(FrozenModel):
     fill_delay_report_s: float = Field(gt=0)
 
 
+class SpreadCostConfig(FrozenModel):
+    """Spread fallback when quotes carry no bid/ask (BT-001)."""
+
+    fallback_quantile: Literal["p50", "p90", "p99"] = "p90"
+
+
+class CommissionConfig(FrozenModel):
+    """Commission per fill (per side), per lot and/or per notional."""
+
+    per_lot_per_side_usd: float = Field(default=0.0, ge=0)
+    per_notional_per_side_bps: float = Field(default=0.0, ge=0)
+
+
+class SlippageConfig(FrozenModel):
+    """Slippage in basis points: ``(fixed_bps + sigma_multiple * sigma_1m_bps) * multiplier``.
+
+    `multipliers` are keyed by a session, overlap or event-window name of ``config/sessions.yaml``
+    (``rollover_window`` for ``in_rollover_window``); the largest one that applies at the fill time
+    is used, 1 when none does.
+    """
+
+    fixed_bps: float = Field(ge=0)
+    sigma_multiple: float = Field(ge=0)
+    multipliers: dict[str, float] = {}
+
+    @field_validator("multipliers")
+    @classmethod
+    def _at_least_one(cls, value: dict[str, float]) -> dict[str, float]:
+        low = [k for k, v in value.items() if v < 1]
+        if low:
+            raise ValueError(f"slippage multipliers must be at least 1: {low}")
+        return value
+
+
+class FinancingConfig(FrozenModel):
+    """Overnight financing (swap) charged at each daily rollover on the notional held over it.
+
+    Rates are annual percentages; positive is a cost, negative a credit. The rollover of
+    `triple_weekday` (a trading day in New York) is charged three times, covering the weekend.
+    """
+
+    long_rate_annual_pct: float
+    short_rate_annual_pct: float
+    day_count: Literal[360, 365] = 360
+    triple_weekday: Weekday = "wed"
+
+
+class CostModelConfig(FrozenModel):
+    """A venue's cost model (``config/costs/<name>.yaml``, BT-001)."""
+
+    venue: str
+    provisional: bool
+    latency_ms: int = Field(ge=0)
+    max_fill_delay_s: float = Field(gt=0)
+    spread: SpreadCostConfig = SpreadCostConfig()
+    commission: CommissionConfig = CommissionConfig()
+    slippage: SlippageConfig
+    financing: FinancingConfig
+
+
+class BacktestConfig(FrozenModel):
+    """Backtest settings (``backtest:`` in ``config/base.yaml``)."""
+
+    cost_model: str
+    capital_usd: float = Field(gt=0)
+    periods_per_year: int = Field(gt=0)
+
+
 class SourceConfig(FrozenModel):
     """A declared market-data source (DATA-003). The clock convention is part of its identity."""
 
@@ -565,6 +633,8 @@ class AppConfig(BaseSettings):
     quality: QualityConfig | None = None
     experiments: ExperimentsConfig | None = None
     datasets: DatasetsConfig | None = None
+    costs: dict[str, CostModelConfig] = {}
+    backtest: BacktestConfig | None = None
     targets: dict[str, dict[str, TargetSetConfig]] = {}
     secrets: SecretsConfig = SecretsConfig()
 
@@ -642,6 +712,31 @@ class AppConfig(BaseSettings):
         if self.experiments is None:
             raise ConfigError("no experiments configuration (experiments: in config/base.yaml)")
         return self.experiments
+
+    @model_validator(mode="after")
+    def _check_cost_model(self) -> AppConfig:
+        if self.backtest is not None and self.backtest.cost_model not in self.costs:
+            known = ", ".join(sorted(self.costs)) or "none"
+            raise ValueError(
+                f"backtest.cost_model {self.backtest.cost_model!r} is not in config/costs "
+                f"(available: {known})"
+            )
+        return self
+
+    def backtest_config(self) -> BacktestConfig:
+        """Return the backtest settings; raise if they are not configured."""
+        if self.backtest is None:
+            raise ConfigError("no backtest configuration (backtest: in config/base.yaml)")
+        return self.backtest
+
+    def cost_model_config(self, name: str | None = None) -> CostModelConfig:
+        """The cost model `name` (default: ``backtest.cost_model``)."""
+        chosen = name if name is not None else self.backtest_config().cost_model
+        try:
+            return self.costs[chosen]
+        except KeyError:
+            known = ", ".join(sorted(self.costs)) or "none"
+            raise ConfigError(f"unknown cost model {chosen!r}; configured: {known}") from None
 
     def datasets_config(self) -> DatasetsConfig:
         """Return the dataset builder settings; raise if they are not configured."""

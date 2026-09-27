@@ -249,6 +249,12 @@ IDs from `docs/specs/development-plan.md`.
   feature_set_version, y_true, y_pred, p_raw, p_cal, train_end`. The writer refuses the whole frame
   if any decision time is not after `train_end + embargo` (or is naive, duplicated or unsorted),
   and records every file as a run artifact. `run_walk_forward` stores its predictions through it.
+- BT-001: cost model (`xq.backtest.costs.CostModel`, `config/costs/placeholder.yaml`,
+  `backtest:` in `config/base.yaml`) — commission per lot and per notional, slippage
+  `(fixed_bps + k·σ̂_1m) × window multiplier` from the calendar columns, financing at each open
+  trading day's 17:00 New York rollover by side with a triple weekday, hour-of-week spread
+  fallback, latency and maximum fill delay. The placeholder values are PROVISIONAL (no broker
+  named). Golden tests include the triple rollover and a Good Friday with no rollover. ADR 0029.
 
 ### Changed
 

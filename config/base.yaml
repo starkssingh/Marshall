@@ -77,6 +77,14 @@ datasets:
   # many seconds after its intended time. The allowed delay itself is a target-set parameter.
   fill_delay_report_s: 5
 
+backtest:
+  # Vectorized screener and cost model (BT-001, BT-002, ADR 0029). Positions are exposures relative
+  # to `capital_usd`; daily returns are P&L over that capital. The cost model is PROVISIONAL until
+  # the broker is named.
+  cost_model: placeholder      # config/costs/placeholder.yaml
+  capital_usd: 100000
+  periods_per_year: 252        # annualization of daily (trading-day) statistics
+
 experiments:
   # Effective number of independent trials (EXP-004, ADR 0023, ADR 0026): trial returns are summed
   # per trading day, clustered by their correlation (average linkage on 1 - rho), and every

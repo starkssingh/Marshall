@@ -11,7 +11,7 @@ with the repository, the repository wins.
 ## Current sprint
 
 - **Sprint:** 4 — evaluation spine (branch `sprint-4`, from `main` at `b64f059`).
-- **Next task:** BT-001 (C-6 blocked, see below).
+- **Next task:** BT-002 (C-6 blocked, see below).
 - **Sprint 4 order:** WF-001, WF-006, WF-002, WF-003, BT-001, BT-002, BT-003, BASE-006, VAL-001,
   VAL-002, VAL-005, VAL-007, BASE-001, BASE-002, BASE-005 — synthetic data only.
 - **Hold point:** before VAL-007, the proposed `config/gates.yaml` goes to the owner, and work waits
@@ -38,6 +38,7 @@ with the repository, the repository wins.
 | Execution broker, venue and primary feed | MT5 broker (to be named), OANDA, cTrader | `mt5_primary` placeholder (ADR 0004): MT5 tick export, server clock `NY+7` |
 | Secondary long-history feed if broker history is short (DATA-013) | Dukascopy, none | none |
 | Evidence gate thresholds (`config/gates.yaml`) | to be proposed before VAL-007 | none yet |
+| Broker cost terms (commission, financing rates, triple day, holiday financing) | broker's published terms | placeholder cost model (ADR 0029) |
 | Account currency | USD, other | USD (plan default) |
 | Research horizon focus | 15m–1d, other | 15m–1d; four horizons kept until EDA-006 (ADR 0026) |
 | Meaning of the `1d` horizon in trading time | 24 market hours (one trading day + 1 h), 23 market hours (one trading day) | 24 market hours, the literal reading of ADR 0026 |
@@ -53,7 +54,7 @@ with the repository, the repository wins.
 | Source clock | `NY+7` (UTC+2/+3, US DST dates) | ADR 0003, ADR 0004 | broker documentation, DQ-004 on real data |
 | Contract terms | tick 0.01, 100 oz per lot, lot step 0.01, max 100 | `config/instruments/xauusd.yaml` | broker contract spec |
 | Trading calendar | 18:00–17:00 New York, NYSE holidays, 13:30 early closes | ADR 0002, `config/sessions.yaml` | broker schedule |
-| Costs (commission, slippage, financing) | not yet modelled | BT-001 (Sprint 4) | broker terms, paper trading |
+| Costs (commission, slippage, financing) | placeholder model, PROVISIONAL: commission 3.5 USD/lot/side; slippage 0.5 bp + 0.1·σ̂₁ₘ, ×3 rollover window, ×2 US release; financing 6 %/yr long, 2 %/yr short, act/360, triple Wednesday; spread fallback p90 | `config/costs/placeholder.yaml`, ADR 0029 | broker terms, paper trading |
 | Execution latency | 1 s (market time from ADR 0026) | `config/targets.yaml` `fwd_returns.v1` | BT-001, paper trading |
 | Decisions taken while the market is closed | entered at the reopen (plus latency) | `xq.targets.returns`, ADR 0026 | owner review of Sprint 4 |
 | Maximum fill delay | 300 s | `fwd_returns.v1` | ADR 0026: kept, provisional |
