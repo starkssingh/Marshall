@@ -146,3 +146,34 @@ on synthetic data only (ADR 0048).
    close (16:30 New York, before the rollover window's slippage multiplier), as an intent through
    the risk approver.
 5. **Margin** is `backtest.event.margin_rate`, PROVISIONAL at 0.05 (1:20) until broker terms.
+
+## BT-009 — reconciliation
+
+1. **Shared strategies.** `ExposureStrategy` replays the screener's target exposures and
+   `RuleStrategy` runs a BASE-002 rule bar by bar on the signal bars seen so far (so its decisions
+   are causal by construction; the test shows they equal the rule computed on the full series).
+   Both send an intent only when the target differs from the last *executed* target, as the
+   screener does.
+2. **Tolerance** (the plan's default, `backtest.event.reconcile_tolerance`): the largest daily
+   equity difference is at most 5 % of the screener's total costs.
+3. **Every difference explained.** The event tier's executed positions are replayed through the
+   screener (the *adjusted* screen), which splits the difference into an *execution effect*
+   (adjusted − screener: what the tiers executed differently, itemized per decision with a cause
+   — sizing, an event-only rule such as a blackout or a weekend exit, or a follow-on of an earlier
+   difference) and a *residual* (event − adjusted: the fill, cost, financing and accounting
+   mechanics on identical orders), which must be below one cent. A decision without a known
+   cause, or a larger residual, is unexplained.
+4. **Findings.** Reconciling found two screener defects, fixed in their own commits: a quote while
+   the market was closed could be a fill quote, and the rollover ending the last quote's trading
+   day was not charged on an open position. After them the residual is below 1e-6 USD. The
+   remaining, explained difference is **sizing**: the event tier sizes at the decision's mid and
+   rounds down to the lot step through the risk approver, the screener fractional lots at the
+   fill's mid. At 100,000 USD and half exposure (0.25 lots) one lot step is 4 % of the position,
+   so sizing alone can exceed 5 % of costs; the reconciliation reports it separately and the
+   tolerance tests use rule baselines at both 100,000 and 10,000,000 USD, plus an exposure
+   schedule at 10,000,000 USD. Event-only rules (the entry blackouts) are switched off for the
+   tolerance check and, when on, show up as explained "event rule" differences.
+5. **Speed.** The event tier prices each fill's slippage from a per-minute table of the window
+   multipliers built once per trading day (`CostModel.slippage_bps_at`), exact because every
+   configured boundary falls on a whole minute (otherwise it computes the multiplier directly);
+   a test shows it equals the vectorized formula across a DST change.

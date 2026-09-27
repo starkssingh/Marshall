@@ -155,3 +155,33 @@ def test_configuration_is_validated() -> None:
         model(slippage__fixed_bps=-1.0)
     with pytest.raises(ConfigError, match="cost_model 'missing'"):
         load_config("research", {"backtest.cost_model": "missing"}, config_dir=REPO / "config")
+
+
+def test_single_fill_slippage_matches_the_vectorized_formula() -> None:
+    # the event tier prices one fill at a time from a per-minute table built once per trading day
+    costs = model(slippage__sigma_multiple=0.1)
+    rng = np.random.default_rng(3)
+    start, end = (
+        pd.Timestamp("2024-03-06", tz="UTC").value,
+        pd.Timestamp("2024-03-15", tz="UTC").value,
+    )
+    t = np.sort(rng.integers(start, end, 3_000))  # across the US DST change of 10 March
+    sigma = rng.uniform(0, 5, len(t))
+    expected = costs.slippage_bps(pd.DatetimeIndex(pd.to_datetime(t, utc=True)), sigma)
+    got = np.array([costs.slippage_bps_at(int(x), float(s)) for x, s in zip(t, sigma, strict=True)])
+    np.testing.assert_allclose(got, expected, rtol=1e-12)
+    assert set(np.round(expected / (0.5 + 0.1 * sigma), 9)) == {1.0, 2.0, 3.0}
+    no_fixed = model(slippage__fixed_bps=0.0, slippage__sigma_multiple=0.1)
+    at = pd.Timestamp("2024-03-12 20:50", tz="UTC")  # rollover window: x3
+    assert no_fixed.slippage_bps_at(at.value, 2.0) == pytest.approx(0.2 * 3)
+
+
+def test_single_fill_slippage_is_exact_when_a_boundary_is_not_on_a_minute() -> None:
+    sessions = CFG.sessions_config().model_dump()
+    sessions["event_windows"]["rollover"]["start"] = "16:45:30"
+    config = type(CFG.sessions_config()).model_validate(sessions)
+    costs = CostModel(CFG.cost_model_config(), CFG.instrument("xauusd"), config)
+    inside = pd.Timestamp("2024-03-12 20:45:31", tz="UTC").value  # 16:45:31 New York
+    before = pd.Timestamp("2024-03-12 20:45:29", tz="UTC").value
+    assert costs.slippage_bps_at(inside, 0.0) == pytest.approx(0.5 * 3)
+    assert costs.slippage_bps_at(before, 0.0) == pytest.approx(0.5)

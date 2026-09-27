@@ -421,8 +421,7 @@ class SimulatedBroker:
     def _slipped(
         self, order: WorkingOrder, side_price: float, sigma_at: int, fill_at: int
     ) -> tuple[float, float]:
-        times = ensure_utc_index(pd.DatetimeIndex([pd.Timestamp(fill_at, tz="UTC")]))
-        slip = float(self.costs.slippage_bps(times, [self._sigma(sigma_at)])[0])
+        slip = self.costs.slippage_bps_at(fill_at, self._sigma(sigma_at))
         sign = order.side.sign
         return side_price * (1 + sign * slip * _BPS), slip
 

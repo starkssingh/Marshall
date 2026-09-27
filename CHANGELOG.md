@@ -518,6 +518,16 @@ IDs from `docs/specs/development-plan.md`.
   weekly close. Windows are exact UTC intervals, shown to agree with the dataset calendar columns
   across DST changes. `backtest.event` also holds the PROVISIONAL margin rate (0.05) and the
   reconciliation tolerance (0.05 of total costs). ADR 0049.
+- BT-009: reconciliation of the two tiers (`xq.backtest.reconcile.reconcile`) with shared
+  market-order strategies (`xq.backtest.strategies.ExposureStrategy`, `RuleStrategy`, which runs
+  a BASE-002 rule bar by bar) — the daily equity difference against 5 % of total costs
+  (`backtest.event.reconcile_tolerance`), and every difference explained: the event tier's
+  executed positions replayed through the screener split it into an itemized execution effect
+  (sizing, event-only rules, follow-ons) and a mechanical residual that must stay below one
+  cent. Tested on three rule baselines at 100,000 and 10,000,000 USD with sigma-scaled slippage
+  and window multipliers, missed and closed decisions, blackouts as explained differences, and
+  planted disagreements (commission, latency) caught as unexplained. `CostModel.slippage_bps_at`
+  prices one fill from a per-minute multiplier table built once per trading day. ADR 0049.
 
 ### Changed
 
