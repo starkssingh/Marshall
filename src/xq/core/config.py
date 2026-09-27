@@ -3,8 +3,8 @@
 Layers, from lowest to highest precedence:
 
 1. ``config/base.yaml`` plus the section files next to it (``instruments/<id>.yaml``,
-   ``costs/<model>.yaml``, ``sessions.yaml``, ``quality.yaml``, ``targets.yaml``, ``gates.yaml``,
-   ``eda.yaml``, ``stats.yaml``, ``volatility.yaml``)
+   ``costs/<model>.yaml``, ``risk/<profile>.yaml``, ``sessions.yaml``, ``quality.yaml``,
+   ``targets.yaml``, ``gates.yaml``, ``eda.yaml``, ``stats.yaml``, ``volatility.yaml``)
 2. ``config/<profile>.yaml`` (for example ``dev``, ``research``, ``paper``, ``prod``)
 3. environment variables prefixed ``XQ_``; nested keys are separated by ``__``,
    e.g. ``XQ_LOGGING__LEVEL=DEBUG``
@@ -63,7 +63,7 @@ DEFAULT_CONFIG_DIR = Path("config")
 BASE_FILE = "base.yaml"
 SECRETS_SECTION = "secrets"
 # Sections kept in their own files: one YAML per entry in a directory (keyed by file stem).
-FRAGMENT_DIRS = {"instruments": "instruments", "costs": "costs"}
+FRAGMENT_DIRS = {"instruments": "instruments", "costs": "costs", "risk": "risk"}
 # Sections kept in a single YAML file next to base.yaml.
 FRAGMENT_FILES = {
     "sessions": "sessions.yaml",
@@ -968,10 +968,110 @@ class EventBacktestConfig(FrozenModel):
     reconcile_tolerance: float = Field(default=0.05, gt=0)
 
 
+class SizingConfig(FrozenModel):
+    """Position sizing of the risk engine (RISK-002, ``config/risk/<profile>.yaml``).
+
+    ``fixed_fractional`` risks `risk_per_trade` of equity to the stop; ``vol_target`` sizes the
+    position to `vol_target_annual` of annualized volatility. Either is capped by the strategy's
+    requested exposure, scaled by the calibrated win probability (0 at or below
+    `probability_zero`, 1 at or above `probability_full`) and by the drawdown throttle (1 up to
+    `throttle_start`, falling linearly to 0 at `throttle_end`), then rounded down to the lot step.
+    """
+
+    method: Literal["fixed_fractional", "vol_target"]
+    risk_per_trade: float = Field(gt=0, le=0.05)
+    vol_target_annual: float = Field(gt=0)
+    probability_zero: float = Field(ge=0, lt=1)
+    probability_full: float = Field(gt=0, le=1)
+    throttle_start: float = Field(ge=0, lt=1)
+    throttle_end: float = Field(gt=0, le=1)
+
+    @model_validator(mode="after")
+    def _ordered(self) -> SizingConfig:
+        if self.probability_zero >= self.probability_full:
+            raise ValueError("probability_zero must be below probability_full")
+        if self.throttle_start >= self.throttle_end:
+            raise ValueError("throttle_start must be below throttle_end")
+        return self
+
+
+class RiskLimitsConfig(FrozenModel):
+    """Limits and halts of the risk engine (RISK-003). Fractions are of equity.
+
+    New exposure is refused while the worst drawdown is at least `max_drawdown` (until a manual
+    reset), while the trading day's loss is at least `max_daily_loss` of its starting equity,
+    for `cooldown_minutes` after `max_consecutive_losses` losing round trips in a row, and once
+    `max_trades_per_day` entries have filled that day. Every position is capped at `max_lots`,
+    `max_notional` and `max_margin_use`, and during a session named in `session_max_exposure` at
+    that exposure.
+    """
+
+    max_lots: float = Field(gt=0)
+    max_notional: float = Field(gt=0)
+    max_margin_use: float = Field(gt=0, le=1)
+    max_daily_loss: float = Field(gt=0, lt=1)
+    max_drawdown: float = Field(gt=0, lt=1)
+    max_consecutive_losses: int = Field(ge=1)
+    cooldown_minutes: int = Field(ge=0)
+    max_trades_per_day: int = Field(ge=1)
+    session_max_exposure: dict[str, float] = {}
+
+
+class StopPolicyConfig(FrozenModel):
+    """Stop policy (RISK-004): every entry carries a stop at a distance in
+    ``[min_spread_multiple x spread, max_sigma_multiple x daily sigma-hat x price]``; a closer stop
+    is widened to the minimum, a farther one refused."""
+
+    required: bool = True
+    min_spread_multiple: float = Field(ge=0)
+    max_sigma_multiple: float = Field(gt=0)
+
+
+class KillSwitchConfig(FrozenModel):
+    """Manual kill switch (RISK-006): new exposure is refused while `file` exists or `env_var`
+    is set to a true value; with `flatten`, open positions are closed too."""
+
+    file: Path | None = None
+    env_var: str | None = None
+    flatten: bool = False
+
+
+class BreakersConfig(FrozenModel):
+    """Data-health breakers (RISK-006): no new exposure on a quote older than `stale_quote_s`
+    or with a spread above `spread_multiple` times the median of the last `spread_window` quotes."""
+
+    stale_quote_s: float = Field(gt=0)
+    spread_multiple: float = Field(gt=1)
+    spread_window: int = Field(ge=10)
+
+
+class RiskSigmaConfig(FrozenModel):
+    """The event tier's interim daily sigma-hat when none is supplied: an EWMA of signal-bar log
+    returns (span `span_bars`), scaled to one trading day, known after `min_bars` returns."""
+
+    span_bars: int = Field(ge=2)
+    min_bars: int = Field(ge=2)
+
+
+class RiskConfig(FrozenModel):
+    """A risk profile (``config/risk/<profile>.yaml``, Phase 14). `version` is recorded on every
+    risk decision together with a hash of the whole profile."""
+
+    version: str = Field(min_length=1)
+    provisional: bool
+    sizing: SizingConfig
+    limits: RiskLimitsConfig
+    stops: StopPolicyConfig
+    kill_switch: KillSwitchConfig = KillSwitchConfig()
+    breakers: BreakersConfig
+    sigma: RiskSigmaConfig
+
+
 class BacktestConfig(FrozenModel):
     """Backtest settings (``backtest:`` in ``config/base.yaml``)."""
 
     cost_model: str
+    risk_profile: str | None = None
     capital_usd: float = Field(gt=0)
     periods_per_year: int = Field(gt=0)
     event: EventBacktestConfig | None = None
@@ -1357,6 +1457,7 @@ class AppConfig(BaseSettings):
     experiments: ExperimentsConfig | None = None
     datasets: DatasetsConfig | None = None
     costs: dict[str, CostModelConfig] = {}
+    risk: dict[str, RiskConfig] = {}
     backtest: BacktestConfig | None = None
     targets: dict[str, dict[str, TargetSetConfig]] = {}
     gates: GatesConfig | None = None
@@ -1448,6 +1549,12 @@ class AppConfig(BaseSettings):
                 f"backtest.cost_model {self.backtest.cost_model!r} is not in config/costs "
                 f"(available: {known})"
             )
+        profile = self.backtest.risk_profile if self.backtest is not None else None
+        if profile is not None and profile not in self.risk:
+            known = ", ".join(sorted(self.risk)) or "none"
+            raise ValueError(
+                f"backtest.risk_profile {profile!r} is not in config/risk (available: {known})"
+            )
         event = self.backtest.event if self.backtest is not None else None
         if event is not None and self.sessions is not None:
             unknown = sorted(set(event.blackouts.event_windows) - set(self.sessions.event_windows))
@@ -1463,6 +1570,17 @@ class AppConfig(BaseSettings):
         if self.backtest is None:
             raise ConfigError("no backtest configuration (backtest: in config/base.yaml)")
         return self.backtest
+
+    def risk_config(self, name: str | None = None) -> RiskConfig:
+        """The risk profile `name` (default: ``backtest.risk_profile``)."""
+        chosen = name if name is not None else self.backtest_config().risk_profile
+        if chosen is None:
+            raise ConfigError("no risk profile (backtest.risk_profile in config/base.yaml)")
+        try:
+            return self.risk[chosen]
+        except KeyError:
+            known = ", ".join(sorted(self.risk)) or "none"
+            raise ConfigError(f"unknown risk profile {chosen!r}; configured: {known}") from None
 
     def cost_model_config(self, name: str | None = None) -> CostModelConfig:
         """The cost model `name` (default: ``backtest.cost_model``)."""

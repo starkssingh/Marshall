@@ -545,6 +545,12 @@ IDs from `docs/specs/development-plan.md`.
   the live state at every decision (tested). `MarketState` carries the latest quote, its age, the
   daily sigma-hat, a reference spread, the sessions and the kill switch for the risk engine.
   ADR 0052.
+- RISK-002: position sizing (`xq.risk.sizing`) and risk profiles (`config/risk/default.yaml`,
+  `RiskConfig`, `backtest.risk_profile`) — fixed-fractional (0.5 % of equity to the stop, the
+  owner's default) or volatility-targeted size, capped by the strategy's requested exposure,
+  scaled by the calibrated win probability and the drawdown throttle (5 % → 15 %), rounded down
+  to the lot step. Hand-computed cases and hypothesis properties: never above the request or the
+  risk budget, lot-step multiples within the lot range, monotone scales. ADR 0052.
 
 ### Changed
 
