@@ -43,6 +43,7 @@ from xq.models.board import load_board_config, run_baseline_board
 from xq.quality.validate import validate_source
 from xq.research.eda.horizons import write_admission
 from xq.research.eda.run import run_eda
+from xq.tracking.conclusions import close_experiment, load_conclusion, unconcluded_experiments
 from xq.tracking.db import current_revision, engine_for, head_revision, upgrade_to_head
 from xq.tracking.hypotheses import register_hypothesis
 from xq.tracking.registry import list_hypotheses
@@ -378,7 +379,8 @@ def dataset_show(
 
 
 exp_app = typer.Typer(
-    help="Hypotheses, experiment runs and trial counts (EXP-001..004).", no_args_is_help=True
+    help="Hypotheses, experiment runs, trial counts and conclusions (EXP-001..005).",
+    no_args_is_help=True,
 )
 app.add_typer(exp_app, name="exp")
 
@@ -424,6 +426,39 @@ def exp_trials(
         f"{stats.n_test_evaluations} evaluated on test folds, "
         f"{stats.effective_n} effectively independent; Sharpe variance {variance}"
     )
+
+
+@exp_app.command("close")
+def exp_close(
+    ctx: typer.Context,
+    experiment_id: Annotated[str, typer.Argument(help="Experiment id.")],
+    conclusion_path: Annotated[
+        Path,
+        typer.Option(
+            "--conclusion",
+            help="Conclusion YAML (verdict and the five fields; experiments/conclusions/).",
+        ),
+    ],
+) -> None:
+    """Close an experiment with its conclusion and append it to the research log (EXP-005)."""
+    with pipeline_run(ctx.obj) as run:
+        record = close_experiment(
+            run.cfg, run.engine, experiment_id, load_conclusion(conclusion_path)
+        )
+        log = run.cfg.paths.resolve(run.cfg.paths.research_log)
+    typer.echo(f"experiment {experiment_id} closed: {record.verdict}; research log {log}")
+
+
+@exp_app.command("audit")
+def exp_audit(ctx: typer.Context) -> None:
+    """List experiments without a conclusion; exit 1 if any (none may remain at a sprint end)."""
+    with pipeline_run(ctx.obj) as run:
+        open_experiments = unconcluded_experiments(run.engine)
+    for e in open_experiments:
+        typer.echo(f"{e.experiment_id}\t{e.hypothesis_id} v{e.hypothesis_version}\t{e.title}")
+    typer.echo(f"{len(open_experiments)} experiment(s) without a conclusion")
+    if open_experiments:
+        raise typer.Exit(1)
 
 
 baselines_app = typer.Typer(

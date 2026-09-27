@@ -364,6 +364,14 @@ IDs from `docs/specs/development-plan.md`.
   ratios with the heteroskedasticity-robust z*, sign runs with run-length counts against
   independent signs, and buy-and-hold drawdown episodes, time under water and the longest
   underwater spell. Variance ratios match AR(1) theory. ADR 0038.
+- EXP-005: experiment conclusions and the research log (`xq.tracking.conclusions`, migration
+  `0008` with table `conclusions`, `xq exp close <experiment> --conclusion <yaml>`, `xq exp
+  audit`, `experiments/conclusions/TEMPLATE.yaml`, `docs/research/log.md`, `paths.research_log`) —
+  an experiment closes only with a verdict (supported, rejected, inconclusive) and non-empty
+  Observed / Evidence / Interpretation / Limitations / Action; closing is refused while a run is
+  running, and "supported" needs a finished confirmatory run; the entry is appended to the
+  research log before the database commit; `xq exp audit` lists experiments still without a
+  conclusion and exits 1 if any. ADR 0039.
 
 ### Changed
 

@@ -1,0 +1,17 @@
+# Experiment conclusion template (EXP-005). Copy it, fill in every field, then close the experiment
+# with `xq exp close <experiment_id> --conclusion <file>`. Closing is refused while a field is
+# empty or a run is still running, and a "supported" verdict needs a finished confirmatory run.
+# The conclusion is stored in the registry and appended to docs/research/log.md; neither can be
+# edited afterwards.
+verdict: inconclusive          # supported, rejected or inconclusive
+observed: >
+  What the runs measured, with numbers (e.g. net Sharpe 0.21, 95 % CI [-0.3, 0.7], DSR 0.41 with
+  36 effective trials, on the walk-forward test folds of ds-...).
+evidence: >
+  Which runs, datasets, reports and tests support that (run ids, report paths, p-values).
+interpretation: >
+  What it means for the hypothesis, and what it does not mean.
+limitations: >
+  What could make it wrong: data depth, provisional costs, regime coverage, multiple testing.
+action: >
+  What happens next: a new hypothesis, a change to the plan, or nothing.

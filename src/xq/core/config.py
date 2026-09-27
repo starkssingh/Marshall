@@ -131,6 +131,8 @@ class PathsConfig(FrozenModel):
     reports_dir: Path = Path("reports")
     logs_dir: Path = Path("logs")
     migrations_dir: Path = Path("migrations")
+    #: Research log: one entry appended per closed experiment (EXP-005).
+    research_log: Path = Path("docs/research/log.md")
 
     def resolve(self, path: Path) -> Path:
         """Return `path` as an absolute path, interpreting relative paths against `root`."""

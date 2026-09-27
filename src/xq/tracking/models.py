@@ -361,6 +361,23 @@ class Experiment(Base):
     closed_at: Mapped[pd.Timestamp | None]
 
 
+class Conclusion(Base):
+    """The conclusion that closed an experiment (EXP-005): a verdict and five written fields."""
+
+    __tablename__ = "conclusions"
+
+    experiment_id: Mapped[str] = mapped_column(
+        ForeignKey("experiments.experiment_id"), primary_key=True
+    )
+    verdict: Mapped[str] = mapped_column(String(16))
+    observed: Mapped[str] = mapped_column(Text)
+    evidence: Mapped[str] = mapped_column(Text)
+    interpretation: Mapped[str] = mapped_column(Text)
+    limitations: Mapped[str] = mapped_column(Text)
+    action: Mapped[str] = mapped_column(Text)
+    created_at: Mapped[pd.Timestamp]
+
+
 class Run(Base):
     """One execution inside an experiment, with everything needed to reproduce it (EXP-001/003)."""
 
