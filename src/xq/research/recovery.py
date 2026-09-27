@@ -35,6 +35,7 @@ _BOOTSTRAP = "tests/unit/robustness/test_bootstrap.py"
 _SLICING = "tests/integration/robustness/test_slicing.py"
 _DELAY = "tests/unit/robustness/test_delay.py"
 _MONTE_CARLO = "tests/unit/robustness/test_montecarlo.py"
+_NOISE = "tests/unit/robustness/test_noise.py"
 
 RECOVERY_TESTS: Mapping[str, tuple[str, ...]] = {
     "ADF": (
@@ -195,6 +196,12 @@ RECOVERY_TESTS: Mapping[str, tuple[str, ...]] = {
         f"{_MONTE_CARLO}::test_with_only_sizing_binding_every_path_is_the_fixed_fractional_recursion",
         f"{_MONTE_CARLO}::test_the_default_profile_keeps_a_losing_strategy_inside_the_halt",
         f"{_MONTE_CARLO}::test_a_reckless_profile_hits_the_halt_and_breaks_the_budget",
+    ),
+    "noise_injection": (
+        f"{_NOISE}::test_price_noise_is_a_fraction_of_the_spread",
+        f"{_NOISE}::test_feature_noise_is_causal_and_scaled_by_the_feature_sigma",
+        f"{_NOISE}::test_an_edge_at_the_scale_of_the_spread_collapses_under_spread_sized_noise",
+        f"{_NOISE}::test_a_genuine_trend_edge_degrades_smoothly",
     ),
 }
 

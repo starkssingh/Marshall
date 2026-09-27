@@ -902,6 +902,16 @@ class MonteCarloConfig(FrozenModel):
     min_block_trades: int = Field(ge=1)
 
 
+class NoiseConfig(FrozenModel):
+    """Noise injection (ROB-005): levels above zero and draws per level."""
+
+    #: Price noise, in multiples of the spread.
+    price_levels: list[Annotated[float, Field(gt=0)]] = Field(min_length=1)
+    #: Feature noise, in multiples of each feature's causal standard deviation.
+    feature_levels: list[Annotated[float, Field(gt=0)]] = Field(min_length=1)
+    n_seeds: int = Field(ge=1)
+
+
 class ValidationConfig(FrozenModel):
     """Validation and robustness procedures (``config/validation.yaml``, Phases 16 and 17).
 
@@ -911,6 +921,7 @@ class ValidationConfig(FrozenModel):
     spa_size_check: SpaSizeCheckConfig
     perturbation: PerturbationConfig
     monte_carlo: MonteCarloConfig
+    noise: NoiseConfig
 
 
 class SpreadCostConfig(FrozenModel):

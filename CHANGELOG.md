@@ -696,6 +696,18 @@ IDs from `docs/specs/development-plan.md`.
   - the calendar makes the cooldown bind.
 
   ADR 0056.
+- ROB-005: noise injection (`xq.robustness.noise`). Noise goes into the strategy's inputs only;
+  fills stay on true prices.
+  - `noisy_prices`: Gaussian noise at `level` times the spread.
+  - `noisy_features`: noise at `level` times each feature's causal (expanding, earlier rows only)
+    standard deviation.
+  - `noise_curve`: the degradation curve, with the median, the 90 % band and the retention of the
+    net Sharpe ratio per level over 20 seeded draws, and the breakdown level. Reported, not gated
+    (P2).
+
+  Settings are in `config/validation.yaml` (`noise`). Proven on known truth: a bid-ask-bounce
+  edge collapses under spread-sized noise, while a trend edge keeps its Sharpe ratio under price
+  noise and degrades smoothly under feature noise. ADR 0056.
 
 ### Changed
 

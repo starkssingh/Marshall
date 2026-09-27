@@ -18,3 +18,8 @@ monte_carlo:             # ROB-004: resampled trade outcomes replayed through th
   stop_sigmas: 3.0       # one R = a stop at 3 daily sigma-hats (the event tier's default stop)
   ruin_level: 0.50       # PROVISIONAL: a path is ruined when equity falls to half the capital
   min_block_trades: 1    # Politis-White block of the R-multiples, at least one trade
+
+noise:                   # ROB-005: noise in the strategy's inputs; fills stay on true prices
+  price_levels: [0.25, 0.5, 1.0, 2.0, 5.0]    # multiples of the spread
+  feature_levels: [0.1, 0.25, 0.5, 1.0]       # multiples of each feature's causal std
+  n_seeds: 20                                 # draws per level (median and 90 % band)

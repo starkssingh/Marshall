@@ -54,3 +54,32 @@ data.
    - Hourly trades that all lose meet the cooldown: five are taken, the next seven are refused.
 7. **Speed.** About 0.3 ms a replayed trade, in pure Python through the engine: 1,000 paths of 300
    trades take about a minute and a half. `n_paths` (1,000) is in `config/validation.yaml`.
+
+## ROB-005 — noise injection
+
+1. **Noise goes into the inputs, never the fills.** The strategy sees disturbed prices or
+   features. Its fills, costs and P&L stay on the true prices, so the curve measures how much of
+   the edge depends on the inputs being exact.
+2. **Price noise** is Gaussian with a standard deviation of `level` times the spread at each
+   instant, independent per price column. The levels are 0.25, 0.5, 1, 2 and 5 spreads.
+3. **Feature noise** is Gaussian with a standard deviation of `level` times the feature's
+   expanding standard deviation over the rows **before** it, so no row's noise depends on later
+   data. The first 20 values are left as they are. The levels are 0.1, 0.25, 0.5 and 1 sigma.
+   A full-sample standard deviation would be harmless here, since it only scales the noise, but
+   the causal one keeps the code within the invariants without an exception.
+4. **The degradation curve.**
+   - Level 0 is the undisturbed strategy.
+   - Every other level is drawn 20 times with derived seeds and summarized by its median, a 90 %
+     band and the retention (median over the undisturbed Sharpe ratio).
+   - The breakdown level is the first level with a non-positive median.
+   - ROB-005 is P2 in the plan and has no R2 gate: the curve is reported, not gated.
+5. **Known truth.**
+   - Price noise has a standard deviation of `level` times the spread, per row and independent
+     per column.
+   - Feature noise scales with each feature's own sigma and does not change when later rows
+     change.
+   - A bid-ask-bounce edge (fading the last tick of mids that bounce by half a spread) keeps less
+     than half its Sharpe ratio at one spread of noise and less than 15 % at five.
+   - A trend edge on daily drift keeps more than 80 % at five spreads.
+   - Under feature noise on its t-statistic the trend edge degrades without a cliff, keeping more
+     than 70 % at 0.25 sigma and more than 30 % at one sigma.
