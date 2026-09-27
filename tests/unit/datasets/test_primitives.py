@@ -68,14 +68,29 @@ def test_vol_normalized_uses_the_scale_known_before_the_return() -> None:
 
 def test_resample_labels_bins_by_their_end() -> None:
     s = series([1, 2, 3, 4], minutes=[0, 14, 15, 44])
-    out = p.resample_causal(s, "15min", "last")
+    out = p.resample_causal(s, "15min", "last", latency=pd.Timedelta(0))
     assert out.index.tolist() == [
         T0 + pd.Timedelta(minutes=15),
         T0 + pd.Timedelta(minutes=30),
         T0 + pd.Timedelta(minutes=45),
     ]
     assert out.tolist() == [2, 3, 4]
-    assert p.resample_causal(s, "15min", "sum").tolist() == [3, 3, 4]
+    assert p.resample_causal(s, "15min", "sum", latency=pd.Timedelta(0)).tolist() == [3, 3, 4]
+
+
+def test_resample_labels_bins_when_their_last_member_is_available() -> None:
+    # Observations become available 2 minutes after their index time: the bin [0, 15) holds the
+    # 14-minute observation, known only at 16 minutes.
+    s = series([1, 2, 3, 4], minutes=[0, 14, 15, 44])
+    out = p.resample_causal(s, "15min", "last", latency=pd.Timedelta(minutes=2))
+    assert out.index.tolist() == [
+        T0 + pd.Timedelta(minutes=17),
+        T0 + pd.Timedelta(minutes=32),
+        T0 + pd.Timedelta(minutes=47),
+    ]
+    assert out.tolist() == [2, 3, 4]
+    with pytest.raises(ValueError, match="non-negative"):
+        p.resample_causal(s, "15min", "last", latency=pd.Timedelta(minutes=-1))
 
 
 def test_lag_and_no_negative_shifts() -> None:

@@ -33,7 +33,11 @@
 5. **`ds_base.yaml` start (2021-09-26) and the four horizons (15m, 1h, 4h, 1d)** stay for now.
 
 Also requested: rebuild the Docker image and run the test suite inside it, because `scipy` was
-added in Sprint 3 without re-checking the image.
+added in Sprint 3 without re-checking the image; and, as the first Sprint 4 item, `resample_causal`
+must respect availability. It takes a required `latency` — how long after the end of its bin any
+member becomes available — and labels each bin `bin end + latency` (the owner's first option; the
+alternative, labelling by the members' latest `available_at`, needs an availability column the
+primitive does not have).
 
 ## Consequences
 

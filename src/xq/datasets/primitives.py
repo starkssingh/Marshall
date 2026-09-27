@@ -142,20 +142,35 @@ def lag(series: pd.Series, periods: int = 1) -> pd.Series:
 
 
 def resample_causal(
-    series: pd.Series, rule: str, how: Literal["last", "first", "sum", "mean", "max", "min"]
+    series: pd.Series,
+    rule: str,
+    how: Literal["last", "first", "sum", "mean", "max", "min"],
+    *,
+    latency: pd.Timedelta,
 ) -> pd.Series:
-    """Aggregate into bins ``[start, start + rule)`` labelled by the bin *end*.
+    """Aggregate into bins ``[start, start + rule)`` of the index, labelled when they are known.
 
-    Bins are aligned to the Unix epoch, so the grid does not depend on where the series starts.
-    The label is the earliest instant the aggregate is known, so the result can be joined on
-    availability. Empty bins are dropped rather than filled.
+    `latency` bounds how long after the end of its bin any member becomes available: zero for a
+    series indexed by its availability, the feed latency for ticks indexed by their time, and the
+    publication latency for bars indexed by their start when `rule` is a multiple of the bar
+    length (a bar then ends no later than its bin). A bin's aggregate is known once the bin has
+    ended and its members are available, so it is labelled ``bin end + latency`` and can be joined
+    on availability. Bins are aligned to the Unix epoch, so the grid does not depend on where the
+    series starts. Empty bins are dropped rather than filled.
+
+    Raises:
+        ValueError: if `latency` is negative.
     """
     _require_datetime_index(series)
     _check_order(series)
+    if latency < pd.Timedelta(0):
+        raise ValueError(f"latency must be non-negative, got {latency}")
     grouped = series.resample(rule, closed="left", label="right", origin="epoch")
     result: pd.Series = getattr(grouped, how)()
     counts = grouped.count()
-    return result[counts > 0]
+    known = result[counts > 0]
+    known.index = pd.DatetimeIndex(known.index) + latency
+    return known
 
 
 def _named(result: pd.Series, like: pd.Series) -> pd.Series:

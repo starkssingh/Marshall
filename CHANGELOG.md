@@ -233,6 +233,11 @@ IDs from `docs/specs/development-plan.md`.
   closing commits, open owner decisions, provisional assumptions, known issues and per-phase
   status; `CLAUDE.md` gains a session protocol (read it after `CLAUDE.md`, keep it current, record
   chat decisions in an ADR and in it the same session, the repository wins over memory).
+- DS-003 `resample_causal` respects availability (ADR 0026, C-7): a required keyword `latency`
+  (how long after the end of its bin any member becomes available) labels each bin
+  `bin end + latency`; tests with latency > 0 (hand-computed, a hypothesis property that
+  truncates by availability, a counterexample showing the old labelling read a row two minutes
+  early, and the leakage harness on bars published late).
 - TGT-002 trading-time horizons (ADR 0026, C-5): `MarketClock` (`xq.data.calendar`) counts only
   market-open time from `config/sessions.yaml`; forward-return horizons and latency are measured
   on it, so decisions before a close or on a Friday are labelled over the break or weekend and
