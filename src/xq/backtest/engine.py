@@ -40,7 +40,7 @@ from typing import Literal, Protocol
 import numpy as np
 import pandas as pd
 
-from xq.backtest.broker_sim import BracketRecord, SimulatedBroker
+from xq.backtest.broker_sim import BracketRecord, SimulatedBroker, through
 from xq.backtest.costs import CostModel
 from xq.backtest.events import (
     AccountState,
@@ -869,8 +869,8 @@ def _ambiguity(broker: SimulatedBroker, data: MarketData) -> dict[str, float | s
     """How often one bar touched both legs of a bracket (the share the plan asks every report for).
 
     Bar mode: the broker's own count, each resolved to the stop loss. Tick mode: the one-minute
-    bars in which a bracket ended and whose range reached both its stop and its target — bars
-    alone could not have told which came first; the ticks did.
+    bars in which a bracket ended and whose range reached its stop and went a tick through its
+    target — bars alone could not have told which came first; the ticks did.
     """
     exits = sum(b.exit_role in ("stop_loss", "take_profit") for b in broker.brackets)
     if data.mode == "bars":
@@ -891,9 +891,13 @@ def _ambiguity(broker: SimulatedBroker, data: MarketData) -> dict[str, float | s
                 continue
             row = minute.iloc[last]
             if bracket.side is Side.BUY:  # a long: sell legs against the bid
-                both = row["bid_low"] <= bracket.stop and row["bid_high"] >= bracket.target
+                both = row["bid_low"] <= bracket.stop and through(
+                    row["bid_high"], bracket.target, broker.tick, above=True
+                )
             else:
-                both = row["ask_high"] >= bracket.stop and row["ask_low"] <= bracket.target
+                both = row["ask_high"] >= bracket.stop and through(
+                    row["ask_low"], bracket.target, broker.tick, above=False
+                )
             ambiguous += int(both)
         resolution = "ticks"
     return {

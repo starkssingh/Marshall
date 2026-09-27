@@ -662,6 +662,11 @@ IDs from `docs/specs/development-plan.md`.
   `within_tolerance` compares |event - sized| with the tolerance; event-only rules and their
   follow-ons stay inside the check, and the mechanical residual must still be below one cent.
   An exposure schedule on 100,000 USD now passes, its sizing effect alone above 5 % of costs.
+- BT-005 limit orders (limit entries and take-profit legs) fill only when the price trades
+  through the limit by at least one tick (`instrument.tick_size`): the bid a tick above a sell
+  limit, the ask a tick below a buy limit, in tick mode and at a bar's open or over its range; a
+  touch is not a fill, and the fill stays at the limit, never better. The bar-mode ambiguity
+  check and the tick-mode ambiguous-bar diagnostic use the same rule (owner's decision, ADR 0050).
 
 ### Fixed
 

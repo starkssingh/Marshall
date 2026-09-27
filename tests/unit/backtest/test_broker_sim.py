@@ -383,3 +383,54 @@ def test_pending_entries_are_cancelled_and_the_end_of_data_cancels_the_rest() ->
     assert recorder.rows[-1] == ("cancelled", "O-I000003-SL", "end of data")
     with pytest.raises(ValueError, match="already submitted"):
         broker.submit(long, ns("2024-03-12 15:00"))
+
+
+# --- limit orders need a trade through (ADR 0050) ------------------------------------------------
+
+
+def test_a_target_touched_is_not_filled_one_tick_through_is() -> None:
+    broker, _ = make_broker()
+    long_with_bracket(broker)  # target 2010: a sell limit, filled against the bid
+    assert tick(broker, "2024-03-12 14:01", 2010.00, 2010.20) == []  # touch
+    assert tick(broker, "2024-03-12 14:02", 2010.009, 2010.21) == []  # less than a tick through
+    [fill] = tick(broker, "2024-03-12 14:03", 2010.01, 2010.21)  # one tick through
+    assert fill.role == "take_profit"
+    assert fill.price == 2010.0  # at the limit, never better
+
+
+def test_a_buy_limit_needs_the_ask_a_tick_below_it() -> None:
+    broker, _ = make_broker()
+    tick(broker, "2024-03-12 14:00:00", 1999.9, 2000.1)
+    send(broker, order(Side.BUY, 0.5, kind="limit", price=1995.0), "2024-03-12 14:00")
+    assert tick(broker, "2024-03-12 14:01", 1994.8, 1995.00) == []  # the ask touches 1995
+    [fill] = tick(broker, "2024-03-12 14:02", 1994.79, 1994.99)
+    assert fill.price == 1995.0
+
+
+def test_in_bar_mode_a_touched_target_neither_fills_nor_makes_the_bar_ambiguous() -> None:
+    broker, _ = make_broker()
+    run_bar(broker, minute_bar("2024-03-12 13:59", (1999.9, 2000.0, 1999.8, 1999.9)))
+    send(broker, order(Side.BUY, 0.5, stop=1995.0, target=2010.0), "2024-03-12 13:59:59")
+    run_bar(broker, minute_bar("2024-03-12 14:00", (1999.9, 2001.0, 1999.0, 2000.0)))
+    # the range touches the target (high 2010.00) and reaches the stop (low 1994): not ambiguous
+    [stop] = run_bar(broker, minute_bar("2024-03-12 14:01", (2000.0, 2010.0, 1994.0, 2000.0)))
+    assert stop.role == "stop_loss"
+    assert broker.ambiguous_bars == 0
+    # one tick through the target, the stop reached too: ambiguous, resolved to the stop
+    broker, _ = make_broker()
+    run_bar(broker, minute_bar("2024-03-12 13:59", (1999.9, 2000.0, 1999.8, 1999.9)))
+    send(broker, order(Side.BUY, 0.5, stop=1995.0, target=2010.0), "2024-03-12 13:59:59")
+    run_bar(broker, minute_bar("2024-03-12 14:00", (1999.9, 2001.0, 1999.0, 2000.0)))
+    [stop] = run_bar(broker, minute_bar("2024-03-12 14:01", (2000.0, 2010.01, 1994.0, 2000.0)))
+    assert stop.role == "stop_loss"
+    assert broker.ambiguous_bars == 1
+
+
+def test_in_bar_mode_a_limit_fills_at_its_price_only_through_the_range_or_the_open() -> None:
+    broker, _ = make_broker()
+    run_bar(broker, minute_bar("2024-03-12 13:59", (1999.9, 2000.0, 1999.8, 1999.9)))
+    send(broker, order(Side.BUY, 0.5, target=2010.0), "2024-03-12 13:59:59")
+    run_bar(broker, minute_bar("2024-03-12 14:00", (1999.9, 2001.0, 1999.0, 2000.0)))
+    assert run_bar(broker, minute_bar("2024-03-12 14:01", (2005.0, 2010.0, 2004.0, 2009.0))) == []
+    [gap] = run_bar(broker, minute_bar("2024-03-12 14:02", (2012.0, 2013.0, 2011.0, 2012.5)))
+    assert (gap.price, gap.ts) == (2010.0, ns("2024-03-12 14:02"))  # the open went through
