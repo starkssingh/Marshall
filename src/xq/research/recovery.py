@@ -29,6 +29,7 @@ _PBO = "tests/unit/validation/test_pbo.py"
 _SPA = "tests/unit/validation/test_spa.py"
 _MULTIPLE = "tests/unit/validation/test_multiple_testing.py"
 _PERTURB = "tests/unit/robustness/test_perturb.py"
+_COST_STRESS = "tests/unit/robustness/test_costs_stress.py"
 
 RECOVERY_TESTS: Mapping[str, tuple[str, ...]] = {
     "ADF": (
@@ -152,6 +153,12 @@ RECOVERY_TESTS: Mapping[str, tuple[str, ...]] = {
         f"{_PERTURB}::test_a_single_point_optimum_on_noise_fails_the_neighbourhood_gate",
         f"{_PERTURB}::test_a_genuine_trend_edge_passes_the_neighbourhood_gate",
         f"{_PERTURB}::test_the_designs_evaluate_the_points_they_state",
+    ),
+    "cost_stress": (
+        f"{_COST_STRESS}::test_the_r2_scenario_passes_exactly_when_the_gross_edge_covers_the_stressed_costs",
+        f"{_COST_STRESS}::test_a_thin_edge_profitable_at_baseline_fails_and_a_thick_one_passes",
+        f"{_COST_STRESS}::test_the_break_even_multiplier_leaves_no_net_pnl",
+        f"{_COST_STRESS}::test_latency_eats_a_signal_priced_in_over_seconds_in_proportion_to_the_delay",
     ),
 }
 

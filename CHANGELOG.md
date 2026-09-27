@@ -641,6 +641,15 @@ IDs from `docs/specs/development-plan.md`.
   (`GatesConfig.criterion`, `GateCheck`). Proven on known truth: a single-point optimum on noise,
   chosen in sample, fails in about 85 % of replications; a genuine trend edge chosen the same way
   passes in at least 90 %. ADR 0054.
+- ROB-002: cost and latency stress (`xq.robustness.costs_stress`) — the plan's grid one dimension
+  at a time (spread x1.25/1.5/2 by widening quotes around the mid, slippage x2/3, latency
+  +250 ms/1 s/5 s, financing x1.5 with credits reduced) and the R2 scenario from
+  `config/gates.yaml` (1.5x spread and 2x slippage together), each screened again by
+  `run_vectorized`; the break-even multiplier of all costs, found by the secant method on actual
+  runs. Proven on known truth: the R2 scenario passes exactly when the gross edge covers the
+  stressed costs, a thin edge profitable at baseline fails, the break-even run nets zero, spreads
+  scale exactly, and latency eats a signal priced in over 10 s in proportion to the delay.
+  ADR 0054.
 
 ### Changed
 

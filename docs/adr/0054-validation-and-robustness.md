@@ -97,3 +97,28 @@ simulations (`tests/helpers/strategies.py`) are:
    an 18-point grid, passes in 98 % of 60 replications (asserted at 90 %), with a median
    median-to-nominal ratio above 0.7. The genuine edge's annualized Sharpe is about 0.9: a
    plausible edge, not a leak.
+
+## ROB-002 — cost and latency stress
+
+1. **One dimension at a time, plus the gate's scenario.** The plan's grid is run one dimension at
+   a time: spread x1.25, 1.5 and 2; slippage x2 and 3; latency +250 ms, +1 s and +5 s; financing
+   x1.5. The R2 scenario (`stressed_costs`: 1.5x spread and 2x slippage together) is always run,
+   whatever scenarios are asked for, and its net Sharpe ratio is the gate's measure (> 0). A full
+   factorial grid is left to the robustness report if the owner wants it.
+2. **How each cost is stressed.** A wider spread widens every quote around its mid, so the fills
+   stay at the correct side of real quotes and the fill times and mids (and so the lot sizes)
+   are unchanged. Slippage multiplies the model's fixed and sigma terms; the session and event
+   multipliers stay on top. A financing stress multiplies a charged rate and divides a credited
+   one, so the stress always costs more. Latency is added to the model's own (1 s for the
+   placeholder).
+3. **Break-even multiplier.** The multiplier k of every cost at which net P&L is zero. Net P&L is
+   almost, but not exactly, linear in k, because slippage is charged on the widened side price.
+   So k is found by the secant method on actual runs, from the linear estimate
+   `gross / costs`, to 1e-9 of the costs. It is 0 for a strategy that loses before costs and
+   infinite for one that pays none. Latency stays at the model's own.
+4. **Known truth.** In synthetic markets with a planted drift or jump (edges known by
+   construction, so their large Sharpe ratios test mechanics, not a strategy): the R2 scenario
+   passes exactly when the gross P&L exceeds the stressed costs; a thin edge that is profitable
+   at baseline fails; a run at the break-even multiplier nets zero; a doubled spread doubles the
+   spread cost exactly with unchanged fill times; and when a signal is priced in linearly over
+   10 s, the gross P&L falls to (10 − latency)/(10 − 1) of the baseline's.
