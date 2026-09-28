@@ -1,6 +1,7 @@
 # ADR 0004 — Provisional primary feed: MT5 tick export
 
-- **Status:** accepted, provisional — the owner must confirm the broker (development plan, section 1)
+- **Status:** accepted, provisional; the primary-feed choice is superseded by ADR 0057 (Dukascopy).
+  The MT5 adapter and the optional source `mt5_primary` remain.
 - **Date:** 2026-09-26
 - **Tasks:** DATA-003
 

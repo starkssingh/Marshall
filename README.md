@@ -11,16 +11,18 @@ follow are in [`CLAUDE.md`](CLAUDE.md), and decisions are recorded in [`docs/adr
 
 ## Status
 
-Sprints 1 to 6, 9, 11 and 12 A are merged. Sprint 12 B is in review: the Sprint 9 review
-decisions (ADR 0055), Monte Carlo with the risk engine, noise injection, the robustness report and
-`xq validate-strategy` (ADR 0056). Sprints 11 and 12 A ran ahead of Sprints 7-10 while real data is pending
-(ADR 0048, ADR 0051). Sprint 2 (clean ticks, bars and data quality) is implemented and tested on
-synthetic data but **not validated**: its quality report must first run on at least one year of real
-broker ticks, followed by the human review (DQ-008); the owner's decisions on its open questions are
-in ADR 0013. Sprint 3 (datasets, leakage harness, experiment registry, forward-return targets) and
-Sprint 4 (walk-forward, cost model and screener, Sharpe inference, DSR, forecast comparison, the
-evidence gates in `config/gates.yaml`, and the baseline board) are implemented and tested on
-synthetic data only. Sprint 5 is build-only because no real broker data exists: the
+Sprints 1 to 6, 9, 11, 12 A and 12 B are merged. In review: the primary research feed is now
+Dukascopy's XAUUSD bid/ask ticks (UTC, from 2003), with its adapter and a downloader,
+`xq fetch dukascopy`, that the owner runs (ADR 0057; see "Real data" below). The project is
+data-only for now, with no execution venue. Sprints 11 and 12 A ran ahead of Sprints 7-10 while
+real data is pending (ADR 0048, ADR 0051). Sprint 2 (clean ticks, bars and data quality) is
+implemented and tested on synthetic data but **not validated**: its quality report must first run
+on at least one year of real ticks, followed by the human review (DQ-008); the owner's decisions
+on its open questions are in ADR 0013. Sprint 3 (datasets, leakage harness, experiment
+registry, forward-return targets) and Sprint 4 (walk-forward, cost model and screener, Sharpe
+inference, DSR, forecast comparison, the evidence gates in `config/gates.yaml`, and the baseline
+board) are implemented and tested on synthetic data only. Sprint 5 is build-only because no real
+data exists: the
 exploratory-research report (distributions, dependence, seasonality, trend and reversion, cost to
 volatility and horizon admission, all on the discovery window) and experiment conclusions are
 implemented and tested on synthetic data and simulated processes; no EDA report has been generated
@@ -61,10 +63,10 @@ See
 completed backlog tasks and [`docs/STATUS.md`](docs/STATUS.md) for the current sprint, open
 decisions and carry-over items.
 
-Open owner decisions (development plan, section 1): the execution broker, its data feed and its
-cost terms. The source `mt5_primary` in `config/base.yaml` is a provisional placeholder (ADR 0004),
-the cost model is a provisional placeholder (every net result is "screening, placeholder costs"),
-and no real market data is in the repository.
+Open owner decisions: the execution venue and its cost terms. No venue is chosen (ADR 0057), so
+the cost model is a provisional placeholder (every net result is "screening, placeholder costs").
+The primary source is `dukascopy` in `config/base.yaml`, and the MT5 source `mt5_primary` stays as
+an optional adapter (ADR 0004). No real market data is in the repository.
 
 ## Quick start
 
