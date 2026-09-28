@@ -120,3 +120,54 @@ them near-duplicates, and their mirrors, which pay the same costs:
   rule's cluster with the opposite sign;
 - the Sharpe variance with the mirrors equals that of the rules alone, in the clustering and
   through the registry's `trial_count` of two recorded families.
+
+## 3. SPA and the Reality Check are gated on a size-adjusted p-value when they over-reject
+
+**Decision.** When the per-sample size check flags over-rejection, a size-adjusted p-value is
+computed from that sample's simulated null and the gate reads it. The threshold is unchanged at
+0.10. Both p-values are reported.
+
+**Why.** Under strong serial dependence in a short sample SPA and the Reality Check reject a true
+null too often, even on the gates' block (ADR 0055). A warning told the reader, but the gate still
+read a p-value that meant less than it said. The size check already simulates null families with
+the sample's own dependence, so it gives the test's null distribution on that sample: the p-value
+can be corrected for the test's size there, without moving the threshold.
+
+**Implementation** (`xq.validation.spa`).
+
+- `size_check` keeps each test's p-value on every simulated null family (`spa_null_p`,
+  `reality_check_null_p`).
+- `SizeCheck.adjusted_p(test, p)` is `(1 + #{p_null <= p}) / (1 + n_sim)`: the share of null
+  families with this sample's dependence whose result is at least as strong. Ties count against
+  the candidate, and it is never zero.
+- `FamilyTest.gate_check` reads the size-adjusted SPA p-value when the size check flags SPA (the
+  simulated size above 1.5 times the level), and the raw one otherwise. The criterion's measure
+  says "size-adjusted on this sample's simulated null"; the result carries the over-rejection
+  warning and "gated on the size-adjusted p-value; raw SPA p = …".
+- Both p-values are always reported: in the Markdown, and in the `stat_tests` rows of SPA and the
+  Reality Check (`p_value` raw, `adjusted_p` size-adjusted, `gate_reads` for SPA). The Reality
+  Check stays reported, not gated.
+- **One approximation.** The null p-values come from the size check's 199 resamples per family,
+  the observed one from the gates' 10,000. The null p-values are therefore coarser (steps of
+  0.005); ties count against the candidate.
+
+**Known truth.**
+
+- Calibration, 600 samples of 8 AR(1) strategies with φ = 0.4 and 400 periods, all true means
+  zero (the ADR 0055 null), 200 simulated null families each and 999 resamples for the observed
+  test:
+
+  | Test | Raw p ≤ 0.10 | Size-adjusted p ≤ 0.10 |
+  | --- | --- | --- |
+  | SPA | 16.8 % | 9.0 % |
+  | Reality Check | 15.3 % | 10.0 % |
+
+  The size check flagged SPA on 88 % of these samples. The size-adjusted p-value restores the
+  nominal level (the Monte Carlo standard error at 10 % is 1.2 points).
+- Power, 300 samples of the same family with one strategy given a mean of 0.2 % a period (a
+  per-period Sharpe ratio of about 0.18): SPA rejects 66.0 % raw and 56.7 % size-adjusted. Part
+  of the raw power was the over-rejection; the adjusted test keeps most of the rest.
+- Tests (`tests/unit/validation/test_spa.py`): the adjusted p-value's arithmetic (ties, never
+  zero, monotone in the raw p); a raw SPA p of 0.08 that would pass 0.10 fails when 28 % of the
+  sample's null families are as strong; on a flagged dependent sample the gate reads the adjusted
+  p-value at the unchanged threshold and names the raw one; on an iid sample it reads the raw one.

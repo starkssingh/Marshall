@@ -767,6 +767,15 @@ IDs from `docs/specs/development-plan.md`.
   it `incomplete`. Tested: the simulated genuine edge chosen among near-identical configurations
   (1 effective trial, CSCV PBO 0.52) is no longer failed by PBO and passes its significance
   criteria; the overfit family of 50 dispersed configurations still fails PBO.
+- C-25 (3) (owner's decision, ADR 0057), VAL-004: when the per-sample size check flags
+  over-rejection, the R2 SPA gate reads a size-adjusted p-value, `(1 + #{p_null <= p}) / (1 +
+  n_sim)` over the null families the size check simulates with the sample's dependence, at the
+  unchanged threshold (0.10). The size check keeps those null p-values; `SizeCheck.adjusted_p`
+  computes it for SPA and the Reality Check. Both p-values are reported in the Markdown and in the
+  `stat_tests` rows (`adjusted_p`, and `gate_reads` for SPA). Tested: the arithmetic, a raw pass
+  that the sample's null does not support fails, and the gate reads the adjusted p-value only when
+  flagged. Characterized on 600 dependent null samples (AR(1) φ = 0.4, 8 strategies, 400 periods):
+  SPA rejects 16.8 % raw and 9.0 % size-adjusted at 10 %, the Reality Check 15.3 % and 10.0 %.
 - C-25 (2) (owner's decision, ADR 0057), EXP-004: trial clustering uses the absolute
   correlation (|ρ| ≥ 0.7, at least 60 common days; the frozen parameters are unchanged), so a rule
   and its mirror image are one cluster. The Sharpe variance that feeds the deflated Sharpe ratio is

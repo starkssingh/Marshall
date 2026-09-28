@@ -70,6 +70,14 @@ def test_every_test_is_a_json_safe_stat_tests_row() -> None:
     assert {"pbo", "reality_check", "spa", "best_baseline"} <= set(names)
     assert sum(n.startswith("configuration:") for n in names) == 50
     assert all(r.family_id == "noise" for r in rows)
+    # C-25 (3): both SPA p-values are reported, and which one the gate read
+    spa = next(r for r in rows if r.test_name == "spa")
+    assert spa.adjusted_p == report.size.adjusted_p("spa", report.family_test.spa_p)
+    assert spa.params["gate_reads"] == (
+        "size_adjusted" if report.size.over_rejects("spa") else "raw"
+    )
+    assert next(r for r in rows if r.test_name == "reality_check").adjusted_p is not None
+    assert "Size-adjusted p-values" in report.markdown()
     json.dumps([dataclasses.asdict(r) for r in rows], allow_nan=False)
     assert verdict_of(report.gate_checks("R2"), report.gate_not_evaluated("R2")) == "fail"
     assert "Holm-adjusted" in report.markdown()

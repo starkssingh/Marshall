@@ -22,7 +22,9 @@ bootstrap convention):
   the deflated Sharpe ratio still applies (C-25, ADR 0057).
 - R2 ``spa_p_max``: Hansen's SPA over the family against cash (VAL-004). It carries the size
   check's warning "test over-rejects on this sample" when the simulated size exceeds 1.5 times
-  the level (ADR 0055). The Reality Check and the Romano-Wolf survivors are reported with it, and
+  the level (ADR 0055), and the gate then reads the size-adjusted p-value from that sample's
+  simulated null, at the same threshold (C-25, ADR 0057). Both p-values are reported, and the
+  Reality Check's too. The Reality Check and the Romano-Wolf survivors are reported with it, and
   every configuration's bootstrap p-value is Holm-adjusted within the family (VAL-006).
 - R2 ``decay_trend``: no significantly negative slope of the walk-forward folds' performance
   over time (`xq.validation.decay`).
@@ -242,8 +244,13 @@ class SignificanceReport:
                 family,
                 _num(test.reality_check_stat),
                 _num(test.reality_check_p),
-                None,
-                {"mean_block": test.mean_block, "n_boot": test.n_boot, "size_check": size},
+                _num(self.size.adjusted_p("reality_check", test.reality_check_p)),
+                {
+                    "mean_block": test.mean_block,
+                    "n_boot": test.n_boot,
+                    "size_check": size,
+                    "adjusted_p": "size-adjusted on the simulated null (reported, not gated)",
+                },
             )
         )
         rows.append(
@@ -252,13 +259,15 @@ class SignificanceReport:
                 family,
                 _num(test.spa_stat),
                 _num(test.spa_p),
-                None,
+                _num(self.size.adjusted_p("spa", test.spa_p)),
                 {
                     "lower": test.spa_p_lower,
                     "upper": test.spa_p_upper,
                     "mean_block": test.mean_block,
                     "n_boot": test.n_boot,
                     "size_check": size,
+                    "adjusted_p": "size-adjusted on the simulated null",
+                    "gate_reads": "size_adjusted" if self.size.over_rejects("spa") else "raw",
                 },
             )
         )
@@ -311,6 +320,7 @@ class SignificanceReport:
             f"upper {self.family_test.spa_p_upper:.4g}); "
             f"simulated size at {self.size.level:.0%}: SPA {self.size.spa_size:.1%}, Reality "
             f"Check {self.size.reality_check_size:.1%} ({self.size.n_sim} null families).",
+            self._size_adjusted_line(),
         ]
         if self.decay is not None:
             out.append(
@@ -329,6 +339,21 @@ class SignificanceReport:
         out += ["", "Configurations of the family, Holm-adjusted within it (VAL-006):", ""]
         out += [markdown_table(self.holm.reset_index())]
         return "\n".join(out)
+
+    def _size_adjusted_line(self) -> str:
+        test, size = self.family_test, self.size
+        reads = "size-adjusted" if size.over_rejects("spa") else "raw"
+        why = (
+            "the size check flags over-rejection"
+            if size.over_rejects("spa")
+            else f"the simulated size is within {size.warn_ratio:g}x the level"
+        )
+        return (
+            f"- Size-adjusted p-values (share of the {size.n_sim} simulated null families at "
+            f"least as strong): SPA {size.adjusted_p('spa', test.spa_p):.4g}, Reality Check "
+            f"{size.adjusted_p('reality_check', test.reality_check_p):.4g}. The SPA gate reads "
+            f"the {reads} p-value: {why}."
+        )
 
     def _pbo_line(self) -> str:
         why = self.not_applicable.get("R2 pbo_max")
