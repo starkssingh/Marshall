@@ -140,6 +140,9 @@ class StrategySubject:
     #: (``parameters_fixed_a_priori: true`` with a ``source``): the neighbourhood gate is then not
     #: applicable, and every other gate still is (C-25, ADR 0057).
     parameters_fixed_a_priori: str | None = None
+    #: Why the adapter cannot perturb the strategy's parameters (the neighbourhood is then not
+    #: evaluated, with this reason, unless the parameters are declared fixed a priori).
+    neighbourhood_unavailable: str | None = None
 
     def __post_init__(self) -> None:
         if self.name not in self.family.columns:

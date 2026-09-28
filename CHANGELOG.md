@@ -754,6 +754,18 @@ IDs from `docs/specs/development-plan.md`.
     correction.
 
   ADR 0056.
+- `xq validate-strategy` for baseline board runs (ADR 0058, closes C-25 (7)): the board's subject
+  adapter (`xq.validation.subjects.board_subject`) rebuilds the board's screening context from the
+  run (`xq.models.board.screening_context`, now shared with `run_baseline_board`, with
+  `rule_signal_bars` and `rule_positions`), rebuilds one strategy (`--strategy`, required for a
+  board) and refuses it unless its daily returns equal the ones the run recorded; artifacts are
+  checked against their recorded SHA-256. The family is the board, R1's baselines its other
+  strategies; a rule's numeric constants are its neighbourhood (C-25 (4)), a forecast-sign
+  strategy's is not evaluated (its model is not refitted). Cost stress, delays and price noise
+  re-screen the positions; the context keeps the quotes ROB-002's added latencies read. Also
+  `prediction_file_name`, `StrategySubject.neighbourhood_unavailable`, and a fix: ROB-001's
+  median-to-nominal ratio, NaN when the nominal Sharpe ratio is not positive, is stored as null
+  instead of breaking the report's JSON. Tested end to end on synthetic ticks.
 
 ### Changed
 
@@ -767,26 +779,6 @@ IDs from `docs/specs/development-plan.md`.
   it `incomplete`. Tested: the simulated genuine edge chosen among near-identical configurations
   (1 effective trial, CSCV PBO 0.52) is no longer failed by PBO and passes its significance
   criteria; the overfit family of 50 dispersed configurations still fails PBO.
-- C-25 (4) (owner's decision, ADR 0057), ROB-001 / ROB-008 / EXP-002: a parameter-free
-  strategy's neighbourhood gate is not applicable only when its hypothesis declares
-  `parameters_fixed_a_priori: true` with a `source` (refused at registration without a source, or
-  a source without the flag; `fixed_parameters_source` reads it from the locked text). Otherwise
-  every numeric constant of its configuration is perturbed (`config_constants`, `with_constants`;
-  zeros held). `StrategySubject` gains `parameter_kind`, `held_constants` and
-  `parameters_fixed_a_priori`; tuned parameters cannot be declared fixed a priori, and
-  `xq validate-strategy` refuses a simulated run under such a hypothesis. With the declaration the
-  perturbation is still reported, not gated, and every other gate applies. Tested: the genuine
-  trend edge as a parameter-free strategy has its constants perturbed and passes; declared fixed a
-  priori it passes on the six other gates, and fails when it loses; the registration rules.
-- C-25 (3) (owner's decision, ADR 0057), VAL-004: when the per-sample size check flags
-  over-rejection, the R2 SPA gate reads a size-adjusted p-value, `(1 + #{p_null <= p}) / (1 +
-  n_sim)` over the null families the size check simulates with the sample's dependence, at the
-  unchanged threshold (0.10). The size check keeps those null p-values; `SizeCheck.adjusted_p`
-  computes it for SPA and the Reality Check. Both p-values are reported in the Markdown and in the
-  `stat_tests` rows (`adjusted_p`, and `gate_reads` for SPA). Tested: the arithmetic, a raw pass
-  that the sample's null does not support fails, and the gate reads the adjusted p-value only when
-  flagged. Characterized on 600 dependent null samples (AR(1) φ = 0.4, 8 strategies, 400 periods):
-  SPA rejects 16.8 % raw and 9.0 % size-adjusted at 10 %, the Reality Check 15.3 % and 10.0 %.
 - C-25 (2) (owner's decision, ADR 0057), EXP-004: trial clustering uses the absolute
   correlation (|ρ| ≥ 0.7, at least 60 common days; the frozen parameters are unchanged), so a rule
   and its mirror image are one cluster. The Sharpe variance that feeds the deflated Sharpe ratio is
@@ -798,6 +790,26 @@ IDs from `docs/specs/development-plan.md`.
   registry. On the simulated genuine family with mirrors the DSR no longer collapses (0.007–0.31
   before, now equal to the rules alone). The `test_trials.py` fixture's variance changed with the
   definition (its near-duplicates count once).
+- C-25 (3) (owner's decision, ADR 0057), VAL-004: when the per-sample size check flags
+  over-rejection, the R2 SPA gate reads a size-adjusted p-value, `(1 + #{p_null <= p}) / (1 +
+  n_sim)` over the null families the size check simulates with the sample's dependence, at the
+  unchanged threshold (0.10). The size check keeps those null p-values; `SizeCheck.adjusted_p`
+  computes it for SPA and the Reality Check. Both p-values are reported in the Markdown and in the
+  `stat_tests` rows (`adjusted_p`, and `gate_reads` for SPA). Tested: the arithmetic, a raw pass
+  that the sample's null does not support fails, and the gate reads the adjusted p-value only when
+  flagged. Characterized on 600 dependent null samples (AR(1) φ = 0.4, 8 strategies, 400 periods):
+  SPA rejects 16.8 % raw and 9.0 % size-adjusted at 10 %, the Reality Check 15.3 % and 10.0 %.
+- C-25 (4) (owner's decision, ADR 0057), ROB-001 / ROB-008 / EXP-002: a parameter-free
+  strategy's neighbourhood gate is not applicable only when its hypothesis declares
+  `parameters_fixed_a_priori: true` with a `source` (refused at registration without a source, or
+  a source without the flag; `fixed_parameters_source` reads it from the locked text). Otherwise
+  every numeric constant of its configuration is perturbed (`config_constants`, `with_constants`;
+  zeros held). `StrategySubject` gains `parameter_kind`, `held_constants` and
+  `parameters_fixed_a_priori`; tuned parameters cannot be declared fixed a priori, and
+  `xq validate-strategy` refuses a simulated run under such a hypothesis. With the declaration the
+  perturbation is still reported, not gated, and every other gate applies. Tested: the genuine
+  trend edge as a parameter-free strategy has its constants perturbed and passes; declared fixed a
+  priori it passes on the six other gates, and fails when it loses; the registration rules.
 - C-24 (1) (owner's decision, ADR 0055), VAL-004: SPA and the Reality Check always take their
   block length from the gates' bootstrap convention (`family_tests(..., bootstrap=...)`, no block
   argument). The size simulation was re-run under it: with AR(1) φ = 0.4, 400 periods and 8

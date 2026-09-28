@@ -8,6 +8,7 @@ source (C-25, ADR 0057)."""
 import dataclasses
 import json
 
+import numpy as np
 import pytest
 
 from helpers.quality import repo_config
@@ -205,3 +206,17 @@ def test_tuned_parameters_cannot_be_declared_fixed_a_priori() -> None:
         dataclasses.replace(subject, parameters_fixed_a_priori=SOURCE)
     with pytest.raises(ValueError, match="need a source"):
         dataclasses.replace(fixed_trend(), parameters_fixed_a_priori="  ")
+
+
+def test_a_strategy_losing_at_its_nominal_point_is_reported_json_safe() -> None:
+    """The median-to-nominal ratio is undefined (NaN) when the nominal Sharpe ratio is not
+    positive; the robustness_results row stores it as null (a real board strategy found it)."""
+    subject = fixed_trend()
+    evaluate = subject.evaluate
+    assert evaluate is not None
+    losing = dataclasses.replace(subject, evaluate=lambda values: -np.asarray(evaluate(values)))
+    result = robustness_report(losing, gates=GATES, settings=SETTINGS, risk_engine=ENGINE, seed=0)
+    (row,) = [r for r in result.results() if r.test_id == "ROB-001"]
+    assert row.metrics["median_to_nominal"] is None
+    assert row.passed is False
+    json.dumps([dataclasses.asdict(r) for r in result.results()], allow_nan=False)

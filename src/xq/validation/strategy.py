@@ -5,8 +5,9 @@ known-truth simulated strategies it is proven on.
 **Validating a run.** `validate_run` works as follows.
 
 1. The recorded run must have finished. Its kind must have a **subject adapter** that rebuilds
-   the strategy and its family from the run's recorded configuration:
-   ``simulated_strategy`` (below) today. Other kinds are refused by name until they get one.
+   the strategy and its family from the run's recorded configuration: ``simulated_strategy``
+   (below) and ``baseline_board`` (`xq.validation.subjects`, one strategy of the board at a
+   time). Other kinds are refused by name until they get one.
 2. The family's trials are read from the registry as the gates count them (EXP-004): the family
    is the hypothesis's, and the count is effective or raw per ``conventions.trial_count``. The
    slices, and any declaration that the strategy's parameters were fixed a priori (C-25), are
@@ -41,7 +42,6 @@ import pandas as pd
 from sqlalchemy import Engine
 
 from xq.core.config import AppConfig
-from xq.core.errors import XQError
 from xq.core.seeds import derive_seed
 from xq.core.time import trading_day_bounds
 from xq.risk.engine import RiskEngine
@@ -55,16 +55,13 @@ from xq.tracking.runs import experiment_run
 from xq.tracking.trials import trial_count
 from xq.validation.report import StrategyValidation, validate_strategy
 from xq.validation.sharpe import sharpe_ratio
+from xq.validation.subjects import BOARD_KIND, StrategyValidationError, board_subject
 
 SIMULATED_KIND = "simulated_strategy"
 VALIDATION_KIND = "validation"
 REPORT_DIR = "validation"
 #: Run kinds `validate_run` can rebuild a strategy from.
-VALIDATABLE_KINDS = (SIMULATED_KIND,)
-
-
-class StrategyValidationError(XQError):
-    """A run cannot be validated (unfinished, or a kind without a subject adapter)."""
+VALIDATABLE_KINDS = (SIMULATED_KIND, BOARD_KIND)
 
 
 @dataclass(frozen=True)
@@ -150,6 +147,17 @@ def subject_for_run(
             raise StrategyValidationError(
                 f"run {run.run_id} selected {subject.name!r}, not {strategy!r}"
             )
+        return subject, family_id
+    if run.kind == BOARD_KIND:
+        subject = board_subject(
+            cfg,
+            engine,
+            run,
+            strategy,
+            trials=trials,
+            slices=run_slices(engine, run.run_id),
+            parameters_fixed_a_priori=fixed,
+        )
         return subject, family_id
     raise StrategyValidationError(
         f"runs of kind {run.kind!r} have no subject adapter yet; validatable kinds: "

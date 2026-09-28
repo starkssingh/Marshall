@@ -173,9 +173,10 @@ class RobustnessReport:
                         not in self.not_applicable,
                     },
                     {
-                        "nominal_sharpe": hood.nominal_sharpe,
-                        "profitable_share": hood.profitable_share(level),
-                        "median_to_nominal": hood.median_to_nominal(level),
+                        "nominal_sharpe": _num(hood.nominal_sharpe),
+                        "profitable_share": _num(hood.profitable_share(level)),
+                        # NaN when the nominal Sharpe ratio is not positive: JSON null
+                        "median_to_nominal": _num(hood.median_to_nominal(level)),
                     },
                     passed("parameter_neighbourhood.profitable_share_min"),
                 )
@@ -404,7 +405,7 @@ def robustness_report(
     elif perturbation is not None:
         checks[hood_key] = perturbation.gate_check(gates)
     else:
-        not_evaluated[hood_key] = (
+        not_evaluated[hood_key] = subject.neighbourhood_unavailable or (
             "the strategy has no tunable parameters and no numeric constant to perturb"
         )
 

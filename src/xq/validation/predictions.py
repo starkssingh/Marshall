@@ -101,7 +101,7 @@ def write_predictions(
     root = run.cfg.paths.resolve(run.cfg.paths.data_dir) / PREDICTIONS_DIR
     directory = root / run.run.experiment_id / run.run_id
     directory.mkdir(parents=True, exist_ok=True)
-    path = directory / f"{_slug(evaluation)}.parquet"
+    path = directory / prediction_file_name(evaluation)
     staging = path.with_name(f".{path.name}.tmp")
     table.to_parquet(staging, index=False)
     staging.replace(path)
@@ -113,6 +113,11 @@ def read_predictions(path: Path) -> pd.DataFrame:
     """A stored prediction file, indexed by tz-aware decision time."""
     frame = pd.read_parquet(path)
     return frame.set_index(pd.DatetimeIndex(frame.pop("decision_time"), name="decision_time"))
+
+
+def prediction_file_name(evaluation: str) -> str:
+    """The file name `write_predictions` gives an evaluation's predictions."""
+    return f"{_slug(evaluation)}.parquet"
 
 
 def _slug(evaluation: str) -> str:
