@@ -682,9 +682,124 @@ IDs from `docs/specs/development-plan.md`.
   configurations as trials again (`RunContext.reproduces`). Reproducible kinds: `baseline_board`.
   A fixture board run reproduces; a changed metric, altered dataset bytes and kinds without a
   reproducer are refused. ADR 0054.
+- ROB-004: Monte Carlo equity with the risk rules applied (`xq.robustness.montecarlo`). Closed
+  trades become R-multiples (net return over a stop at 3 daily sigma-hats), which are resampled
+  with a stationary bootstrap on the trades' own calendar. Every path is replayed through the real
+  `RiskEngine.evaluate` and `RiskStateTracker`. Reported: the drawdown distribution (capital as
+  the first peak), the halt probability, the ruin probability (equity at half the capital,
+  provisional) and entries taken and refused, plus the R2 `monte_carlo_drawdown` check. Settings
+  are in `config/validation.yaml` (`monte_carlo`). Proven on known truth:
+  - with only sizing binding, every path equals the fixed-fractional recursion;
+  - the default profile keeps a losing strategy's 95th-percentile drawdown below the halt, where
+    the same outcomes without the rules do not;
+  - a reckless profile hits and overshoots the halt, and without it ruins;
+  - the calendar makes the cooldown bind.
+
+  ADR 0056.
+- ROB-005: noise injection (`xq.robustness.noise`). Noise goes into the strategy's inputs only;
+  fills stay on true prices.
+  - `noisy_prices`: Gaussian noise at `level` times the spread.
+  - `noisy_features`: noise at `level` times each feature's causal (expanding, earlier rows only)
+    standard deviation.
+  - `noise_curve`: the degradation curve, with the median, the 90 % band and the retention of the
+    net Sharpe ratio per level over 20 seeded draws, and the breakdown level. Reported, not gated
+    (P2).
+
+  Settings are in `config/validation.yaml` (`noise`). Proven on known truth: a bid-ask-bounce
+  edge collapses under spread-sized noise, while a trend edge keeps its Sharpe ratio under price
+  noise and degrades smoothly under feature noise. ADR 0056.
+- ROB-008: the robustness report and score (`xq.robustness.report`). `robustness_report` runs
+  ROB-001 … ROB-007, the positive-fold share and the evaluated period's drawdown on a
+  `StrategySubject` (`xq.robustness.subject`), and judges the seven R2 robustness gates.
+  - The score is the share of evaluated gates passed.
+  - The verdict is `pass` only when all seven are evaluated and pass, `fail` when any fails, and
+    `incomplete` (with the reason) when one cannot be evaluated.
+  - Every measure is a `RobustnessResult` row, and the report renders as Markdown.
+
+  Also added: known-truth simulated strategies as subjects (`xq.robustness.simulated`: a genuine
+  trend edge and a single-point optimum on noise, synthetic, rebuilt from a `SimulationSpec`).
+  Proven: the genuine edge passes every robustness gate and the overfit strategy fails. ADR 0056.
+  The risk state tracker caches the trading day of an instant (a pure function) so Monte Carlo
+  replays do not recompute it.
+- `xq validate-strategy <run_id>` (Phase 17's acceptance; `xq.validation.report`,
+  `xq.validation.strategy`): the combined significance and robustness report of a recorded
+  strategy against `config/gates.yaml`, with R1 and R2 verdicts (`pass`, `fail` or `incomplete`,
+  never a pass by default). The significance tests are:
+  - the Sharpe bootstrap (R1);
+  - the new paired block bootstrap against the best baseline (R1, `xq.validation.paired`);
+  - the closed trades (R1);
+  - the deflated Sharpe ratio with the registry's gated trial count;
+  - PBO;
+  - SPA with its per-sample size check and warning, the Reality Check, Romano–Wolf and Holm
+    within the family;
+  - the new decay-trend test (`xq.validation.decay`: the slope of walk-forward fold means on
+    time, Student t on K − 2 degrees of freedom; a daily Newey–West regression over-rejected
+    genuine edges whose strength drifts in regimes, 14 % at 5 %);
+  - the minimum track record.
+
+  Combined with ROB-008's seven robustness gates. It runs in a run of kind `validation` (no
+  trials: it selects nothing), writes `report.md`/`report.json` under `reports/validation/`, and
+  records the plan's `stat_tests` and `robustness_results` tables (migration 0010).
+  `xq robustness simulate --truth genuine|overfit` records a known-truth simulated strategy as a
+  run (synthetic, always exploratory, its configurations the family's trials). Subject adapters:
+  `simulated_strategy` runs; other kinds are refused by name. Proven end to end: a recorded
+  genuine trend edge passes R1 and R2, and a recorded single-point optimum on noise fails R2 (DSR,
+  PBO, SPA, neighbourhood). Also:
+  - The simulated genuine family now spans lookbacks of 2–80 days (24 configurations). With
+    near-identical configurations PBO is about 0.5 even for a real edge, and with mirror-image
+    ones the deflated Sharpe ratio's benchmark explodes (ADR 0056).
+  - ROB-006 volatility terciles put days without a known sigma-hat (the estimator's warm-up) in
+    a `no_sigma_hat` bucket instead of refusing the report.
+  - `FamilyTest` gains each strategy's own bootstrap p-value (`single_p`) for the per-family
+    correction.
+
+  ADR 0056.
 
 ### Changed
 
+- C-24 (1) (owner's decision, ADR 0055), VAL-004: SPA and the Reality Check always take their
+  block length from the gates' bootstrap convention (`family_tests(..., bootstrap=...)`, no block
+  argument). The size simulation was re-run under it: with AR(1) φ = 0.4, 400 periods and 8
+  strategies, 2,000 replications reject at 15.4 % (Reality Check) and 18.5 % (SPA) at a 10 % level.
+  That is still above 1.5 times nominal, so `size_check` now measures the size on each sample. It
+  simulates null families with the sample's serial dependence (AR sieve by AIC, residual rows
+  resampled together). `FamilyTest.gate_check(gates, size)` requires it, and the R2 SPA result
+  carries "test over-rejects on this sample" when the simulated size exceeds 1.5 times the level.
+  `GateCheck` gains `warnings`, shown by `describe()`. The settings are in the new
+  `config/validation.yaml` (`ValidationConfig`). Tested: the over-rejection under the convention,
+  the warning on a dependent sample, and no warning on an iid one.
+- C-24 (2) (owner's decision, ADR 0055), BT-003: the starting capital is the first equity peak.
+  `drawdown_metrics(equity, capital)` requires the capital, so a drawdown that starts on the first
+  day counts: equity 99, 98, 97 on 100 now reports 3/100, not 2/99. One definition
+  (`running_peak`, `path_max_drawdowns`) is shared by `performance_metrics`, the board's drawdown
+  and its bootstrap interval, ROB-003 and the report's drawdown panel. This closes the known issue
+  of ADR 0054. It feeds R2's `oos_max_drawdown_max`.
+- C-24 (3) (owner's decision, ADR 0055), ROB-001: the R2 neighbourhood gate reads the full
+  combinatorial grid (each parameter at −20 %/0/+20 %, the nominal point left out). Above 243
+  neighbours (more than five parameters), 243 are drawn without replacement by a generator seeded
+  from the run's seed, so the draw is repeatable. `neighbourhood_design` names the design, and
+  `sensitivity()` is the one-at-a-time sensitivity table for the report. `perturb` requires
+  `max_points` and `seed`. The levels and the 243 are in `config/validation.yaml`
+  (`perturbation`), which must include the gate's level. Tested: a ridge optimum (good only along
+  the diagonal, two or three parameters) fails, and a six-parameter grid is sampled
+  deterministically.
+- C-24 (4) (owner's decision, ADR 0055), ROB-006 / EXP-002: slice names are validated when a
+  hypothesis is registered. The vocabulary moved to `xq.tracking.slices` and `HypothesisDoc`
+  refuses an unknown name before the text is locked. Loading still checks the names, for versions
+  locked before this change. Volatility-tercile tables are labelled "descriptive, cut ex post"
+  (`SliceReport.label`); every other slice is "descriptive". Tested: an unknown name is refused at
+  registration, vocabulary names and aliases register, and an old version with an unknown name is
+  still refused when loaded.
+- C-24 (5) (owner's decision, ADR 0055), EXP-006: a reproduction has a status
+  (`ReproductionStatus`). It is REPRODUCED only when the git sha, the config hash and the lock
+  hash match and identify the code, and every judged metric is within tolerance. An unknown or
+  dirty sha, a missing lockfile or a missing config hash never matches. Otherwise the status is
+  RERUN_DIFFERENT_CODE, which is reported and never counted as reproduced. On the same code with a
+  metric out of tolerance it is NOT_REPRODUCED. The status, the identity fields and the
+  comparisons are written to `reports/reproductions/<run>.json` as a `reproduction` artifact.
+  `xq exp reproduce` exits 0 only for REPRODUCED, 1 for NOT_REPRODUCED and 3 for
+  RERUN_DIFFERENT_CODE. The test fixture is now a clean git repository. Tested: a new commit,
+  another configuration and a dirty tree each give RERUN_DIFFERENT_CODE with matching metrics.
 - C-22 (owner's decision, ADR 0053): position sizing scales on the edge per unit of risk instead
   of the raw calibrated probability — `ev_r = p_lcb x TP/SL - (1 - p_lcb) - round_trip_cost/SL`
   with `p_lcb` the probability's lower confidence bound, and the multiplier

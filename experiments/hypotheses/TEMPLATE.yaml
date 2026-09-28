@@ -31,5 +31,5 @@ planned_tests:
   - Deflated Sharpe ratio
   - Diebold-Mariano against the best baseline
 slices:                          # pre-declared subsets to report (ROB-006): year, session,
-  - session                      # volatility tercile; regime slices wait for REG-007
-  - volatility tercile
+  - session                      # volatility tercile (cut ex post); regime slices wait for
+  - volatility tercile           # REG-007; other names are refused at registration

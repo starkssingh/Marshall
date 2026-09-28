@@ -9,7 +9,8 @@ intervals for:
 - the CAGR, ``(1 + sum r)^(P / n) - 1``: the screener sizes on constant capital, so equity is
   capital plus cumulative P&L (as `performance_metrics`), NaN for a path that loses everything;
 - the maximum drawdown, the largest fall of equity from its running peak as a fraction of that
-  peak, where the path starts at the capital: a loss on the first day is already a drawdown.
+  peak, where the path starts at the capital: a loss on the first day is already a drawdown
+  (BT-003's definition, `xq.backtest.metrics.path_max_drawdowns`).
 
 **Trade order.** `permute_trades` shuffles the order of a strategy's closed trades. Their total
 is unchanged, but the path is not: the distribution of the maximum drawdown and of the longest
@@ -27,6 +28,7 @@ import numpy as np
 import numpy.typing as npt
 import pandas as pd
 
+from xq.backtest.metrics import path_max_drawdowns, running_peak
 from xq.core.seeds import make_rng
 from xq.validation.sharpe import bootstrap_distribution, gate_block_length
 
@@ -225,14 +227,12 @@ def permute_trades(
 
 def _max_drawdown(equity: FloatArray) -> FloatArray:
     """Row-wise maximum drawdown of equity paths starting from 1 (the capital)."""
-    peak = np.maximum.accumulate(np.maximum(equity, 1.0), axis=1)
-    result: FloatArray = np.max((peak - equity) / peak, axis=1)
-    return np.maximum(result, 0.0)
+    return path_max_drawdowns(equity, 1.0)
 
 
 def _longest_under_water(equity: FloatArray) -> npt.NDArray[np.int64]:
     """Row-wise longest run of consecutive points below the running peak (from 1)."""
-    peak = np.maximum.accumulate(np.maximum(equity, 1.0), axis=1)
+    peak = running_peak(equity, 1.0)
     below = (equity < peak).astype(np.int64)
     count = np.cumsum(below, axis=1)
     last_reset = np.maximum.accumulate(np.where(below == 0, count, 0), axis=1)

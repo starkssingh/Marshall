@@ -1,10 +1,13 @@
 """EXP-006: `xq exp reproduce <run_id>` rebuilds a fixture board run's dataset, repeats the run and
 matches every judged metric within tolerance without counting its trials again; a result that
 changed, altered dataset content and runs without a reproducer are refused; a deleted dataset is
-rebuilt from the spec the registry recorded."""
+rebuilt from the spec the registry recorded. C-24 (5): the status is REPRODUCED only with the same
+git sha, config hash and lock hash; a rerun on another commit or configuration is
+RERUN_DIFFERENT_CODE and never counts as reproduced."""
 
 import json
 import shutil
+import subprocess
 from collections.abc import Iterator
 from pathlib import Path
 
@@ -40,9 +43,37 @@ BOARD = {
 }
 
 
+def git(repo: Path, *args: str) -> str:
+    completed = subprocess.run(
+        [
+            "git",
+            "-c",
+            "user.email=t@example.com",
+            "-c",
+            "user.name=t",
+            "-c",
+            "commit.gpgsign=false",
+            *args,
+        ],
+        cwd=repo,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    return completed.stdout.strip()
+
+
 @pytest.fixture(scope="module")
 def root(tmp_path_factory: pytest.TempPathFactory) -> Path:
-    return tmp_path_factory.mktemp("reproduce")
+    """A clean git repository: what runs write (data, logs, reports) is ignored, so the tree
+    stays clean and every run records the commit's sha."""
+    root = tmp_path_factory.mktemp("reproduce")
+    git(root, "init", "-q")
+    (root / ".gitignore").write_text("/*\n!/.gitignore\n!/uv.lock\n")
+    (root / "uv.lock").write_text("version = 1\n")
+    git(root, "add", ".")
+    git(root, "commit", "-q", "-m", "init")
+    return root
 
 
 @pytest.fixture(scope="module")
@@ -118,10 +149,19 @@ def test_a_board_run_reproduces_within_tolerance(
     trials_before = trial_count(cfg, engine, "baselines").n_trials
     code, output = xq(root, "exp", "reproduce", board_run, "--exploratory")
     assert code == 0, output
-    assert "REPRODUCED" in output
+    assert f"{board_run} (baseline_board) -> reproduction" in output
+    assert ": REPRODUCED;" in output
+    assert "provenance" not in output  # the same commit, configuration and lockfile
     assert f"dataset {dataset.dataset_id} rebuilt with identical content" in output
     (copy,) = [r for r in registry.list_runs(engine) if r.kind == REPRODUCTION_KIND]
     original = registry.get_run(engine, board_run)
+    assert copy.git_sha == original.git_sha == git(root, "rev-parse", "HEAD")
+    (artifact,) = [
+        a for a in registry.list_artifacts(engine, copy.run_id) if a.kind == "reproduction"
+    ]
+    status = json.loads(Path(artifact.path).read_text())
+    assert (status["status"], status["counts_as_reproduced"]) == ("REPRODUCED", True)
+    assert all(field["matches"] for field in status["identity"].values())
     assert copy.config["run"]["reproduces"] == board_run
     assert copy.config["run"]["run"] == original.config["run"]
     assert (copy.seed, copy.dataset_id) == (original.seed, original.dataset_id)
@@ -142,7 +182,7 @@ def test_a_deleted_dataset_is_rebuilt_from_its_recorded_spec(
     shutil.rmtree(directory)
     code, output = xq(root, "exp", "reproduce", board_run, "--exploratory")
     assert code == 0, output
-    assert "REPRODUCED" in output
+    assert ": REPRODUCED;" in output
     rebuilt = json.loads((directory / "manifest.json").read_text())
     assert rebuilt["sha256"] == manifest["sha256"]  # the same content from the recorded spec
 
@@ -170,7 +210,7 @@ def test_a_changed_result_is_not_reproduced(root: Path, engine: Engine, board_ru
             )
             session.commit()
     assert code == 1, output
-    assert "NOT REPRODUCED" in output
+    assert ": NOT_REPRODUCED;" in output  # the same code: a genuine failure to reproduce
     assert f"mismatch: {name}" in output
     assert sum(line.startswith("mismatch:") for line in output.splitlines()) == 1
 
@@ -209,3 +249,50 @@ def test_unfinished_runs_and_kinds_without_a_reproducer_are_refused(
     registry.finish_run(engine, eda.run_id, RunStatus.FINISHED)
     with pytest.raises(ReproductionError, match="no reproducer"):
         reproduce_run(cfg, engine, eda.run_id, exploratory=True)
+
+
+def test_a_rerun_on_another_commit_is_not_counted_as_reproduced(
+    root: Path, engine: Engine, board_run: str
+) -> None:
+    before = git(root, "rev-parse", "HEAD")
+    (root / ".gitignore").write_text("/*\n!/.gitignore\n!/uv.lock\n# a later commit\n")
+    git(root, "commit", "-q", "-am", "the code moved on")
+    after = git(root, "rev-parse", "HEAD")
+    try:
+        code, output = xq(root, "exp", "reproduce", board_run, "--exploratory")
+    finally:
+        git(root, "reset", "-q", "--hard", before)
+    assert code == 3, output
+    assert ": RERUN_DIFFERENT_CODE;" in output
+    assert "not counted as reproduced" in output
+    assert f"provenance differs: git_sha {before} -> {after}" in output
+    assert "mismatch:" not in output  # the metrics agree, and it is still not a reproduction
+    status_file = next(line for line in output.splitlines() if line.startswith("status file:"))
+    status = json.loads(Path(status_file.removeprefix("status file: ")).read_text())
+    assert status["status"] == "RERUN_DIFFERENT_CODE"
+    assert status["counts_as_reproduced"] is False
+    assert status["identity"]["git_sha"] == {
+        "original": before,
+        "reproduction": after,
+        "matches": False,
+    }
+
+
+def test_a_rerun_with_another_configuration_or_dirty_tree_is_not_reproduced(
+    root: Path, board_run: str
+) -> None:
+    code, output = xq(
+        root, "--set", "logging.level=WARNING", "exp", "reproduce", board_run, "--exploratory"
+    )
+    assert code == 3, output
+    assert ": RERUN_DIFFERENT_CODE;" in output
+    assert "provenance differs: app_config_hash" in output
+    lock = root / "uv.lock"
+    lock.write_text("version = 1\n# edited, not committed\n")
+    try:
+        code, output = xq(root, "exp", "reproduce", board_run, "--exploratory")
+    finally:
+        git(root, "checkout", "-q", "--", "uv.lock")
+    assert code == 3, output
+    assert "+dirty" in output  # a dirty tree identifies no commit
+    assert "provenance differs: lock_hash" in output

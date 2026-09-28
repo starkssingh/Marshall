@@ -480,6 +480,37 @@ class BacktestRecord(Base):
     report_path: Mapped[str] = mapped_column(Text)
 
 
+class StatTestRecord(Base):
+    """One statistical test of a validation run (Phase 17): the statistic, its p-value and the
+    p-value adjusted within its test family (VAL-006); `params_json` says how it was run."""
+
+    __tablename__ = "stat_tests"
+
+    stat_test_id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    run_id: Mapped[str] = mapped_column(ForeignKey("runs.run_id"))
+    test_name: Mapped[str] = mapped_column(String(160))
+    family_id: Mapped[str] = mapped_column(String(64))
+    statistic: Mapped[float | None] = mapped_column(Float)
+    p_value: Mapped[float | None] = mapped_column(Float)
+    adjusted_p: Mapped[float | None] = mapped_column(Float)
+    params_json: Mapped[dict[str, Any]]
+
+
+class RobustnessResultRecord(Base):
+    """One robustness measure of a validation run (ROB-008): its parameters, metrics and whether
+    its gate passed (null when it is reported, not gated)."""
+
+    __tablename__ = "robustness_results"
+
+    result_id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    run_id: Mapped[str] = mapped_column(ForeignKey("runs.run_id"))
+    test_id: Mapped[str] = mapped_column(String(16))
+    name: Mapped[str] = mapped_column(String(64))
+    params_json: Mapped[dict[str, Any]]
+    metrics_json: Mapped[dict[str, Any]]
+    passed: Mapped[bool | None] = mapped_column(Boolean)
+
+
 class TargetSetRecord(Base):
     """The locked definition of a target set version (TGT-001).
 

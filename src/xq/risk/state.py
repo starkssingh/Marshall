@@ -32,6 +32,7 @@ value is handed to the strategy (for stops in volatility units) and to the risk 
 
 from __future__ import annotations
 
+import functools
 import json
 import math
 from dataclasses import dataclass
@@ -144,7 +145,7 @@ class RiskStateTracker:
 
     def observe(self, account: AccountState) -> None:
         """Equity observed at a risk decision."""
-        self._roll(trading_day(pd.Timestamp(account.ts, tz="UTC")))
+        self._roll(_trading_day_of(account.ts))
         self._see(account)
 
     def close_day(self, account: AccountState) -> None:
@@ -154,7 +155,7 @@ class RiskStateTracker:
 
     def on_fill(self, fill: Fill) -> None:
         """A booked fill: position, entries today and round-trip outcomes."""
-        self._roll(trading_day(pd.Timestamp(fill.ts, tz="UTC")))
+        self._roll(_trading_day_of(fill.ts))
         if fill.role == "entry":
             self._trades_today += 1
         before = self._position
@@ -291,6 +292,12 @@ class SeriesSigma:
         if i < 0 or not np.isfinite(self._values[i]) or self._values[i] <= 0:
             return None
         return float(self._values[i])
+
+
+@functools.lru_cache(maxsize=1 << 16)
+def _trading_day_of(ns: int) -> date:
+    """The trading day of an instant in UTC nanoseconds (cached: replays reuse their instants)."""
+    return trading_day(pd.Timestamp(ns, tz="UTC"))
 
 
 def _drawdown(peak: float, equity: float) -> float:

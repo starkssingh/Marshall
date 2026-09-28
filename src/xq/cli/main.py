@@ -18,6 +18,7 @@ from typing import Annotated, Literal
 import pandas as pd
 import typer
 import yaml
+from pydantic import ValidationError
 from sqlalchemy import Engine
 
 import xq
@@ -29,7 +30,7 @@ from xq.core.config import (
     load_config,
     parse_override,
 )
-from xq.core.errors import XQError
+from xq.core.errors import ConfigError, XQError
 from xq.core.ids import git_sha, new_ulid
 from xq.core.logging import configure_logging, shutdown_logging
 from xq.core.time import ensure_utc
@@ -43,15 +44,25 @@ from xq.models.board import load_board_config, run_baseline_board
 from xq.quality.validate import validate_source
 from xq.research.eda.horizons import write_admission
 from xq.research.eda.run import run_eda
+from xq.robustness.simulated import SimulationSpec
 from xq.tracking.conclusions import close_experiment, load_conclusion, unconcluded_experiments
 from xq.tracking.db import current_revision, engine_for, head_revision, upgrade_to_head
 from xq.tracking.hypotheses import register_hypothesis
 from xq.tracking.registry import list_hypotheses
-from xq.tracking.reproduce import DEFAULT_ATOL, DEFAULT_RTOL, describe, reproduce_run
+from xq.tracking.reproduce import (
+    DEFAULT_ATOL,
+    DEFAULT_RTOL,
+    ReproductionStatus,
+    describe,
+    reproduce_run,
+)
 from xq.tracking.runs import experiment_run
 from xq.tracking.trials import trial_count
+from xq.validation.strategy import record_simulated_run, validate_run
 
 EXIT_USAGE_ERROR = 2
+#: `xq exp reproduce`: the rerun used other code, config or environment (never reproduced).
+EXIT_DIFFERENT_CODE = 3
 
 app = typer.Typer(
     name="xq",
@@ -480,16 +491,20 @@ def exp_reproduce(
         ),
     ] = False,
 ) -> None:
-    """Rebuild a run's dataset, repeat the run and compare its metrics (EXP-006); exit 1 unless
-    every judged metric is within tolerance."""
+    """Rebuild a run's dataset, repeat the run and compare its metrics (EXP-006).
+
+    Exit 0 only for REPRODUCED (same git sha, config hash and lock hash, every judged metric
+    within tolerance); 1 for NOT_REPRODUCED; 3 for RERUN_DIFFERENT_CODE (C-24, ADR 0055)."""
     with pipeline_run(ctx.obj) as run:
         result = reproduce_run(
             run.cfg, run.engine, run_id, rtol=rtol, atol=atol, exploratory=exploratory
         )
     for line in describe(result):
         typer.echo(line)
-    if not result.reproduced:
+    if result.status is ReproductionStatus.NOT_REPRODUCED:
         raise typer.Exit(1)
+    if result.status is ReproductionStatus.RERUN_DIFFERENT_CODE:
+        raise typer.Exit(EXIT_DIFFERENT_CODE)
 
 
 baselines_app = typer.Typer(
@@ -669,10 +684,70 @@ def db_current(ctx: typer.Context) -> None:
         engine.dispose()
 
 
+robustness_app = typer.Typer(
+    help="Robustness research (ROB-001 ... ROB-008) and known-truth simulated strategies.",
+    no_args_is_help=True,
+)
+app.add_typer(robustness_app, name="robustness")
+
+
+@robustness_app.command("simulate")
+def robustness_simulate(
+    ctx: typer.Context,
+    truth: Annotated[
+        str, typer.Option("--truth", help="genuine (a real trend edge) or overfit (noise).")
+    ],
+    hypothesis: Annotated[
+        str, typer.Option("--hypothesis", help="Registered hypothesis the run belongs to.")
+    ],
+    seed: Annotated[int, typer.Option("--seed", help="Seed of the simulation.")] = 0,
+) -> None:
+    """Record a known-truth simulated strategy as a run (synthetic, always exploratory).
+
+    Its family's configurations are recorded as trials of the hypothesis's family. It exists to
+    prove `xq validate-strategy`; it is never evidence."""
+    with pipeline_run(ctx.obj) as run, cli_errors():
+        try:
+            spec = SimulationSpec(truth=truth, seed=seed)  # type: ignore[arg-type]
+        except ValidationError as exc:
+            raise ConfigError(f"invalid simulation: {exc}") from exc
+        ref = record_simulated_run(run.cfg, run.engine, spec, hypothesis_id=hypothesis)
+    typer.echo(f"run {ref.run_id}: simulated {truth} strategy, seed {seed} (synthetic)")
+
+
+@app.command("validate-strategy")
+def validate_strategy_command(
+    ctx: typer.Context,
+    run_id: Annotated[str, typer.Argument(help="Id of the finished run that chose the strategy.")],
+    strategy: Annotated[
+        str | None,
+        typer.Option("--strategy", help="The strategy to validate when the run holds several."),
+    ] = None,
+    exploratory: Annotated[
+        bool,
+        typer.Option(
+            "--exploratory",
+            help="Allow a dirty git tree; the validation run is then not confirmatory.",
+        ),
+    ] = False,
+) -> None:
+    """Significance and robustness report of a recorded strategy against config/gates.yaml.
+
+    Writes report.md and report.json under reports/validation/<run_id>/<validation run>/ and
+    records every test (stat_tests) and robustness measure (robustness_results). Exit 0 when
+    the report is produced, whatever its verdicts."""
+    with pipeline_run(ctx.obj) as run, cli_errors():
+        outcome = validate_run(
+            run.cfg, run.engine, run_id, strategy=strategy, exploratory=exploratory
+        )
+    for line in outcome.validation.summary_lines():
+        typer.echo(line)
+    typer.echo(f"validation run {outcome.run.run_id}; report: {outcome.report_dir / 'report.md'}")
+
+
 # Command groups for later phases. Each is registered now so the CLI surface is stable; the
 # commands arrive in the sprint named in the help text.
 _PLANNED_GROUPS = {
-    "robustness": "Robustness stress tests (Sprint 9: ROB-001..008).",
     "registry": "Model registry and strategy bundles (Sprint 13: MREG-001..005).",
     "gate": "Evidence gates and vault evaluation (Sprint 13: GATE-001..003).",
 }

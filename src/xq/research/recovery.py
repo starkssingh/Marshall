@@ -2,9 +2,10 @@
 ADR 0054).
 
 The plan requires every statistical and volatility method to recover a known answer on a simulated
-process before it runs on gold; Sprint 9's validation and robustness methods (VAL-003, VAL-004,
-VAL-006, ROB-001 ... ROB-007) are held to the same rule on simulated strategies with known truth —
-noise-only families, a single-point optimum on noise, a genuine edge. `RECOVERY_TESTS` names, per
+process before it runs on gold. Sprint 9's validation and robustness methods (VAL-003, VAL-004,
+VAL-006, ROB-001, ROB-002, ROB-003, ROB-006, ROB-007) and Sprint 12's (ROB-004, ROB-005, ADR 0056)
+are held to the same rule on simulated strategies with known truth: noise-only families, a
+single-point optimum on noise, a genuine edge. `RECOVERY_TESTS` names, per
 method, the tests (pytest node ids, relative to the repository root) that prove it; a unit test
 checks that every named test exists, and the verdict report (STAT-008) cites them in each method's
 evidence. A method without an entry here must not be used by a report, a board, the sigma-hat
@@ -33,6 +34,12 @@ _COST_STRESS = "tests/unit/robustness/test_costs_stress.py"
 _BOOTSTRAP = "tests/unit/robustness/test_bootstrap.py"
 _SLICING = "tests/integration/robustness/test_slicing.py"
 _DELAY = "tests/unit/robustness/test_delay.py"
+_MONTE_CARLO = "tests/unit/robustness/test_montecarlo.py"
+_NOISE = "tests/unit/robustness/test_noise.py"
+_REPORT = "tests/unit/robustness/test_report.py"
+_DECAY = "tests/unit/validation/test_decay.py"
+_PAIRED = "tests/unit/validation/test_paired.py"
+_VALIDATE = "tests/integration/validation/test_validate_strategy.py"
 
 RECOVERY_TESTS: Mapping[str, tuple[str, ...]] = {
     "ADF": (
@@ -147,6 +154,10 @@ RECOVERY_TESTS: Mapping[str, tuple[str, ...]] = {
         f"{_SPA}::test_a_genuine_edge_is_detected_and_its_survivors_named",
         f"{_SPA}::test_spa_keeps_its_power_when_poor_strategies_join_the_family",
     ),
+    "spa_size_check": (
+        f"{_SPA}::test_strong_serial_dependence_still_over_rejects_under_the_gates_block_convention",
+        f"{_SPA}::test_the_size_check_warns_on_a_dependent_short_sample_and_not_on_an_iid_one",
+    ),
     "holm_bh": (
         f"{_MULTIPLE}::test_hand_computed_reference_values",
         f"{_MULTIPLE}::test_the_adjustments_match_statsmodels",
@@ -156,6 +167,8 @@ RECOVERY_TESTS: Mapping[str, tuple[str, ...]] = {
         f"{_PERTURB}::test_a_single_point_optimum_on_noise_fails_the_neighbourhood_gate",
         f"{_PERTURB}::test_a_genuine_trend_edge_passes_the_neighbourhood_gate",
         f"{_PERTURB}::test_the_designs_evaluate_the_points_they_state",
+        f"{_PERTURB}::test_a_ridge_optimum_fails_the_full_grid_gate",
+        f"{_PERTURB}::test_a_large_grid_is_sampled_deterministically",
     ),
     "cost_stress": (
         f"{_COST_STRESS}::test_the_r2_scenario_passes_exactly_when_the_gross_edge_covers_the_stressed_costs",
@@ -182,6 +195,35 @@ RECOVERY_TESTS: Mapping[str, tuple[str, ...]] = {
         f"{_DELAY}::test_a_genuine_trend_edge_decays_smoothly_and_passes_the_gate",
         f"{_DELAY}::test_a_bid_ask_bounce_edge_flips_at_the_first_delay",
         f"{_DELAY}::test_a_look_ahead_leak_collapses_at_the_first_delay",
+    ),
+    "monte_carlo_risk_rules": (
+        f"{_MONTE_CARLO}::test_with_only_sizing_binding_every_path_is_the_fixed_fractional_recursion",
+        f"{_MONTE_CARLO}::test_the_default_profile_keeps_a_losing_strategy_inside_the_halt",
+        f"{_MONTE_CARLO}::test_a_reckless_profile_hits_the_halt_and_breaks_the_budget",
+    ),
+    "noise_injection": (
+        f"{_NOISE}::test_price_noise_is_a_fraction_of_the_spread",
+        f"{_NOISE}::test_feature_noise_is_causal_and_scaled_by_the_feature_sigma",
+        f"{_NOISE}::test_an_edge_at_the_scale_of_the_spread_collapses_under_spread_sized_noise",
+        f"{_NOISE}::test_a_genuine_trend_edge_degrades_smoothly",
+    ),
+    "robustness_report": (
+        f"{_REPORT}::test_a_genuine_edge_passes_every_robustness_gate",
+        f"{_REPORT}::test_a_single_point_optimum_on_noise_fails",
+        f"{_REPORT}::test_a_gate_that_cannot_be_evaluated_makes_the_verdict_incomplete",
+    ),
+    "decay_trend": (
+        f"{_DECAY}::test_a_stable_edge_is_rejected_at_about_the_nominal_rate",
+        f"{_DECAY}::test_a_genuine_edge_with_regimes_keeps_the_size",
+        f"{_DECAY}::test_a_fading_edge_is_detected_and_fails_the_gate",
+    ),
+    "best_baseline_paired_bootstrap": (
+        f"{_PAIRED}::test_a_candidate_that_adds_nothing_is_rejected_at_about_the_nominal_rate",
+        f"{_PAIRED}::test_pairing_detects_a_small_consistent_improvement",
+    ),
+    "validate_strategy": (
+        f"{_VALIDATE}::test_a_recorded_genuine_edge_passes_r1_and_r2",
+        f"{_VALIDATE}::test_a_recorded_single_point_optimum_on_noise_fails_r2",
     ),
 }
 

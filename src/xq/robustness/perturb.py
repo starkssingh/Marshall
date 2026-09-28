@@ -11,17 +11,24 @@ measures the plateau:
   one step away from the nominal. A parameter with a grid of allowed values (``choices``) moves to
   the allowed value nearest the target on each side: the neighbouring discrete values. A value
   below ``minimum`` is dropped.
-- **Designs.** *One at a time*: each parameter down and up, the others at nominal. *Jointly*:
-  every combination of {down, nominal, up} across the parameters, except the nominal point
-  itself. *Heat maps*: for each pair of parameters, the grid of both parameters' values at every
-  level, the others at nominal.
+- **Designs.** *One at a time*: each parameter down and up, the others at nominal; its table
+  (`sensitivity`) is reported, not gated. *Jointly*: the full combinatorial grid, every
+  combination of {down, nominal, up} across the parameters, except the nominal point itself
+  (3^k - 1 points for k parameters). When that neighbourhood has more than ``max_points`` points
+  (243, from ``config/validation.yaml``: more than five parameters), ``max_points`` of them are
+  drawn without replacement, deterministically from ``seed`` (C-24, ADR 0055). *Heat maps*: for
+  each pair of parameters, the grid of both parameters' values at every level, the others at
+  nominal.
 - **Metrics.** Every point's annualized net Sharpe ratio, from the per-period net returns the
   strategy's ``evaluate`` returns. The joint neighbourhood at level p gives the *profitable share*
   (the share of points with net Sharpe > 0; a point without variance, such as one that never
   trades, is not profitable) and the *median-to-nominal ratio* (the median neighbourhood Sharpe
   over the nominal Sharpe; NaN when the nominal is not positive).
 - **Gate.** R2's ``parameter_neighbourhood``: the profitable share of the joint neighbourhood at
-  ``perturbation`` (20 %) must be at least ``profitable_share_min`` (ADR 0032, ADR 0054).
+  ``perturbation`` (20 %) must be at least ``profitable_share_min`` (ADR 0032, ADR 0054,
+  ADR 0055). The joint grid is the owner's reading: a ridge (an optimum that holds only along a
+  diagonal of the parameters, where two must move together) fails it, and so does a strategy
+  flat in each parameter alone that falls apart when two move together.
 
 Each distinct point is evaluated once.
 """
@@ -38,6 +45,7 @@ import numpy.typing as npt
 import pandas as pd
 
 from xq.core.config import GateCheck, GatesConfig
+from xq.core.seeds import derive_seed, make_rng
 from xq.validation.sharpe import sharpe_ratio
 
 DEFAULT_LEVELS = (0.10, 0.20, 0.30)
@@ -109,6 +117,9 @@ class PerturbationResult:
     #: and ``net_return`` (the sum of the per-period net returns).
     points: pd.DataFrame
     _sharpe: dict[Point, float] = field(repr=False, compare=False)
+    #: Per level: the joint neighbourhood's evaluated points, and the size of its full grid.
+    _joint: dict[float, tuple[Point, ...]] = field(repr=False, compare=False)
+    _grid_size: dict[float, int] = field(repr=False, compare=False)
 
     @property
     def names(self) -> tuple[str, ...]:
@@ -148,13 +159,47 @@ class PerturbationResult:
                     )
         return pd.DataFrame(rows, columns=["parameter", "level", "side", "value", "sharpe"])
 
+    def sensitivity(self) -> pd.DataFrame:
+        """The one-at-a-time sensitivity table: per parameter, its nominal value, the net Sharpe
+        at each level down (``-10%``) and up (``+10%``), the nominal Sharpe, the worst change
+        from it and the share of these points that are profitable. Reported, not gated."""
+        single = self.one_at_a_time()
+        nominal = self.nominal_sharpe
+        rows = []
+        for parameter in self.parameters:
+            own = single.loc[single["parameter"] == parameter.name]
+            row: dict[str, float] = {"nominal_value": float(parameter.nominal)}
+            for level in self.levels:
+                for side, sign in (("down", "-"), ("up", "+")):
+                    match = own.loc[np.isclose(own["level"], level) & (own["side"] == side)]
+                    row[f"{sign}{level:.0%}"] = (
+                        float(match["sharpe"].iloc[0]) if len(match) else math.nan
+                    )
+            values = own["sharpe"].to_numpy(np.float64)
+            row["nominal_sharpe"] = nominal
+            row["worst_change"] = float(np.nanmin(values) - nominal) if len(values) else math.nan
+            row["profitable_share"] = (
+                float(np.mean(np.nan_to_num(values, nan=0.0) > 0)) if len(values) else math.nan
+            )
+            rows.append(row)
+        return pd.DataFrame(rows, index=pd.Index(self.names, name="parameter"))
+
     def neighbourhood(self, level: float) -> pd.DataFrame:
-        """The joint neighbourhood at `level`: one row per point, the nominal point excluded."""
+        """The joint neighbourhood at `level`: one row per point, the nominal point excluded (a
+        seeded sample of the grid when it is larger than the design's ``max_points``)."""
         level = self._level(level)
-        points = _joint(self.parameters, level)
-        frame = pd.DataFrame(points, columns=list(self.names))
+        points = self._joint[level]
+        frame = pd.DataFrame(list(points), columns=list(self.names))
         frame["sharpe"] = [self._sharpe[p] for p in points]
         return frame
+
+    def neighbourhood_design(self, level: float) -> str:
+        """How the joint neighbourhood at `level` was drawn, for the report."""
+        level = self._level(level)
+        size, drawn = self._grid_size[level] - 1, len(self._joint[level])
+        if drawn == size:
+            return f"full grid: {drawn} points around the nominal"
+        return f"seeded sample of {drawn} of the grid's {size} points around the nominal"
 
     def profitable_share(self, level: float) -> float:
         """Share of the joint neighbourhood at `level` with a positive net Sharpe ratio."""
@@ -217,6 +262,8 @@ def perturb(
     parameters: Sequence[Parameter],
     *,
     periods_per_year: int,
+    max_points: int,
+    seed: int,
     levels: Iterable[float] = DEFAULT_LEVELS,
     heatmaps: bool = True,
 ) -> PerturbationResult:
@@ -226,12 +273,15 @@ def perturb(
         evaluate: Maps parameter values (by name) to the strategy's per-period net returns.
         parameters: The perturbed parameters with their nominal values.
         periods_per_year: Annualization of the Sharpe ratio (``backtest.periods_per_year``).
+        max_points: The largest joint neighbourhood evaluated in full; a larger one is sampled
+            (``perturbation.max_joint_points`` in ``config/validation.yaml``).
+        seed: Seed of that sample (the run's seed).
         levels: Perturbation levels, shares of each parameter's scale, in (0, 1).
         heatmaps: Also evaluate every pair of parameters over all levels.
 
     Raises:
-        ValueError: for no or duplicate parameters, a level outside (0, 1), or returns with
-            missing values.
+        ValueError: for no or duplicate parameters, a level outside (0, 1), no points, or
+            returns with missing values.
     """
     params = tuple(parameters)
     names = [p.name for p in params]
@@ -240,14 +290,21 @@ def perturb(
     grid_levels = tuple(sorted({float(level) for level in levels}))
     if not grid_levels or not all(0 < level < 1 for level in grid_levels):
         raise ValueError("perturbation levels must lie in (0, 1)")
+    if max_points < 1:
+        raise ValueError("max_points must be at least 1")
     nominal = tuple(float(p.nominal) for p in params)
 
     wanted: dict[Point, None] = {nominal: None}
+    joint: dict[float, tuple[Point, ...]] = {}
+    grid_size: dict[float, int] = {}
     for level in grid_levels:
         for i, parameter in enumerate(params):
             for value in parameter.neighbours(level):
                 wanted[_replace(nominal, i, value)] = None
-        for point in _joint(params, level):
+        joint[level], grid_size[level] = _joint(
+            params, level, max_points, derive_seed(seed, "parameter_neighbourhood", repr(level))
+        )
+        for point in joint[level]:
             wanted[point] = None
     if heatmaps:
         for i, j in itertools.combinations(range(len(params)), 2):
@@ -264,18 +321,38 @@ def perturb(
         sharpe[point] = sharpe_ratio(returns) * root
         rows.append((*point, sharpe[point], float(np.sum(returns))))
     points = pd.DataFrame(rows, columns=[*names, "sharpe", "net_return"])
-    return PerturbationResult(params, grid_levels, periods_per_year, points, sharpe)
+    return PerturbationResult(
+        params, grid_levels, periods_per_year, points, sharpe, joint, grid_size
+    )
 
 
 def _replace(point: Point, index: int, value: float) -> Point:
     return (*point[:index], float(value), *point[index + 1 :])
 
 
-def _joint(parameters: tuple[Parameter, ...], level: float) -> list[Point]:
-    """Every combination of {down, nominal, up} at `level`, the nominal point excluded."""
+def _joint(
+    parameters: tuple[Parameter, ...], level: float, max_points: int, seed: int
+) -> tuple[tuple[Point, ...], int]:
+    """The combinations of {nominal, down, up} at `level`, the nominal point excluded, and the
+    grid's size. Above `max_points` combinations, `max_points` are drawn without replacement
+    (seeded), in grid order."""
     options = [(float(p.nominal), *p.neighbours(level)) for p in parameters]
-    nominal = tuple(o[0] for o in options)
-    return [point for point in itertools.product(*options) if point != nominal]
+    radices = [len(o) for o in options]
+    size = math.prod(radices)
+    if size - 1 <= max_points:
+        indices = list(range(1, size))
+    else:
+        # index 0 is the nominal point (every parameter at its first option)
+        drawn = make_rng(seed).choice(size - 1, size=max_points, replace=False) + 1
+        indices = sorted(int(i) for i in drawn)
+    points = []
+    for index in indices:
+        point = []
+        for option, radix in zip(reversed(options), reversed(radices), strict=True):
+            index, digit = divmod(index, radix)
+            point.append(option[digit])
+        points.append(tuple(reversed(point)))
+    return tuple(points), size
 
 
 def _axis(parameter: Parameter, levels: tuple[float, ...]) -> list[float]:

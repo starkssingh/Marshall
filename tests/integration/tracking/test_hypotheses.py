@@ -97,6 +97,7 @@ def test_registration_locks_the_text_and_edits_create_versions(
             "timezone",
         ),
         ({"extra_field": 1}, "Extra inputs"),
+        ({"slices": ["year", "weekday"]}, "unknown slice 'weekday'"),  # C-24: at registration
     ],
 )
 def test_invalid_hypotheses_are_refused(
@@ -193,3 +194,12 @@ def test_cli_register_and_list(tmp_path: Path) -> None:
     )
     assert reserved.exit_code == 2
     assert "reserved" in reserved.output
+
+
+def test_declared_slices_from_the_vocabulary_register(
+    cfg: AppConfig, engine: Engine, tmp_path: Path
+) -> None:
+    slices = ["Year", "volatility tercile", "vol_tercile", "session", "trend/range regime"]
+    doc, _ = load_hypothesis(write(tmp_path, slices=slices), cfg)
+    assert doc.slices == slices  # the text is locked as written; names are only checked
+    assert register_hypothesis(cfg, engine, tmp_path / "H-0001.yaml").version == 1

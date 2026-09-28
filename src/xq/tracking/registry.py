@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import hashlib
 import math
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
@@ -35,7 +35,9 @@ from xq.tracking.models import (
     FoldResultRecord,
     Hypothesis,
     Metric,
+    RobustnessResultRecord,
     Run,
+    StatTestRecord,
 )
 
 #: Trial family of linear forecasting models evaluated on test folds (STAT-006, ADR 0046).
@@ -588,6 +590,92 @@ def list_backtests(engine: Engine, run_id: str) -> list[BacktestRef]:
         ]
 
 
+def record_stat_tests(engine: Engine, run_id: str, rows: Sequence[Mapping[str, Any]]) -> int:
+    """Record statistical tests of a running run (``stat_tests``): each row has ``test_name``,
+    ``family_id``, ``statistic``, ``p_value``, ``adjusted_p`` (numbers or None) and ``params``.
+    Non-finite numbers are stored as null. Returns the number of rows."""
+    with session_factory(engine)() as session:
+        _running(session.get(Run, run_id), run_id)
+        session.add_all(
+            StatTestRecord(
+                run_id=run_id,
+                test_name=str(row["test_name"]),
+                family_id=str(row["family_id"]),
+                statistic=_finite(row.get("statistic")),
+                p_value=_finite(row.get("p_value")),
+                adjusted_p=_finite(row.get("adjusted_p")),
+                params_json=dict(row.get("params", {})),
+            )
+            for row in rows
+        )
+        session.commit()
+    return len(rows)
+
+
+def list_stat_tests(engine: Engine, run_id: str) -> list[dict[str, Any]]:
+    """The statistical tests a run recorded, in the order it recorded them."""
+    with session_factory(engine)() as session:
+        records = session.scalars(
+            select(StatTestRecord)
+            .where(StatTestRecord.run_id == run_id)
+            .order_by(StatTestRecord.stat_test_id)
+        ).all()
+        return [
+            {
+                "test_name": r.test_name,
+                "family_id": r.family_id,
+                "statistic": r.statistic,
+                "p_value": r.p_value,
+                "adjusted_p": r.adjusted_p,
+                "params": dict(r.params_json),
+            }
+            for r in records
+        ]
+
+
+def record_robustness_results(
+    engine: Engine, run_id: str, rows: Sequence[Mapping[str, Any]]
+) -> int:
+    """Record robustness measures of a running run (``robustness_results``): each row has
+    ``test_id``, ``name``, ``params``, ``metrics`` and ``passed`` (a bool, or None when the
+    measure is reported, not gated). Returns the number of rows."""
+    with session_factory(engine)() as session:
+        _running(session.get(Run, run_id), run_id)
+        session.add_all(
+            RobustnessResultRecord(
+                run_id=run_id,
+                test_id=str(row["test_id"]),
+                name=str(row["name"]),
+                params_json=dict(row.get("params", {})),
+                metrics_json=dict(row.get("metrics", {})),
+                passed=None if row.get("passed") is None else bool(row["passed"]),
+            )
+            for row in rows
+        )
+        session.commit()
+    return len(rows)
+
+
+def list_robustness_results(engine: Engine, run_id: str) -> list[dict[str, Any]]:
+    """The robustness measures a run recorded, in the order it recorded them."""
+    with session_factory(engine)() as session:
+        records = session.scalars(
+            select(RobustnessResultRecord)
+            .where(RobustnessResultRecord.run_id == run_id)
+            .order_by(RobustnessResultRecord.result_id)
+        ).all()
+        return [
+            {
+                "test_id": r.test_id,
+                "name": r.name,
+                "params": dict(r.params_json),
+                "metrics": dict(r.metrics_json),
+                "passed": r.passed,
+            }
+            for r in records
+        ]
+
+
 def count_runs(engine: Engine, *, experiment_id: str | None = None) -> int:
     with session_factory(engine)() as session:
         query = select(func.count()).select_from(Run)
@@ -597,6 +685,13 @@ def count_runs(engine: Engine, *, experiment_id: str | None = None) -> int:
 
 
 # --- helpers -----------------------------------------------------------------------------------
+
+
+def _finite(value: Any) -> float | None:
+    if value is None:
+        return None
+    number = float(value)
+    return number if math.isfinite(number) else None
 
 
 def _running(record: Run | None, run_id: str) -> Run:

@@ -1,0 +1,25 @@
+# Validation and robustness procedures (Phases 16 and 17: VAL-003 ... VAL-006, ROB-001 ... ROB-008;
+# ADR 0054, ADR 0055). Every value is fixed before any candidate result exists; changing one needs
+# an ADR. The pass/fail thresholds are not here: they are in config/gates.yaml, and the bootstrap
+# convention (n_boot, Politis-White block, at least 5 days) is the gates' own.
+
+spa_size_check:          # C-24 (1): does SPA / the Reality Check over-reject on this sample?
+  n_sim: 500             # null families simulated with the sample's serial dependence
+  n_boot: 199            # bootstrap resamples per simulated family
+  max_ar_order: 5        # AR sieve per strategy, order by AIC (Yule-Walker, always stationary)
+  warn_ratio: 1.5        # warn when the simulated size exceeds 1.5x the gate's level (owner)
+
+perturbation:            # ROB-001; the gate's neighbourhood is the full grid (C-24 (3))
+  levels: [0.10, 0.20, 0.30]   # the gate reads parameter_neighbourhood.perturbation (0.20)
+  max_joint_points: 243  # full grid up to 3^5 points; above that a seeded sample of 243 points
+
+monte_carlo:             # ROB-004: resampled trade outcomes replayed through the RiskEngine
+  n_paths: 1000
+  stop_sigmas: 3.0       # one R = a stop at 3 daily sigma-hats (the event tier's default stop)
+  ruin_level: 0.50       # PROVISIONAL: a path is ruined when equity falls to half the capital
+  min_block_trades: 1    # Politis-White block of the R-multiples, at least one trade
+
+noise:                   # ROB-005: noise in the strategy's inputs; fills stay on true prices
+  price_levels: [0.25, 0.5, 1.0, 2.0, 5.0]    # multiples of the spread
+  feature_levels: [0.1, 0.25, 0.5, 1.0]       # multiples of each feature's causal std
+  n_seeds: 20                                 # draws per level (median and 90 % band)

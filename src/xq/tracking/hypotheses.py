@@ -15,6 +15,9 @@ The trial budget is at least one, except in the ``descriptive`` family: a descri
 (the standing hypothesis H-0000 that EDA runs belong to, ADR 0041) evaluates no trading
 configuration, so its budget may be zero (ADR 0042).
 
+Declared ``slices`` must come from the slice vocabulary (`xq.tracking.slices`): an unknown name
+is refused here, at registration, before the text is locked (C-24, ADR 0055).
+
 The family ids the platform records forecasting-model trials under (``linear_forecasts``,
 ``volatility_models``; ``xq.tracking.registry.RESERVED_FAMILIES``) are reserved: a hypothesis
 registered in one would mix its trials with model evaluations (ADR 0046, ADR 0047).
@@ -50,6 +53,7 @@ from xq.tracking.registry import (
     get_hypothesis,
     text_hash,
 )
+from xq.tracking.slices import canonical_slice
 
 HYPOTHESIS_ID = re.compile(r"^H-\d{4}$")
 #: The only family whose trial budget may be zero (ADR 0042).
@@ -100,6 +104,13 @@ class HypothesisDoc(BaseModel):
             check_family_not_reserved(value)
         except RegistryError as exc:
             raise ValueError(str(exc)) from exc
+        return value
+
+    @field_validator("slices")
+    @classmethod
+    def _known_slices(cls, value: list[str]) -> list[str]:
+        for name in value:
+            canonical_slice(name)  # raises SliceError (a ValueError) for an unknown name
         return value
 
     @model_validator(mode="after")

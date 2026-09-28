@@ -4,7 +4,8 @@ Layers, from lowest to highest precedence:
 
 1. ``config/base.yaml`` plus the section files next to it (``instruments/<id>.yaml``,
    ``costs/<model>.yaml``, ``risk/<profile>.yaml``, ``sessions.yaml``, ``quality.yaml``,
-   ``targets.yaml``, ``gates.yaml``, ``eda.yaml``, ``stats.yaml``, ``volatility.yaml``)
+   ``targets.yaml``, ``gates.yaml``, ``eda.yaml``, ``stats.yaml``, ``volatility.yaml``,
+   ``validation.yaml``)
 2. ``config/<profile>.yaml`` (for example ``dev``, ``research``, ``paper``, ``prod``)
 3. environment variables prefixed ``XQ_``; nested keys are separated by ``__``,
    e.g. ``XQ_LOGGING__LEVEL=DEBUG``
@@ -73,6 +74,7 @@ FRAGMENT_FILES = {
     "eda": "eda.yaml",
     "stats": "stats.yaml",
     "volatility": "volatility.yaml",
+    "validation": "validation.yaml",
 }
 #: Sections that only their own file may set: no base.yaml key, profile, environment variable or
 #: override may change them (evidence gates are fixed before results are seen, ADR 0032).
@@ -862,6 +864,66 @@ class VolatilityConfig(FrozenModel):
         return self
 
 
+class SpaSizeCheckConfig(FrozenModel):
+    """The per-sample size check of SPA and the Reality Check (VAL-004, C-24, ADR 0055)."""
+
+    #: Simulated null families per check.
+    n_sim: int = Field(ge=50)
+    #: Bootstrap resamples per simulated family.
+    n_boot: int = Field(ge=99)
+    #: Highest AR order of the sieve fitted to each strategy's differentials (chosen by AIC).
+    max_ar_order: int = Field(ge=0, le=20)
+    #: A gate result that uses SPA or the Reality Check carries a warning when the simulated
+    #: rejection rate exceeds this multiple of the gate's level.
+    warn_ratio: float = Field(gt=1)
+
+
+class PerturbationConfig(FrozenModel):
+    """Parameter perturbation (ROB-001; the neighbourhood design of C-24, ADR 0055)."""
+
+    #: Perturbation levels, shares of each parameter's scale; the gate reads its own
+    #: ``parameter_neighbourhood.perturbation``, which must be one of them.
+    levels: list[Annotated[float, Field(gt=0, lt=1)]] = Field(min_length=1)
+    #: The largest joint neighbourhood evaluated in full (3^5 - 1 = 242 points for five
+    #: parameters); a larger one is a seeded sample of this many points.
+    max_joint_points: int = Field(ge=1)
+
+
+class MonteCarloConfig(FrozenModel):
+    """Monte Carlo equity with the risk rules applied (ROB-004)."""
+
+    #: Resampled paths replayed through the risk engine.
+    n_paths: int = Field(ge=100)
+    #: One R: a stop at this many daily sigma-hats (the event tier's default stop).
+    stop_sigmas: float = Field(gt=0)
+    #: A path is ruined when its equity falls to this share of the capital.
+    ruin_level: float = Field(gt=0, lt=1)
+    #: Lower bound on the Politis-White mean block of the resampled trade outcomes (trades).
+    min_block_trades: int = Field(ge=1)
+
+
+class NoiseConfig(FrozenModel):
+    """Noise injection (ROB-005): levels above zero and draws per level."""
+
+    #: Price noise, in multiples of the spread.
+    price_levels: list[Annotated[float, Field(gt=0)]] = Field(min_length=1)
+    #: Feature noise, in multiples of each feature's causal standard deviation.
+    feature_levels: list[Annotated[float, Field(gt=0)]] = Field(min_length=1)
+    n_seeds: int = Field(ge=1)
+
+
+class ValidationConfig(FrozenModel):
+    """Validation and robustness procedures (``config/validation.yaml``, Phases 16 and 17).
+
+    Pass/fail thresholds are not here: they are in ``config/gates.yaml``.
+    """
+
+    spa_size_check: SpaSizeCheckConfig
+    perturbation: PerturbationConfig
+    monte_carlo: MonteCarloConfig
+    noise: NoiseConfig
+
+
 class SpreadCostConfig(FrozenModel):
     """Spread fallback when quotes carry no bid/ask (BT-001)."""
 
@@ -1119,17 +1181,23 @@ class GateCriterion:
             return value < self.threshold
         return value <= self.threshold
 
-    def check(self, value: float) -> GateCheck:
-        """The criterion applied to a measured `value`."""
-        return GateCheck(self, float(value))
+    def check(self, value: float, warnings: tuple[str, ...] = ()) -> GateCheck:
+        """The criterion applied to a measured `value`, with any `warnings` about the evidence."""
+        return GateCheck(self, float(value), tuple(warnings))
 
 
 @dataclass(frozen=True)
 class GateCheck:
-    """A gate criterion applied to a measured value (robustness and validation evidence)."""
+    """A gate criterion applied to a measured value (robustness and validation evidence).
+
+    `warnings` qualify the evidence without changing the outcome: a threshold is never moved,
+    but a reader must see, next to the result, when the test behind it is known to be unreliable
+    on the sample (for example SPA over-rejecting under strong serial dependence, ADR 0055).
+    """
 
     criterion: GateCriterion
     value: float
+    warnings: tuple[str, ...] = ()
 
     @property
     def passed(self) -> bool:
@@ -1140,9 +1208,10 @@ class GateCheck:
         """One line: the measure, its value, the rule and the outcome."""
         c = self.criterion
         outcome = "pass" if self.passed else "FAIL"
-        return (
+        line = (
             f"{c.gate} {c.key}: {c.measure} = {self.value:.4g} ({c.op} {c.threshold:g}) {outcome}"
         )
+        return "".join([line, *(f"; WARNING: {w}" for w in self.warnings)])
 
 
 class GateBootstrapConfig(FrozenModel):
@@ -1501,6 +1570,7 @@ class AppConfig(BaseSettings):
     eda: EdaConfig | None = None
     stats: StatsConfig | None = None
     volatility: VolatilityConfig | None = None
+    validation: ValidationConfig | None = None
     secrets: SecretsConfig = SecretsConfig()
 
     @classmethod
@@ -1641,6 +1711,17 @@ class AppConfig(BaseSettings):
             )
         return self
 
+    @model_validator(mode="after")
+    def _check_validation(self) -> AppConfig:
+        if self.gates is None or self.validation is None:
+            return self
+        gate_level = self.gates.r2_validated.parameter_neighbourhood.perturbation
+        if not any(math.isclose(gate_level, x) for x in self.validation.perturbation.levels):
+            raise ValueError(
+                f"validation.perturbation.levels must include the gate's perturbation {gate_level}"
+            )
+        return self
+
     def gates_config(self) -> GatesConfig:
         """Return the evidence policy; raise if ``config/gates.yaml`` was not loaded."""
         if self.gates is None:
@@ -1693,6 +1774,12 @@ class AppConfig(BaseSettings):
         if self.volatility is None:
             raise ConfigError("no volatility research configuration (config/volatility.yaml)")
         return self.volatility
+
+    def validation_config(self) -> ValidationConfig:
+        """Return the validation and robustness settings (``config/validation.yaml``), or raise."""
+        if self.validation is None:
+            raise ConfigError("no validation configuration (config/validation.yaml)")
+        return self.validation
 
     def datasets_config(self) -> DatasetsConfig:
         """Return the dataset builder settings; raise if they are not configured."""
