@@ -41,6 +41,20 @@ sources:
     clock: "NY+7"          # server time UTC+2 / UTC+3, switching on US DST dates
     instrument: xauusd
     file_patterns: ["*.csv", "*.txt"]
+  # Dukascopy XAUUSD bid/ask ticks (DATA-013, ADR 0057): UTC timestamps, tick history from
+  # 2003-05-05. Reads the native hourly files `xq fetch dukascopy` downloads
+  # (<SYMBOL>_<YYYY-MM-DD>_<HH>h_ticks.bi5) and dukascopy-node tick CSVs.
+  dukascopy:
+    adapter: dukascopy_ticks
+    vendor: "Dukascopy Bank SA"
+    feed_type: vendor_ticks
+    venue: dukascopy
+    price_type: bid_ask_ticks
+    clock: "UTC"
+    instrument: xauusd
+    file_patterns: ["*.bi5", "*.csv"]
+    vendor_symbol: XAUUSD
+    point_scale: 1000      # integer points per USD in .bi5 records (2034155 = 2034.155)
 
 cleaning:
   # Non-destructive tick cleaning (DATA-007, ADR 0006). Every rule sets a flag bit; the rules

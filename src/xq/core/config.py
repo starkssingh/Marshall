@@ -1504,9 +1504,15 @@ def gates_hash(gates: GatesConfig) -> str:
 
 
 class SourceConfig(FrozenModel):
-    """A declared market-data source (DATA-003). The clock convention is part of its identity."""
+    """A declared market-data source (DATA-003). The clock convention is part of its identity.
 
-    adapter: Literal["mt5_ticks"]
+    Vendor encodings (DATA-013, ADR 0057): `vendor_symbol` is the vendor's code for the instrument
+    (Dukascopy ``XAUUSD``) and `point_scale` the number of integer price points per unit of the
+    quote currency in the vendor's binary files (Dukascopy XAUUSD: 1000, so 2034155 is 2034.155).
+    Both are required by the ``dukascopy_ticks`` adapter.
+    """
+
+    adapter: Literal["mt5_ticks", "dukascopy_ticks"]
     vendor: str
     feed_type: Literal["broker_ticks", "vendor_ticks", "vendor_bars"]
     venue: str
@@ -1515,6 +1521,8 @@ class SourceConfig(FrozenModel):
     instrument: str
     file_patterns: list[str] = ["*.csv"]
     encoding: str | None = None
+    vendor_symbol: str | None = Field(default=None, pattern=r"^[A-Z0-9]+$")
+    point_scale: int | None = Field(default=None, gt=0)
     notes: str = ""
 
     @field_validator("clock")
@@ -1524,6 +1532,14 @@ class SourceConfig(FrozenModel):
             return str(ClockConvention.parse(value))
         except ClockConventionError as exc:
             raise ValueError(str(exc)) from exc
+
+    @model_validator(mode="after")
+    def _check_vendor_encoding(self) -> SourceConfig:
+        if self.adapter == "dukascopy_ticks":
+            missing = [n for n in ("vendor_symbol", "point_scale") if getattr(self, n) is None]
+            if missing:
+                raise ValueError(f"the dukascopy_ticks adapter needs {', '.join(missing)}")
+        return self
 
     def clock_convention(self) -> ClockConvention:
         """The parsed clock convention."""

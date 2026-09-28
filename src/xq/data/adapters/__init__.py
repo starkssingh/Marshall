@@ -10,10 +10,12 @@ from xq.data.adapters.base import (
     discover_files,
     validate_tick_frame,
 )
+from xq.data.adapters.dukascopy import DukascopyTickAdapter
 from xq.data.adapters.mt5 import Mt5TickAdapter
 
 __all__ = [
     "TICK_SCHEMA",
+    "DukascopyTickAdapter",
     "Mt5TickAdapter",
     "RawFileRef",
     "SourceAdapter",
@@ -28,4 +30,6 @@ def build_adapter(cfg: AppConfig, source_id: str) -> SourceAdapter:
     source = cfg.source(source_id)
     if source.adapter == "mt5_ticks":
         return Mt5TickAdapter(source_id, source)
+    if source.adapter == "dukascopy_ticks":
+        return DukascopyTickAdapter(source_id, source)
     raise AssertionError(f"unhandled adapter {source.adapter!r}")  # pragma: no cover

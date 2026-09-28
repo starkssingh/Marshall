@@ -754,6 +754,30 @@ IDs from `docs/specs/development-plan.md`.
     correction.
 
   ADR 0056.
+- DATA-013, promoted to the primary research feed by the owner (ADR 0057): the Dukascopy tick
+  adapter (`xq.data.adapters.dukascopy`, adapter `dukascopy_ticks`) and the source `dukascopy`
+  in `config/base.yaml` (vendor ticks, clock `UTC`, bid/ask ticks, `vendor_symbol` XAUUSD,
+  `point_scale` 1000). It reads:
+  - the native hourly `.bi5` files, named `<SYMBOL>_<YYYY-MM-DD>_<HH>h_ticks.bi5` after the UTC
+    hour they cover (the bytes do not carry it): LZMA "alone" streams of 20-byte big-endian
+    records (milliseconds from the hour start, ask and bid points, ask and bid volume); price =
+    points / `point_scale`, time = hour start + offset, read through the declared clock. An
+    empty file is an hour without ticks; an offset outside the hour, a partial record, a
+    corrupt stream or another symbol is refused (`SourceFormatError`);
+  - dukascopy-node tick CSVs (`timestamp,askPrice,bidPrice[,askVolume,bidVolume]`, Unix ms or
+    UTC ISO 8601; another UTC offset is refused), the fallback while the `.bi5` endpoint is
+    unavailable.
+
+  Every row carries both sides: nothing is carried forward, and a missing side is flagged
+  `MISSING_QUOTE`. Volumes stay in the raw frame and the mirror; canonical sizes are NaN (their
+  unit for gold is undocumented). `SourceConfig` gains `vendor_symbol` and `point_scale`,
+  required by this adapter. Synthetic fixtures in `tests/fixtures/dukascopy/` (generator
+  `tests/helpers/dukascopy_fixtures.py`): a week of hourly `.bi5` files across the US DST start
+  with its weekend gap, and a CSV week across the US DST end. Tested: file hours never move with
+  DST and carry no DST flags, the daily and weekly gaps land at the calendar's UTC hours on both
+  sides of each change, reading the files as `NY+7` is detected, a clean week of hourly files
+  passes every quality check through ingest, cleaning, bars and `xq validate`, re-ingest is a
+  no-op, and a property test reads back any hour of records exactly.
 
 ### Changed
 
