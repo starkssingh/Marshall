@@ -754,6 +754,52 @@ IDs from `docs/specs/development-plan.md`.
     correction.
 
   ADR 0056.
+- DATA-013, promoted to the primary research feed by the owner (ADR 0057): the Dukascopy tick
+  adapter (`xq.data.adapters.dukascopy`, adapter `dukascopy_ticks`) and the source `dukascopy`
+  in `config/base.yaml` (vendor ticks, clock `UTC`, bid/ask ticks, `vendor_symbol` XAUUSD,
+  `point_scale` 1000). It reads:
+  - the native hourly `.bi5` files, named `<SYMBOL>_<YYYY-MM-DD>_<HH>h_ticks.bi5` after the UTC
+    hour they cover (the bytes do not carry it): LZMA "alone" streams of 20-byte big-endian
+    records (milliseconds from the hour start, ask and bid points, ask and bid volume); price =
+    points / `point_scale`, time = hour start + offset, read through the declared clock. An
+    empty file is an hour without ticks; an offset outside the hour, a partial record, a
+    corrupt stream or another symbol is refused (`SourceFormatError`);
+  - dukascopy-node tick CSVs (`timestamp,askPrice,bidPrice[,askVolume,bidVolume]`, Unix ms or
+    UTC ISO 8601; another UTC offset, or an integer too small to be Unix milliseconds of
+    Dukascopy data, is refused), the fallback while the `.bi5` endpoint is unavailable.
+
+  Every row carries both sides: nothing is carried forward, and a missing side is flagged
+  `MISSING_QUOTE`. Volumes stay in the raw frame and the mirror; canonical sizes are NaN (their
+  unit for gold is undocumented). `SourceConfig` gains `vendor_symbol` and `point_scale`,
+  required by this adapter. Synthetic fixtures in `tests/fixtures/dukascopy/` (generator
+  `tests/helpers/dukascopy_fixtures.py`): a week of hourly `.bi5` files across the US DST start
+  with its weekend gap, and a CSV week across the US DST end. Tested: file hours never move with
+  DST and carry no DST flags, the daily and weekly gaps land at the calendar's UTC hours on both
+  sides of each change, reading the files as `NY+7` is detected, a clean week of hourly files
+  passes every quality check through ingest, cleaning, bars and `xq validate`, re-ingest is a
+  no-op, and a property test reads back any hour of records exactly.
+- DATA-013: `xq fetch dukascopy --instrument xauusd --from YYYY-MM-DD --to YYYY-MM-DD --out
+  <dir>` (`xq.data.adapters.dukascopy_fetch`), the downloader the owner runs on a machine with
+  internet access. It stores each UTC hour's `.bi5` file unchanged under
+  `<out>/XAUUSD/<yyyy>/<mm>/<dd>/` and appends a line per hour to `manifest.jsonl` (status, URL,
+  HTTP status, SHA-256, size, record count). It is:
+  - resumable: recorded hours are re-hashed, not requested again; a file without a manifest line
+    is adopted after a decoding check; a partial last manifest line is cut off;
+  - safe: files are placed through a hidden `.part` file and a hard link, so none is ever
+    overwritten or repaired; a mismatch stops the run; a lock file keeps a second download out;
+  - polite: one request at a time, at least 0.5 s apart, retries with exponential backoff on
+    network errors, timeouts, 429 and 5xx, then a stop that names the dukascopy-node CSV
+    fallback (the `.bi5` endpoint has been reported to time out since July 2026, ADR 0057);
+  - wary of empty answers: a 404 or an empty body is an hour without ticks, but an empty hour
+    inside the calendar's market hours is asked again once and recorded only when a later hour
+    brings ticks; 24 in a row stop the run; `--retry-empty` asks again for recorded empty hours.
+
+  `--to` must be before today (UTC) and `--from` not before 2003-05-05. Settings in
+  `sources.dukascopy.download` (`DownloadConfig`). Tested against a scripted vendor with a fake
+  clock (pacing, backoff, resume after an interruption, tampered, missing and unrecorded files,
+  empty and dead endpoints, the lock) and against a local HTTP server through the real transport
+  and the CLI, then `xq ingest`. No new dependency (`urllib`, `lzma`). README: how to download,
+  the fallback and the pipeline commands.
 
 ### Changed
 
@@ -945,6 +991,13 @@ IDs from `docs/specs/development-plan.md`.
   gains the stop leg and its cancellation), the financing, constraint and reconciliation tests
   give their intents stops and, where halts would interrupt another mechanism under test, use the
   real engine with halts that cannot bind.
+- DATA-013 (owner's decision, ADR 0057, superseding ADR 0004's primary-feed choice): the primary
+  research feed is Dukascopy. `config/base.yaml` gains `data.primary_source: dukascopy`
+  (`DataConfig`, validated against the declared sources); `xq ingest`, `rebuild-mirror`,
+  `clean`, `build-bars`, `spread-stats` and `validate` take `--source` optionally and read the
+  primary source without it; `experiments/configs/ds_base.yaml` names `dukascopy`. `mt5_primary`
+  stays declared as an optional source. The README's quick start runs on the synthetic Dukascopy
+  fixtures.
 
 ### Fixed
 

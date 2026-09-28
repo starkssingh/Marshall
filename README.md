@@ -11,16 +11,18 @@ follow are in [`CLAUDE.md`](CLAUDE.md), and decisions are recorded in [`docs/adr
 
 ## Status
 
-Sprints 1 to 6, 9, 11 and 12 A are merged. Sprint 12 B is in review: the Sprint 9 review
-decisions (ADR 0055), Monte Carlo with the risk engine, noise injection, the robustness report and
-`xq validate-strategy` (ADR 0056). Sprints 11 and 12 A ran ahead of Sprints 7-10 while real data is pending
-(ADR 0048, ADR 0051). Sprint 2 (clean ticks, bars and data quality) is implemented and tested on
-synthetic data but **not validated**: its quality report must first run on at least one year of real
-broker ticks, followed by the human review (DQ-008); the owner's decisions on its open questions are
-in ADR 0013. Sprint 3 (datasets, leakage harness, experiment registry, forward-return targets) and
-Sprint 4 (walk-forward, cost model and screener, Sharpe inference, DSR, forecast comparison, the
-evidence gates in `config/gates.yaml`, and the baseline board) are implemented and tested on
-synthetic data only. Sprint 5 is build-only because no real broker data exists: the
+Sprints 1 to 6, 9, 11, 12 A and 12 B are merged. In review: the primary research feed is now
+Dukascopy's XAUUSD bid/ask ticks (UTC, from 2003), with its adapter and a downloader,
+`xq fetch dukascopy`, that the owner runs (ADR 0057; see "Real data" below). The project is
+data-only for now, with no execution venue. Sprints 11 and 12 A ran ahead of Sprints 7-10 while
+real data is pending (ADR 0048, ADR 0051). Sprint 2 (clean ticks, bars and data quality) is
+implemented and tested on synthetic data but **not validated**: its quality report must first run
+on at least one year of real ticks, followed by the human review (DQ-008); the owner's decisions
+on its open questions are in ADR 0013. Sprint 3 (datasets, leakage harness, experiment
+registry, forward-return targets) and Sprint 4 (walk-forward, cost model and screener, Sharpe
+inference, DSR, forecast comparison, the evidence gates in `config/gates.yaml`, and the baseline
+board) are implemented and tested on synthetic data only. Sprint 5 is build-only because no real
+data exists: the
 exploratory-research report (distributions, dependence, seasonality, trend and reversion, cost to
 volatility and horizon admission, all on the discovery window) and experiment conclusions are
 implemented and tested on synthetic data and simulated processes; no EDA report has been generated
@@ -61,10 +63,10 @@ See
 completed backlog tasks and [`docs/STATUS.md`](docs/STATUS.md) for the current sprint, open
 decisions and carry-over items.
 
-Open owner decisions (development plan, section 1): the execution broker, its data feed and its
-cost terms. The source `mt5_primary` in `config/base.yaml` is a provisional placeholder (ADR 0004),
-the cost model is a provisional placeholder (every net result is "screening, placeholder costs"),
-and no real market data is in the repository.
+Open owner decisions: the execution venue and its cost terms. No venue is chosen (ADR 0057), so
+the cost model is a provisional placeholder (every net result is "screening, placeholder costs").
+The primary source is `dukascopy` in `config/base.yaml`, and the MT5 source `mt5_primary` stays as
+an optional adapter (ADR 0004). No real market data is in the repository.
 
 ## Quick start
 
@@ -75,14 +77,15 @@ uv sync            # create the environment from uv.lock
 uv run pytest      # run the test suite
 ```
 
-The data pipeline, shown on the synthetic MT5 fixtures (every step can be re-run safely):
+The data pipeline, shown on the synthetic Dukascopy fixtures (every step can be re-run safely;
+without `--source`, the pipeline reads `data.primary_source`, the Dukascopy source):
 
 ```bash
-uv run xq ingest --source mt5_primary --path tests/fixtures/ticks/   # immutable raw store
-uv run xq clean --source mt5_primary          # flag bad ticks into versioned clean partitions
-uv run xq build-bars --source mt5_primary     # bid/ask/mid bars on 7 timeframes
-uv run xq spread-stats --source mt5_primary   # hour-of-week spread percentiles (pre-vault)
-uv run xq validate --source mt5_primary       # data-quality checks (pre-vault) in reports/quality/
+uv run xq ingest --path tests/fixtures/dukascopy/   # immutable raw store
+uv run xq clean                               # flag bad ticks into versioned clean partitions
+uv run xq build-bars                          # bid/ask/mid bars on 7 timeframes
+uv run xq spread-stats                        # hour-of-week spread percentiles (pre-vault)
+uv run xq validate                            # data-quality checks (pre-vault) in reports/quality/
 uv run xq dataset build experiments/configs/ds_base.yaml   # versioned dataset with targets
 uv run xq exp register experiments/hypotheses/H-XXXX.yaml  # pre-register (copy TEMPLATE.yaml)
 uv run xq exp trials                          # trial counts for multiple-testing corrections
@@ -100,16 +103,74 @@ uv run xq config show                         # resolved configuration, secrets 
 The committed fixtures are sparse (one tick every ~90 s), so `xq validate` reports stale-quote and
 missing-minute failures on them; that is the checks working, not a bug. For the same reason
 `xq dataset build experiments/configs/ds_base.yaml` stops at the quality gate (DQ-007), listing
-every failing fixture day and check: a meaningful base dataset needs real broker history for the
-four years before the vault. The dataset, hypothesis, trial, baseline-board, EDA, conclusion and
-reproduce commands are exercised end to end on dense synthetic weeks in `tests/integration/`, and
-the simulate and validate-strategy commands on the known-truth simulated strategies. The
-board's net figures are screening results while the cost model is a provisional placeholder
-(ADR 0032).
+every failing fixture day and check: a meaningful base dataset needs real history for the four
+years before the vault (see "Real data" below). The MT5 fixtures in `tests/fixtures/ticks/` go
+through the same steps with `--source mt5_primary`. The dataset, hypothesis, trial,
+baseline-board, EDA, conclusion and reproduce commands are exercised end to end on dense
+synthetic weeks in `tests/integration/`, and the simulate and validate-strategy commands on the
+known-truth simulated strategies. The board's net figures are screening results while the cost
+model is a provisional placeholder (ADR 0032).
 
 Or in Docker (research profile; `data/`, `logs/` and `reports/` are mounted from the host):
 
 ```bash
 docker compose --profile research build
 docker compose --profile research run --rm xq xq --version
+```
+
+## Real data: Dukascopy XAUUSD ticks
+
+The primary research feed is Dukascopy's XAUUSD bid/ask tick history (UTC timestamps, ticks
+from 2003-05-05), source `dukascopy` in `config/base.yaml` (ADR 0057). The research sandbox has
+no internet access, so the download runs on your machine:
+
+```bash
+uv run xq fetch dukascopy --instrument xauusd --from 2003-05-05 --to 2026-09-27 --out data/downloads
+```
+
+- **Output.** Under `data/`, which is git-ignored: market data is never committed. One file per
+  UTC hour with ticks, exactly the vendor's bytes (LZMA-compressed records), at
+  `data/downloads/XAUUSD/<yyyy>/<mm>/<dd>/XAUUSD_<yyyy-mm-dd>_<HH>h_ticks.bi5`. Hours without
+  ticks get no file.
+- **Checksummed.** `data/downloads/XAUUSD/manifest.jsonl` has one line per hour: `ok` with the
+  file's SHA-256, size and record count, or `empty`; the URL, HTTP status and fetch time. A
+  payload is kept only if it decodes into whole records inside its hour.
+- **Resumable and safe.** Stop it at any time (Ctrl-C) and run the same command again: hours in
+  the manifest are verified against their SHA-256 and not requested again. A file is never
+  overwritten or repaired; a mismatch stops the run and names the file. A lock file keeps a
+  second download out of the same folder (delete `data/downloads/XAUUSD/.fetch.lock` only if no
+  download is running).
+- **Polite.** One request at a time, at most two a second, with retries and exponential backoff
+  on errors (`sources.dukascopy.download` in `config/base.yaml`). The full history is about
+  205,000 hourly requests, so expect more than a day in total; it can run in pieces, for example
+  a year at a time, and the order does not matter.
+- **Empty hours.** An hour inside market hours that comes back empty is asked again once, and it
+  is recorded as empty only once a later hour brings ticks. A day or more of empty market hours
+  in a row stops the run: the endpoint is more likely failing than the market silent.
+  `--retry-empty` asks again for hours recorded empty.
+- **`--to` must be before today (UTC)**; `--from` may not be earlier than 2003-05-05.
+
+**If the download fails with timeouts.** Since 7 July 2026 `datafeed.dukascopy.com`, the endpoint
+that serves the `.bi5` files, has been reported to time out, and dukascopy-node moved to a JSON
+API in response (ADR 0057). It could not be tested from the sandbox. If `xq fetch` stops with
+"no answer (timed out) after 4 attempts", use dukascopy-node (Node.js) instead, one CSV per month
+with Unix-millisecond timestamps (the default) and volumes; `-to` is exclusive:
+
+```bash
+npx dukascopy-node -i xauusd -from 2024-03-01 -to 2024-04-01 -t tick -f csv -v \
+  -bs 5 -bp 1000 -r 3 -re -dir data/downloads/csv -fn XAUUSD_2024-03
+```
+
+The `dukascopy` source reads these CSVs (`timestamp,askPrice,bidPrice,askVolume,bidVolume`)
+too. Keep the default UTC offset (`-utc 0`), and do not ingest both formats for the same
+period.
+
+Then run the pipeline on the downloaded files (each step can be re-run safely):
+
+```bash
+uv run xq ingest --source dukascopy --path data/downloads/XAUUSD   # or data/downloads/csv
+uv run xq clean --source dukascopy
+uv run xq build-bars --source dukascopy
+uv run xq spread-stats --source dukascopy
+uv run xq validate --source dukascopy        # quality report in reports/quality/ (pre-vault)
 ```

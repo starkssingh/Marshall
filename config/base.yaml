@@ -28,10 +28,40 @@ vault:
   # 2025-09-25, EDT). Changing it requires an ADR.
   start: "2025-09-25T21:00:00Z"
 
+data:
+  # The primary research feed (ADR 0057, superseding ADR 0004's choice): pipeline commands read it
+  # when no --source is given, and the base dataset spec names it.
+  primary_source: dukascopy
+
 sources:
-  # Provisional primary feed: the execution broker's MT5 tick export (ADR 0004). The broker is not
-  # yet named; confirm vendor, venue and clock before ingesting real data. Changing `clock` for a
-  # source that already has ingested files is refused: declare a new source id instead.
+  # Changing `clock` for a source that already has ingested files is refused: declare a new source
+  # id instead.
+  #
+  # Primary: Dukascopy XAUUSD bid/ask ticks (DATA-013, ADR 0057), UTC timestamps, tick history
+  # from 2003-05-05. Reads the native hourly files `xq fetch dukascopy` downloads
+  # (<SYMBOL>_<YYYY-MM-DD>_<HH>h_ticks.bi5) and dukascopy-node tick CSVs.
+  dukascopy:
+    adapter: dukascopy_ticks
+    vendor: "Dukascopy Bank SA"
+    feed_type: vendor_ticks
+    venue: dukascopy
+    price_type: bid_ask_ticks
+    clock: "UTC"
+    instrument: xauusd
+    file_patterns: ["*.bi5", "*.csv"]
+    vendor_symbol: XAUUSD
+    point_scale: 1000      # integer points per USD in .bi5 records (2034155 = 2034.155)
+    download:              # `xq fetch dukascopy`, run on a machine with internet access
+      base_url: "https://datafeed.dukascopy.com/datafeed"
+      history_start: "2003-05-05"   # first XAUUSD tick hour at the vendor (00:01 UTC)
+      min_interval_s: 0.5           # at most two requests a second, one at a time
+      timeout_s: 30
+      max_attempts: 4               # then the run stops; rerunning resumes
+      backoff_s: 2.0                # 2 s, 4 s, 8 s between attempts
+      empty_retry_pause_s: 5.0      # an empty in-market hour is asked again once
+      max_empty_open_hours: 24      # consecutive empty in-market hours that stop the run
+  # Optional: an MT5 broker's tick export (ADR 0004). No execution venue is chosen (ADR 0057); if
+  # one is, confirm vendor, venue and clock before ingesting its data.
   mt5_primary:
     adapter: mt5_ticks
     vendor: "MT5 broker (to be named)"

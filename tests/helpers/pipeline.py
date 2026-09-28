@@ -26,23 +26,27 @@ def config(root: Path, **overrides: Any) -> AppConfig:
 
 
 def run_pipeline(
-    cfg: AppConfig, *source_dirs: Path, bars: bool = True, spreads: bool = True
+    cfg: AppConfig,
+    *source_dirs: Path,
+    bars: bool = True,
+    spreads: bool = True,
+    source: str = "mt5_primary",
 ) -> Engine:
-    """Ingest `source_dirs` as mt5_primary, then clean and optionally build bars and spreads."""
+    """Ingest `source_dirs` as `source`, then clean and optionally build bars and spreads."""
     engine = create_db_engine(cfg.database_url())
     upgrade_to_head(engine, REPO / "migrations")
     for number, directory in enumerate(source_dirs):
         ingest(
             cfg,
-            "mt5_primary",
+            source,
             directory,
             engine=engine,
             run_id=f"01RUN{number:021d}",
             git_sha="test",
         )
-    build_clean(cfg, engine, "mt5_primary")
+    build_clean(cfg, engine, source)
     if bars:
-        build_bar_sets(cfg, engine, "mt5_primary")
+        build_bar_sets(cfg, engine, source)
     if spreads:
-        build_spread_stats(cfg, engine, "mt5_primary")
+        build_spread_stats(cfg, engine, source)
     return engine

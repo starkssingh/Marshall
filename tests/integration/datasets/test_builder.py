@@ -237,5 +237,6 @@ def test_cli_dataset_build_and_show(tmp_path: Path, clean_week_dir: Path) -> Non
 def test_base_spec_is_valid() -> None:
     spec = load_spec(REPO / "experiments" / "configs" / "ds_base.yaml")
     assert spec.name == "ds_base"
+    assert spec.source == "dukascopy"  # the primary research feed (ADR 0057)
     assert spec.end == pd.Timestamp("2025-09-25T21:00:00Z")
     assert [tf.value for tf in spec.context_timeframes] == ["1h", "4h", "1d"]
