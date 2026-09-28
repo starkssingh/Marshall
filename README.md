@@ -75,14 +75,15 @@ uv sync            # create the environment from uv.lock
 uv run pytest      # run the test suite
 ```
 
-The data pipeline, shown on the synthetic MT5 fixtures (every step can be re-run safely):
+The data pipeline, shown on the synthetic Dukascopy fixtures (every step can be re-run safely;
+without `--source`, the pipeline reads `data.primary_source`, the Dukascopy source):
 
 ```bash
-uv run xq ingest --source mt5_primary --path tests/fixtures/ticks/   # immutable raw store
-uv run xq clean --source mt5_primary          # flag bad ticks into versioned clean partitions
-uv run xq build-bars --source mt5_primary     # bid/ask/mid bars on 7 timeframes
-uv run xq spread-stats --source mt5_primary   # hour-of-week spread percentiles (pre-vault)
-uv run xq validate --source mt5_primary       # data-quality checks (pre-vault) in reports/quality/
+uv run xq ingest --path tests/fixtures/dukascopy/   # immutable raw store
+uv run xq clean                               # flag bad ticks into versioned clean partitions
+uv run xq build-bars                          # bid/ask/mid bars on 7 timeframes
+uv run xq spread-stats                        # hour-of-week spread percentiles (pre-vault)
+uv run xq validate                            # data-quality checks (pre-vault) in reports/quality/
 uv run xq dataset build experiments/configs/ds_base.yaml   # versioned dataset with targets
 uv run xq exp register experiments/hypotheses/H-XXXX.yaml  # pre-register (copy TEMPLATE.yaml)
 uv run xq exp trials                          # trial counts for multiple-testing corrections
@@ -100,12 +101,13 @@ uv run xq config show                         # resolved configuration, secrets 
 The committed fixtures are sparse (one tick every ~90 s), so `xq validate` reports stale-quote and
 missing-minute failures on them; that is the checks working, not a bug. For the same reason
 `xq dataset build experiments/configs/ds_base.yaml` stops at the quality gate (DQ-007), listing
-every failing fixture day and check: a meaningful base dataset needs real broker history for the
-four years before the vault. The dataset, hypothesis, trial, baseline-board, EDA, conclusion and
-reproduce commands are exercised end to end on dense synthetic weeks in `tests/integration/`, and
-the simulate and validate-strategy commands on the known-truth simulated strategies. The
-board's net figures are screening results while the cost model is a provisional placeholder
-(ADR 0032).
+every failing fixture day and check: a meaningful base dataset needs real history for the four
+years before the vault (see "Real data" below). The MT5 fixtures in `tests/fixtures/ticks/` go
+through the same steps with `--source mt5_primary`. The dataset, hypothesis, trial,
+baseline-board, EDA, conclusion and reproduce commands are exercised end to end on dense
+synthetic weeks in `tests/integration/`, and the simulate and validate-strategy commands on the
+known-truth simulated strategies. The board's net figures are screening results while the cost
+model is a provisional placeholder (ADR 0032).
 
 Or in Docker (research profile; `data/`, `logs/` and `reports/` are mounted from the host):
 

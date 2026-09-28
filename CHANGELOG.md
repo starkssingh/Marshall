@@ -991,6 +991,13 @@ IDs from `docs/specs/development-plan.md`.
   gains the stop leg and its cancellation), the financing, constraint and reconciliation tests
   give their intents stops and, where halts would interrupt another mechanism under test, use the
   real engine with halts that cannot bind.
+- DATA-013 (owner's decision, ADR 0057, superseding ADR 0004's primary-feed choice): the primary
+  research feed is Dukascopy. `config/base.yaml` gains `data.primary_source: dukascopy`
+  (`DataConfig`, validated against the declared sources); `xq ingest`, `rebuild-mirror`,
+  `clean`, `build-bars`, `spread-stats` and `validate` take `--source` optionally and read the
+  primary source without it; `experiments/configs/ds_base.yaml` names `dukascopy`. `mt5_primary`
+  stays declared as an optional source. The README's quick start runs on the synthetic Dukascopy
+  fixtures.
 
 ### Fixed
 

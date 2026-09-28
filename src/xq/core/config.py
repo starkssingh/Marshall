@@ -1570,6 +1570,12 @@ class SourceConfig(FrozenModel):
         return ClockConvention.parse(self.clock)
 
 
+class DataConfig(FrozenModel):
+    """Which declared source the data pipeline reads when a command names none (ADR 0057)."""
+
+    primary_source: str
+
+
 class SecretsConfig(FrozenModel):
     """Credentials. Only ever supplied through ``XQ_SECRETS__*`` environment variables."""
 
@@ -1597,6 +1603,7 @@ class AppConfig(BaseSettings):
     instruments: dict[str, InstrumentSpec] = {}
     sessions: SessionsConfig | None = None
     sources: dict[str, SourceConfig] = {}
+    data: DataConfig | None = None
     cleaning: CleaningConfig | None = None
     bars: BarsConfig | None = None
     quality: QualityConfig | None = None
@@ -1644,7 +1651,15 @@ class AppConfig(BaseSettings):
                 raise ValueError(
                     f"source {source_id!r} refers to unknown instrument {source.instrument!r}"
                 )
+        if self.data is not None and self.data.primary_source not in self.sources:
+            raise ValueError(f"data.primary_source {self.data.primary_source!r} is not a source")
         return self
+
+    def primary_source(self) -> str:
+        """The source pipeline commands use by default (``data.primary_source``)."""
+        if self.data is None:
+            raise ConfigError("no primary source (data.primary_source in config/base.yaml)")
+        return self.data.primary_source
 
     def source(self, source_id: str) -> SourceConfig:
         """Return the configuration of `source_id`."""

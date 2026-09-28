@@ -229,7 +229,7 @@ def test_misdeclared_clock_fails_calendar_checks(
     assert gap_failures == closed_failures == set(WEEK)
 
 
-def test_cli_ingests_hourly_files(tmp_path: Path) -> None:
+def test_cli_reads_the_primary_source_by_default(tmp_path: Path) -> None:
     common = [
         "--config-dir",
         str(REPO / "config"),
@@ -241,8 +241,17 @@ def test_cli_ingests_hourly_files(tmp_path: Path) -> None:
         "logging.console=false",
     ]
     runner = CliRunner()
-    result = runner.invoke(
-        app, [*common, "ingest", "--source", "dukascopy", "--path", str(BI5_DIR)]
-    )
+    result = runner.invoke(app, [*common, "ingest", "--path", str(BI5_DIR)])  # no --source
     assert result.exit_code == 0, result.output
     assert f"ingested {len(hour_records(bi5_fixture_quotes()))} file(s)" in result.stdout
+    for step in (["clean"], ["build-bars"], ["validate"]):
+        done = runner.invoke(app, [*common, *step])
+        assert done.exit_code == 0, done.output
+    engine = create_db_engine(config(tmp_path).database_url())
+    with session_factory(engine)() as session:
+        sources = set(session.scalars(select(RawFile.source_id)))
+    engine.dispose()
+    assert sources == {"dukascopy"}
+    unknown = runner.invoke(app, [*common, "clean", "--source", "nope"])
+    assert unknown.exit_code == 2
+    assert "unknown source 'nope'" in unknown.output
