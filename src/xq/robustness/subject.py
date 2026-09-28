@@ -28,7 +28,7 @@ from xq.robustness.costs_stress import CostStressResult
 from xq.robustness.noise import NoiseKind, NoisyEvaluate
 from xq.robustness.perturb import Evaluate, Parameter
 from xq.robustness.slicing import DeclaredSlices
-from xq.tracking.trials import effective_trials
+from xq.tracking.trials import cluster_trials
 from xq.validation.sharpe import sharpe_ratio
 
 #: Columns of `StrategySubject.trades`, one row per closed trade.
@@ -71,19 +71,18 @@ def family_trials(
     periods_per_year: int,
 ) -> TrialSummary:
     """The trials of a family counted the way the registry counts them (EXP-004): every
-    configuration is a raw trial, the effective count clusters their daily returns by
-    correlation, and the variance is that of their annualized Sharpe ratios."""
+    configuration is a raw trial, the effective count clusters their daily returns by absolute
+    correlation, and the variance is that of their annualized Sharpe ratios across clusters
+    (`xq.tracking.trials`)."""
     starts = pd.DatetimeIndex([trading_day_bounds(d)[0] for d in family.index])
-    series = {
-        str(c): pd.Series(family[c].to_numpy(np.float64), index=starts) for c in family.columns
-    }
+    series = [pd.Series(family[c].to_numpy(np.float64), index=starts) for c in family.columns]
     root = np.sqrt(periods_per_year)
-    sharpes = np.array([sharpe_ratio(s.to_numpy()) * root for s in series.values()])
-    variance = float(np.var(sharpes, ddof=1)) if len(sharpes) > 1 else 0.0
+    sharpes: list[float | None] = [float(sharpe_ratio(s.to_numpy()) * root) for s in series]
+    clusters = cluster_trials(series, clustering)
     return TrialSummary(
         n_raw=len(series),
-        n_effective=float(effective_trials(series, clustering)),
-        sharpe_variance=variance,
+        n_effective=float(clusters.n_clusters),
+        sharpe_variance=clusters.sharpe_variance(sharpes) or 0.0,
         gated=gated,
     )
 

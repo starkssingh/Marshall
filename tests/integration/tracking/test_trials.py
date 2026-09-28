@@ -1,4 +1,5 @@
-"""EXP-004: every evaluated configuration is counted; near-duplicate trials count once."""
+"""EXP-004: every evaluated configuration is counted; near-duplicate trials count once, and so
+does a rule and its mirror image (absolute correlation, C-25, ADR 0057)."""
 
 import subprocess
 from collections.abc import Iterator
@@ -17,7 +18,7 @@ from xq.core.errors import NaiveTimestampError
 from xq.tracking import registry
 from xq.tracking.db import create_db_engine, upgrade_to_head
 from xq.tracking.runs import experiment_run
-from xq.tracking.trials import daily_returns, effective_trials, trial_count
+from xq.tracking.trials import cluster_trials, daily_returns, effective_trials, trial_count
 
 PARAMS = TrialClusteringConfig(correlation_threshold=0.7, min_common_days=60)
 INDEX = pd.date_range("2024-01-01 22:00", periods=100 * 24, freq="1h", tz="UTC")  # 100 days
@@ -61,6 +62,65 @@ def test_near_duplicates_count_once() -> None:
     assert effective_trials(series, PARAMS) == 4  # one cluster of three plus three singletons
     assert effective_trials({}, PARAMS) == 0
     assert effective_trials({"a": series["a"]}, PARAMS) == 1
+
+
+def rules_and_mirrors() -> tuple[dict[str, pd.Series], dict[str, pd.Series]]:
+    """Five rules (two near-duplicates) net of costs, and their mirror images: the same signals
+    traded the other way, which pay the same costs."""
+    common = np.random.default_rng(0).normal(0, 1, len(INDEX))
+    gross = {
+        "trend_10": returns(1, common, 0.1),
+        "trend_12": returns(2, common, 0.1),
+        "carry": returns(3),
+        "value": returns(4),
+        "breakout": returns(5),
+    }
+    costs = {name: 0.02 * (i + 1) for i, name in enumerate(gross)}
+    rules = {name: r - costs[name] for name, r in gross.items()}
+    mirrors = {f"{name}~mirror": -r - costs[name] for name, r in gross.items()}
+    return rules, mirrors
+
+
+def test_a_rule_and_its_mirror_image_are_one_trial() -> None:
+    rules, mirrors = rules_and_mirrors()
+    alone = cluster_trials(list(rules.values()), PARAMS)
+    both = cluster_trials([*rules.values(), *mirrors.values()], PARAMS)
+    assert alone.n_clusters == both.n_clusters == 4  # the trend pair, and three singletons
+    assert effective_trials({**rules, **mirrors}, PARAMS) == 4
+    # each mirror sits in its rule's cluster, trading the other way
+    assert both.labels[5:] == both.labels[:5]
+    assert both.signs[:5] == alone.signs == (1.0,) * 5
+    assert both.signs[5:] == (-1.0,) * 5
+    # a mirror adds nothing to the variance: its Sharpe ratio is left out, not negated (negating
+    # a net return would count its costs as income)
+    sharpes = [0.4, 0.5, -0.3, 0.8, -1.2]
+    mirrored = [-0.6, -0.7, 0.1, -1.0, 1.0]
+    assert both.sharpe_variance([*sharpes, *mirrored]) == alone.sharpe_variance(sharpes)
+    assert alone.sharpe_variance(sharpes) == pytest.approx(np.var([0.45, -0.3, 0.8, -1.2], ddof=1))
+
+
+def test_a_family_with_mirrors_counts_like_the_rules_alone(cfg: AppConfig, engine: Engine) -> None:
+    """The registry's counts (C-25 (2)): a family holding each rule and its mirror image has the
+    same effective trial count and Sharpe variance as the rules alone."""
+    rules, mirrors = rules_and_mirrors()
+    with experiment_run(
+        cfg, engine, "H-0001", {}, kind="baseline", seed=1, exploratory=True
+    ) as run:
+        for family, members in (("rules", rules), ("mirrored", {**rules, **mirrors})):
+            for name, r in members.items():
+                daily = daily_returns(r)
+                run.record_trial(
+                    family_id=family,
+                    config={"rule": name},
+                    evaluated_on_test=True,
+                    sharpe=float(daily.mean() / daily.std() * np.sqrt(252)),
+                    returns=r,
+                )
+    alone, both = trial_count(cfg, engine, "rules"), trial_count(cfg, engine, "mirrored")
+    assert (alone.n_trials, both.n_trials) == (5, 10)
+    assert alone.effective_n == both.effective_n == 4
+    assert alone.sharpe_variance is not None
+    assert both.sharpe_variance == pytest.approx(alone.sharpe_variance)
 
 
 def test_too_little_overlap_counts_as_independent() -> None:
@@ -118,7 +178,9 @@ def test_every_trial_is_counted_per_family_and_globally(cfg: AppConfig, engine: 
     assert momentum.n_trials == 4
     assert momentum.n_test_evaluations == 3
     assert momentum.effective_n == 2  # three near-duplicates, plus one trial without returns
-    assert momentum.sharpe_variance == pytest.approx(np.var([0.0, 0.1, 0.2, 0.5], ddof=1))
+    # the variance is across clusters (C-25): the near-duplicates' mean Sharpe ratio (0.1) and the
+    # trial without returns (0.5), not the four raw trials
+    assert momentum.sharpe_variance == pytest.approx(np.var([0.1, 0.5], ddof=1))
     everything = trial_count(cfg, engine)
     assert (everything.family_id, everything.n_trials, everything.effective_n) == (None, 5, 3)
     assert trial_count(cfg, engine, "none").n_trials == 0

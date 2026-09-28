@@ -2,8 +2,8 @@
 
 - **Status:** accepted
 - **Date:** 2026-09-28
-- **Decided by:** project owner, at the Sprint 12 B review (C-25); amends ADR 0054, ADR 0055 and
-  ADR 0056
+- **Decided by:** project owner, at the Sprint 12 B review (C-25); amends ADR 0023 (trial
+  clustering), ADR 0054, ADR 0055 and ADR 0056
 - **Tasks:** VAL-002, VAL-003, VAL-004, EXP-004, ROB-001, ROB-008, `xq validate-strategy`
 
 Everything here runs on synthetic data and simulated strategies only. Nothing has run on real
@@ -64,3 +64,59 @@ rule.
   0.94.
 - The single-point optimum on noise (50 independent configurations) keeps PBO applicable and
   still fails it.
+
+## 2. Trial clustering uses the absolute correlation
+
+**Decision.** Trials are clustered on the absolute correlation of their daily returns
+(|ρ| ≥ 0.7 on average, at least 60 common trading days), so mirror-image rules form one cluster.
+A family holding a rule and its mirror has the same effective N and the same Sharpe variance as
+the rule alone.
+
+**Why.** A rule and its mirror (the same signal traded the other way) are one choice: which side
+to take. Counted as two independent trials they doubled N, and their Sharpe ratios `s` and about
+`-s` inflated the variance of the trial Sharpe ratios that sets the deflated Sharpe ratio's
+benchmark. The simulated genuine family with its mirrors added had a DSR of 0.007–0.31 over
+seeds 0–5, against 0.95–1.00 for the rules alone (ADR 0056 found the same with a hand-built
+mirror family).
+
+**Implementation** (`xq.tracking.trials`).
+
+- `cluster_trials` clusters by average linkage on `1 - |ρ|`, cut at `1 - 0.7`, with the frozen
+  parameters of `experiments.trial_clustering` (unchanged). Pairs with fewer than 60 common days
+  and trials without returns still count as independent.
+- **The Sharpe variance follows the clusters.** Equal N is not enough: the variance over raw
+  trials still counts the mirror's `-s`. The variance is now taken across clusters, one value per
+  cluster, so it matches the count it is used with (the DSR's benchmark is the expected maximum
+  of N independent trials with variance V):
+  - each cluster's value is the mean recorded Sharpe ratio of its members that trade in the same
+    direction as its anchor, the first of its trials in recording order with a Sharpe ratio;
+  - a member trades in the anchor's direction when its returns correlate positively with it;
+  - a mirror's Sharpe ratio is left out, not negated. A negated net return would count its costs
+    as income. A first version negated it, and the variance of the genuine family with its
+    realistic mirrors fell to half that of the rules alone (0.112 against 0.219 on seed 0), the
+    lenient direction;
+  - a trial without returns is its own cluster with its own Sharpe ratio.
+- The registry's `trial_count` and the subject's `family_trials` share this code, so a recorded
+  run and a simulated subject are counted alike.
+
+**What changed for existing families.** Families without mirrors keep their effective N. Their
+Sharpe variance moves slightly, because near-duplicates now contribute their mean once instead of
+each contributing its own value:
+
+| Simulated family | Effective N | Sharpe variance before → after | DSR of the candidate before → after |
+| --- | --- | --- | --- |
+| genuine, seeds 0–5 | 6–7 (unchanged) | 0.116–0.408 → 0.118–0.353 | 0.919–1.000 → 0.953–1.000 |
+| overfit, seeds 0–5 | 50 (unchanged) | unchanged (every trial its own cluster) | unchanged, 0.148–0.336 |
+| genuine with its mirrors | 12–14 → 6–7 | 0.550–1.412 → equal to the rules alone | 0.007–0.310 → equal to the rules alone |
+
+The fixture expectation in `test_trials.py` changed with the definition: its three
+near-duplicates now contribute their mean Sharpe ratio once (variance of 0.1 and 0.5, where it was
+the variance of 0.0, 0.1, 0.2 and 0.5).
+
+**Known truth** (`tests/integration/tracking/test_trials.py`). Five rules net of costs, two of
+them near-duplicates, and their mirrors, which pay the same costs:
+
+- the rules alone and the rules with their mirrors both have 4 clusters, each mirror in its
+  rule's cluster with the opposite sign;
+- the Sharpe variance with the mirrors equals that of the rules alone, in the clustering and
+  through the registry's `trial_count` of two recorded families.

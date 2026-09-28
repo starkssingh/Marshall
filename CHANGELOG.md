@@ -767,6 +767,17 @@ IDs from `docs/specs/development-plan.md`.
   it `incomplete`. Tested: the simulated genuine edge chosen among near-identical configurations
   (1 effective trial, CSCV PBO 0.52) is no longer failed by PBO and passes its significance
   criteria; the overfit family of 50 dispersed configurations still fails PBO.
+- C-25 (2) (owner's decision, ADR 0057), EXP-004: trial clustering uses the absolute
+  correlation (|ρ| ≥ 0.7, at least 60 common days; the frozen parameters are unchanged), so a rule
+  and its mirror image are one cluster. The Sharpe variance that feeds the deflated Sharpe ratio is
+  now taken across clusters: each cluster contributes the mean Sharpe ratio of its members trading
+  in its anchor's direction (a mirror is left out, never negated, since a negated net return would
+  count costs as income). `cluster_trials` is shared by `trial_count` and the subject's
+  `family_trials`. Tested: a family of rules with their mirrors (net of the same costs) has the
+  same effective N and Sharpe variance as the rules alone, in the clustering and through the
+  registry. On the simulated genuine family with mirrors the DSR no longer collapses (0.007–0.31
+  before, now equal to the rules alone). The `test_trials.py` fixture's variance changed with the
+  definition (its near-duplicates count once).
 - C-24 (1) (owner's decision, ADR 0055), VAL-004: SPA and the Reality Check always take their
   block length from the gates' bootstrap convention (`family_tests(..., bootstrap=...)`, no block
   argument). The size simulation was re-run under it: with AR(1) φ = 0.4, 400 periods and 8
