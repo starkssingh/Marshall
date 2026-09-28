@@ -55,6 +55,15 @@ sources:
     file_patterns: ["*.bi5", "*.csv"]
     vendor_symbol: XAUUSD
     point_scale: 1000      # integer points per USD in .bi5 records (2034155 = 2034.155)
+    download:              # `xq fetch dukascopy`, run on a machine with internet access
+      base_url: "https://datafeed.dukascopy.com/datafeed"
+      history_start: "2003-05-05"   # first XAUUSD tick hour at the vendor (00:01 UTC)
+      min_interval_s: 0.5           # at most two requests a second, one at a time
+      timeout_s: 30
+      max_attempts: 4               # then the run stops; rerunning resumes
+      backoff_s: 2.0                # 2 s, 4 s, 8 s between attempts
+      empty_retry_pause_s: 5.0      # an empty in-market hour is asked again once
+      max_empty_open_hours: 24      # consecutive empty in-market hours that stop the run
 
 cleaning:
   # Non-destructive tick cleaning (DATA-007, ADR 0006). Every rule sets a flag bit; the rules

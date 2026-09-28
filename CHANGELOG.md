@@ -778,6 +778,28 @@ IDs from `docs/specs/development-plan.md`.
   sides of each change, reading the files as `NY+7` is detected, a clean week of hourly files
   passes every quality check through ingest, cleaning, bars and `xq validate`, re-ingest is a
   no-op, and a property test reads back any hour of records exactly.
+- DATA-013: `xq fetch dukascopy --instrument xauusd --from YYYY-MM-DD --to YYYY-MM-DD --out
+  <dir>` (`xq.data.adapters.dukascopy_fetch`), the downloader the owner runs on a machine with
+  internet access. It stores each UTC hour's `.bi5` file unchanged under
+  `<out>/XAUUSD/<yyyy>/<mm>/<dd>/` and appends a line per hour to `manifest.jsonl` (status, URL,
+  HTTP status, SHA-256, size, record count). It is:
+  - resumable: recorded hours are re-hashed, not requested again; a file without a manifest line
+    is adopted after a decoding check; a partial last manifest line is cut off;
+  - safe: files are placed through a hidden `.part` file and a hard link, so none is ever
+    overwritten or repaired; a mismatch stops the run; a lock file keeps a second download out;
+  - polite: one request at a time, at least 0.5 s apart, retries with exponential backoff on
+    network errors, timeouts, 429 and 5xx, then a stop that names the dukascopy-node CSV
+    fallback (the `.bi5` endpoint has been reported to time out since July 2026, ADR 0057);
+  - wary of empty answers: a 404 or an empty body is an hour without ticks, but an empty hour
+    inside the calendar's market hours is asked again once and recorded only when a later hour
+    brings ticks; 24 in a row stop the run; `--retry-empty` asks again for recorded empty hours.
+
+  `--to` must be before today (UTC) and `--from` not before 2003-05-05. Settings in
+  `sources.dukascopy.download` (`DownloadConfig`). Tested against a scripted vendor with a fake
+  clock (pacing, backoff, resume after an interruption, tampered, missing and unrecorded files,
+  empty and dead endpoints, the lock) and against a local HTTP server through the real transport
+  and the CLI, then `xq ingest`. No new dependency (`urllib`, `lzma`). README: how to download,
+  the fallback and the pipeline commands.
 
 ### Changed
 

@@ -113,3 +113,60 @@ Or in Docker (research profile; `data/`, `logs/` and `reports/` are mounted from
 docker compose --profile research build
 docker compose --profile research run --rm xq xq --version
 ```
+
+## Real data: Dukascopy XAUUSD ticks
+
+The primary research feed is Dukascopy's XAUUSD bid/ask tick history (UTC timestamps, ticks
+from 2003-05-05), source `dukascopy` in `config/base.yaml` (ADR 0057). The research sandbox has
+no internet access, so the download runs on your machine:
+
+```bash
+uv run xq fetch dukascopy --instrument xauusd --from 2003-05-05 --to 2026-09-27 --out data/downloads
+```
+
+- **Output.** Under `data/`, which is git-ignored: market data is never committed. One file per
+  UTC hour with ticks, exactly the vendor's bytes (LZMA-compressed records), at
+  `data/downloads/XAUUSD/<yyyy>/<mm>/<dd>/XAUUSD_<yyyy-mm-dd>_<HH>h_ticks.bi5`. Hours without
+  ticks get no file.
+- **Checksummed.** `data/downloads/XAUUSD/manifest.jsonl` has one line per hour: `ok` with the
+  file's SHA-256, size and record count, or `empty`; the URL, HTTP status and fetch time. A
+  payload is kept only if it decodes into whole records inside its hour.
+- **Resumable and safe.** Stop it at any time (Ctrl-C) and run the same command again: hours in
+  the manifest are verified against their SHA-256 and not requested again. A file is never
+  overwritten or repaired; a mismatch stops the run and names the file. A lock file keeps a
+  second download out of the same folder (delete `data/downloads/XAUUSD/.fetch.lock` only if no
+  download is running).
+- **Polite.** One request at a time, at most two a second, with retries and exponential backoff
+  on errors (`sources.dukascopy.download` in `config/base.yaml`). The full history is about
+  205,000 hourly requests, so expect more than a day in total; it can run in pieces, for example
+  a year at a time, and the order does not matter.
+- **Empty hours.** An hour inside market hours that comes back empty is asked again once, and it
+  is recorded as empty only once a later hour brings ticks. A day or more of empty market hours
+  in a row stops the run: the endpoint is more likely failing than the market silent.
+  `--retry-empty` asks again for hours recorded empty.
+- **`--to` must be before today (UTC)**; `--from` may not be earlier than 2003-05-05.
+
+**If the download fails with timeouts.** Since 7 July 2026 `datafeed.dukascopy.com`, the endpoint
+that serves the `.bi5` files, has been reported to time out, and dukascopy-node moved to a JSON
+API in response (ADR 0057). It could not be tested from the sandbox. If `xq fetch` stops with
+"no answer (timed out) after 4 attempts", use dukascopy-node (Node.js) instead, one CSV per month
+with Unix-millisecond timestamps (the default) and volumes; `-to` is exclusive:
+
+```bash
+npx dukascopy-node -i xauusd -from 2024-03-01 -to 2024-04-01 -t tick -f csv -v \
+  -bs 5 -bp 1000 -r 3 -re -dir data/downloads/csv -fn XAUUSD_2024-03
+```
+
+The `dukascopy` source reads these CSVs (`timestamp,askPrice,bidPrice,askVolume,bidVolume`)
+too. Keep the default UTC offset (`-utc 0`), and do not ingest both formats for the same
+period.
+
+Then run the pipeline on the downloaded files (each step can be re-run safely):
+
+```bash
+uv run xq ingest --source dukascopy --path data/downloads/XAUUSD   # or data/downloads/csv
+uv run xq clean --source dukascopy
+uv run xq build-bars --source dukascopy
+uv run xq spread-stats --source dukascopy
+uv run xq validate --source dukascopy        # quality report in reports/quality/ (pre-vault)
+```

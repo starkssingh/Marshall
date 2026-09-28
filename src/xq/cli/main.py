@@ -34,6 +34,7 @@ from xq.core.errors import ConfigError, XQError
 from xq.core.ids import git_sha, new_ulid
 from xq.core.logging import configure_logging, shutdown_logging
 from xq.core.time import ensure_utc
+from xq.data.adapters.dukascopy_fetch import DayProgress, fetch_dukascopy
 from xq.data.bars import build_bar_sets
 from xq.data.clean import build_clean
 from xq.data.raw_store import ingest, rebuild_mirror, verify_raw_store
@@ -346,6 +347,87 @@ def verify_raw_command(ctx: typer.Context) -> None:
     if problems:
         raise typer.Exit(1)
     typer.echo("raw store verified: every file matches its manifest entry")
+
+
+fetch_app = typer.Typer(
+    help="Download vendor data to local files (run on a machine with internet access).",
+    no_args_is_help=True,
+)
+app.add_typer(fetch_app, name="fetch")
+
+
+@fetch_app.command("dukascopy")
+def fetch_dukascopy_command(
+    ctx: typer.Context,
+    instrument: Annotated[str, typer.Option("--instrument", help="Instrument id, e.g. xauusd.")],
+    first: Annotated[datetime, typer.Option("--from", formats=["%Y-%m-%d"], help="First UTC day.")],
+    last: Annotated[
+        datetime,
+        typer.Option("--to", formats=["%Y-%m-%d"], help="Last UTC day (inclusive; before today)."),
+    ],
+    out: Annotated[
+        Path, typer.Option("--out", help="Output directory; files go below <out>/<SYMBOL>/.")
+    ],
+    source: Annotated[
+        str, typer.Option("--source", help="Configured Dukascopy source.")
+    ] = "dukascopy",
+    retry_empty: Annotated[
+        bool, typer.Option("--retry-empty", help="Ask again for hours recorded empty.")
+    ] = False,
+) -> None:
+    """Download Dukascopy hourly tick files (.bi5) with a SHA-256 manifest (ADR 0057).
+
+    One polite request at a time; resumable (hours in <out>/<SYMBOL>/manifest.jsonl are verified,
+    not fetched again); never overwrites a file. Then:
+    xq ingest --source dukascopy --path <out>/<SYMBOL>"""
+    state: CliContext = ctx.obj
+    with cli_errors():
+        cfg = state.config
+        declared = cfg.source(source)
+        if declared.instrument != instrument.lower():
+            raise ConfigError(
+                f"source {source!r} is declared for {declared.instrument!r}, not {instrument!r}"
+            )
+        configure_logging(
+            cfg, run_id=new_ulid(), git_sha=git_sha(cfg.paths.resolve(cfg.paths.root))
+        )
+        try:
+            result = fetch_dukascopy(
+                cfg,
+                source,
+                first.date(),
+                last.date(),
+                out,
+                retry_empty=retry_empty,
+                on_day=_echo_day,
+            )
+        finally:
+            shutdown_logging()
+    typer.echo(
+        f"{result.fetched} hour(s) fetched, {result.empty} empty "
+        f"({result.empty_in_market} inside market hours), "
+        f"{result.already_present + result.adopted} already present; "
+        f"{result.requests} request(s); files under {result.folder}; manifest {result.manifest}"
+    )
+    if result.unconfirmed_empty:
+        typer.echo(
+            f"warning: the last {result.unconfirmed_empty} hour(s) inside market hours came back "
+            "empty with no later hour to confirm the feed was answering; they are not recorded "
+            "and the next run asks for them again"
+        )
+    if result.empty_in_market:
+        typer.echo(
+            f"note: {result.empty_in_market} empty hour(s) inside the calendar's market hours "
+            "(holidays or vendor gaps); --retry-empty asks for them again"
+        )
+    typer.echo(f"next: xq ingest --source {source} --path {result.folder}")
+
+
+def _echo_day(progress: DayProgress) -> None:
+    typer.echo(
+        f"{progress.day}: {progress.fetched} fetched, {progress.empty} empty, "
+        f"{progress.already_present} already present"
+    )
 
 
 dataset_app = typer.Typer(

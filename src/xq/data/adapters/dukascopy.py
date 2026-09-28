@@ -93,7 +93,11 @@ def datafeed_url(base_url: str, symbol: str, hour_start: pd.Timestamp) -> str:
 
 
 def decode_bi5(data: bytes) -> npt.NDArray[np.void]:
-    """Decompress a ``.bi5`` payload into `BI5_RECORD` rows (none for an empty payload)."""
+    """Decompress a ``.bi5`` payload into `BI5_RECORD` rows (none for an empty payload).
+
+    Raises `SourceFormatError` unless the payload is an LZMA stream of whole records whose
+    offsets all lie within the hour.
+    """
     if not data:
         return np.zeros(0, dtype=BI5_RECORD)
     try:
@@ -105,6 +109,13 @@ def decode_bi5(data: bytes) -> npt.NDArray[np.void]:
             f"{len(payload)} decompressed bytes are not whole {BI5_RECORD.itemsize}-byte records"
         )
     records: npt.NDArray[np.void] = np.frombuffer(payload, dtype=BI5_RECORD)
+    ms = records["ms"].astype(np.int64)
+    outside = np.flatnonzero((ms < 0) | (ms >= HOUR_MS))
+    if len(outside):
+        row = int(outside[0])
+        raise SourceFormatError(
+            f"record {row} is {ms[row]} ms from the hour start, outside [0, {HOUR_MS})"
+        )
     return records
 
 
@@ -185,13 +196,6 @@ class DukascopyTickAdapter:
         except SourceFormatError as exc:
             raise SourceFormatError(f"{ref.original_name}: {exc}") from exc
         ms = records["ms"].astype(np.int64)
-        outside = np.flatnonzero((ms < 0) | (ms >= HOUR_MS))
-        if len(outside):
-            row = int(outside[0])
-            raise SourceFormatError(
-                f"{ref.original_name}: record {row} is {ms[row]} ms from the hour start, "
-                f"outside [0, {HOUR_MS})"
-            )
         ask_points = records["ask"].astype(np.int64)
         bid_points = records["bid"].astype(np.int64)
         hour_ms = int(hour_start.value // 1_000_000)

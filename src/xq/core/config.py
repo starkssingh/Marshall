@@ -26,7 +26,7 @@ import os
 import re
 from collections.abc import Mapping
 from dataclasses import dataclass
-from datetime import UTC, datetime, time
+from datetime import UTC, date, datetime, time
 from decimal import ROUND_FLOOR, Decimal
 from pathlib import Path
 from typing import Annotated, Any, Literal
@@ -1503,13 +1503,36 @@ def gates_hash(gates: GatesConfig) -> str:
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()[:16]
 
 
+class DownloadConfig(FrozenModel):
+    """Endpoint and politeness of a vendor downloader (`xq fetch dukascopy`, ADR 0057).
+
+    One request at a time, at least `min_interval_s` apart. A failed request (network error,
+    timeout, HTTP 429 or 5xx) is retried after `backoff_s`, doubling each time, up to
+    `max_attempts` tries; then the run stops (it resumes where it stopped). An empty answer for an
+    hour inside market hours is asked again once after `empty_retry_pause_s` (0 disables the
+    second request), and `max_empty_open_hours` consecutive empty hours inside market hours stop
+    the run: the endpoint is more likely failing than the market silent for that long.
+    `history_start` is the vendor's first day with ticks; earlier days are refused.
+    """
+
+    base_url: str = Field(pattern=r"^https?://")
+    history_start: date
+    min_interval_s: float = Field(gt=0)
+    timeout_s: float = Field(gt=0)
+    max_attempts: int = Field(ge=1)
+    backoff_s: float = Field(ge=0)
+    empty_retry_pause_s: float = Field(ge=0)
+    max_empty_open_hours: int = Field(ge=1)
+
+
 class SourceConfig(FrozenModel):
     """A declared market-data source (DATA-003). The clock convention is part of its identity.
 
     Vendor encodings (DATA-013, ADR 0057): `vendor_symbol` is the vendor's code for the instrument
     (Dukascopy ``XAUUSD``) and `point_scale` the number of integer price points per unit of the
     quote currency in the vendor's binary files (Dukascopy XAUUSD: 1000, so 2034155 is 2034.155).
-    Both are required by the ``dukascopy_ticks`` adapter.
+    Both are required by the ``dukascopy_ticks`` adapter. `download` configures the source's
+    downloader, where one exists.
     """
 
     adapter: Literal["mt5_ticks", "dukascopy_ticks"]
@@ -1523,6 +1546,7 @@ class SourceConfig(FrozenModel):
     encoding: str | None = None
     vendor_symbol: str | None = Field(default=None, pattern=r"^[A-Z0-9]+$")
     point_scale: int | None = Field(default=None, gt=0)
+    download: DownloadConfig | None = None
     notes: str = ""
 
     @field_validator("clock")
