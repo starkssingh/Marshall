@@ -73,3 +73,54 @@ def test_every_test_is_a_json_safe_stat_tests_row() -> None:
     json.dumps([dataclasses.asdict(r) for r in rows], allow_nan=False)
     assert verdict_of(report.gate_checks("R2"), report.gate_not_evaluated("R2")) == "fail"
     assert "Holm-adjusted" in report.markdown()
+
+
+def homogeneous(seed: int):  # type: ignore[no-untyped-def]
+    """The genuine edge selected from near-identical configurations only (lookbacks 40-80)."""
+    made = subject("genuine", seed)
+    columns = [c for c in made.family.columns if float(c.split(",")[0].split("=")[1]) >= 40]
+    family = made.family[columns]
+    best = max(columns, key=lambda c: float(family[c].mean() / family[c].std()))
+    assert CFG.experiments is not None
+    trials = family_trials(
+        family,
+        clustering=CFG.experiments.trial_clustering,
+        gated=GATES.conventions.trial_count,
+        periods_per_year=252,
+    )
+    return dataclasses.replace(
+        made, name=best, returns=family[best].rename("return"), family=family, trials=trials
+    )
+
+
+def test_pbo_does_not_apply_to_a_family_without_a_meaningful_selection() -> None:
+    """C-25 (1): a genuine edge among near-identical configurations (at most two effective
+    trials) is no longer failed by PBO, which only judges a choice there is none of here; the
+    deflated Sharpe ratio still applies."""
+    report = significance_report(
+        homogeneous(0), family_id="simulated", gates=GATES, settings=SETTINGS, seed=3
+    )
+    assert report.trials.n_effective <= 2
+    assert report.pbo is not None
+    assert report.pbo.pbo > GATES.r2_validated.pbo_max  # judged, it would fail R2 on a coin toss
+    keys = [c.criterion.key for c in report.gate_checks("R2")]
+    assert "pbo_max" not in keys
+    assert "dsr_min" in keys  # the DSR still applies
+    assert report.gate_not_applicable("R2")["pbo_max"].startswith("no meaningful selection")
+    assert "pbo_max" not in report.gate_not_evaluated("R2")
+    assert verdict_of(report.gate_checks("R2"), report.gate_not_evaluated("R2")) == "pass"
+    assert "PBO: not applicable: no meaningful selection" in report.markdown()
+    (row,) = [t for t in report.stat_tests() if t.test_name == "pbo"]
+    assert row.params["applicable"] is False
+
+
+def test_pbo_still_fails_an_overfit_family_of_dispersed_configurations() -> None:
+    report = significance_report(
+        subject("overfit"), family_id="noise", gates=GATES, settings=SETTINGS, seed=4
+    )
+    assert report.trials.n_effective > SETTINGS.pbo.not_applicable_max_effective_trials
+    assert report.not_applicable == {}
+    (pbo,) = [c for c in report.gate_checks("R2") if c.criterion.key == "pbo_max"]
+    assert not pbo.passed
+    (row,) = [t for t in report.stat_tests() if t.test_name == "pbo"]
+    assert row.params["applicable"] is True

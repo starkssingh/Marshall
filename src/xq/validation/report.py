@@ -15,7 +15,11 @@ bootstrap convention):
 - R1 ``min_oos_trades``: at least 100 closed trades.
 - R2 ``dsr_min``: the deflated Sharpe ratio (VAL-002) with the family's gated trial count and the
   variance of its trials' Sharpe ratios.
-- R2 ``pbo_max``: PBO by CSCV over the family's configuration matrix (VAL-003).
+- R2 ``pbo_max``: PBO by CSCV over the family's configuration matrix (VAL-003). A family with
+  at most two effective trials (``pbo.not_applicable_max_effective_trials``) offers no meaningful
+  selection: PBO judges the choice among configurations, and there is no choice to judge. PBO is
+  then reported as "not applicable: no meaningful selection" and the criterion is not applicable;
+  the deflated Sharpe ratio still applies (C-25, ADR 0057).
 - R2 ``spa_p_max``: Hansen's SPA over the family against cash (VAL-004). It carries the size
   check's warning "test over-rejects on this sample" when the simulated size exceeds 1.5 times
   the level (ADR 0055). The Reality Check and the Romano-Wolf survivors are reported with it, and
@@ -27,9 +31,15 @@ bootstrap convention):
 
 **Verdicts.** Each of R1 and R2 is:
 
-- ``pass`` when every one of its criteria is evaluated and passes;
+- ``pass`` when every one of its applicable criteria is evaluated and passes;
 - ``fail`` when any fails;
 - ``incomplete`` when none fails but one could not be evaluated, with the reason.
+
+A criterion is **not applicable** only by a rule the owner decided (C-25, ADR 0057): PBO without a
+meaningful selection, and the parameter neighbourhood of a strategy whose hypothesis declares its
+parameters fixed a priori. It is listed with its reason and does not enter the verdict. A
+criterion that merely could not be computed is never not applicable: it makes the verdict
+incomplete.
 
 R2's criteria are the significance ones above plus the seven robustness gates. Warnings never
 change a verdict: thresholds are fixed. A synthetic subject's report says, first, that it is
@@ -88,7 +98,6 @@ SIGNIFICANCE_GATES: dict[str, tuple[str, ...]] = {
         "min_track_record.confidence",
     ),
 }
-PBO_BLOCKS = 16
 
 
 @dataclass(frozen=True)
@@ -135,6 +144,8 @@ class SignificanceReport:
     checks: tuple[GateCheck, ...]
     #: ``"R1 key"`` -> why that criterion could not be evaluated.
     not_evaluated: dict[str, str] = field(default_factory=dict)
+    #: ``"R2 key"`` -> why that criterion does not apply (an owner's rule; module docstring).
+    not_applicable: dict[str, str] = field(default_factory=dict)
 
     @property
     def sharpe(self) -> float:
@@ -147,12 +158,11 @@ class SignificanceReport:
 
     def gate_not_evaluated(self, gate: Gate) -> dict[str, str]:
         """The criteria of `gate` that could not be evaluated, with the reason."""
-        prefix = f"{gate} "
-        return {
-            key.removeprefix(prefix): why
-            for key, why in self.not_evaluated.items()
-            if key.startswith(prefix)
-        }
+        return _of_gate(self.not_evaluated, gate)
+
+    def gate_not_applicable(self, gate: Gate) -> dict[str, str]:
+        """The criteria of `gate` that do not apply, with the reason."""
+        return _of_gate(self.not_applicable, gate)
 
     def stat_tests(self) -> list[StatTest]:
         """One row per test, for the ``stat_tests`` table."""
@@ -214,6 +224,8 @@ class SignificanceReport:
                         "blocks": self.pbo.n_blocks,
                         "configurations": self.pbo.n_configurations,
                         "probability_of_loss": self.pbo.probability_of_loss,
+                        "effective_trials": self.trials.n_effective,
+                        "applicable": "R2 pbo_max" not in self.not_applicable,
                     },
                 )
             )
@@ -292,8 +304,7 @@ class SignificanceReport:
             f"- Minimum track record length at 95 %: {self.min_track_record_days:.0f} days.",
             f"- Deflated Sharpe ratio {self.dsr.dsr:.4f} with {self.trials.n_gated:g} "
             f"{self.trials.gated} trials ({self.trials.n_raw} raw).",
-            f"- PBO {'n/a' if self.pbo is None else f'{self.pbo.pbo:.3f}'} "
-            f"({'n/a' if self.pbo is None else self.pbo.n_configurations} configurations).",
+            self._pbo_line(),
             f"- Family of {len(self.holm)}: Reality Check p = "
             f"{self.family_test.reality_check_p:.4g}, SPA p = {self.family_test.spa_p:.4g} "
             f"(lower {self.family_test.spa_p_lower:.4g}, "
@@ -319,6 +330,23 @@ class SignificanceReport:
         out += [markdown_table(self.holm.reset_index())]
         return "\n".join(out)
 
+    def _pbo_line(self) -> str:
+        why = self.not_applicable.get("R2 pbo_max")
+        if why is not None:
+            shown = (
+                ""
+                if self.pbo is None
+                else f"; the CSCV value {self.pbo.pbo:.3f} is shown for reference, not judged"
+            )
+            return f"- PBO: not applicable: {why}{shown}."
+        if self.pbo is None:
+            return "- PBO: not evaluated."
+        return (
+            f"- PBO {self.pbo.pbo:.3f} ({self.pbo.n_configurations} configurations, "
+            f"{self.trials.n_effective:g} effective); probability of loss "
+            f"{self.pbo.probability_of_loss:.3f}."
+        )
+
 
 def significance_report(
     subject: StrategySubject,
@@ -334,6 +362,7 @@ def significance_report(
     convention = gates.conventions.bootstrap
     checks: dict[str, GateCheck] = {}
     not_evaluated: dict[str, str] = {}
+    not_applicable: dict[str, str] = {}
 
     est = estimate(r)
     block = gate_block_length(r, convention.block_length, convention.min_block_days)
@@ -369,12 +398,23 @@ def significance_report(
     checks["R2 dsr_min"] = gates.criterion("R2", "dsr_min").check(dsr.dsr)
 
     family = subject.family
+    blocks = settings.pbo.blocks
     pbo = None
-    if family.shape[1] >= 2 and len(family) >= 2 * PBO_BLOCKS:
-        pbo = pbo_cscv(family.to_numpy(np.float64), n_blocks=PBO_BLOCKS)
+    if family.shape[1] >= 2 and len(family) >= 2 * blocks:
+        pbo = pbo_cscv(family.to_numpy(np.float64), n_blocks=blocks)
+    effective = trials.n_effective
+    limit = settings.pbo.not_applicable_max_effective_trials
+    if effective <= limit:
+        not_applicable["R2 pbo_max"] = (
+            f"no meaningful selection (the family has {effective:g} effective "
+            f"trial{'' if effective == 1 else 's'}, at most {limit:g})"
+        )
+    elif pbo is not None:
         checks["R2 pbo_max"] = gates.criterion("R2", "pbo_max").check(pbo.pbo)
     else:
-        not_evaluated["R2 pbo_max"] = "PBO needs at least two configurations over 32 days"
+        not_evaluated["R2 pbo_max"] = (
+            f"PBO needs at least two configurations over {2 * blocks} days"
+        )
 
     test = family_tests(family, bootstrap=convention, seed=derive_seed(seed, "spa"))
     size = size_check(
@@ -425,6 +465,7 @@ def significance_report(
         baseline=baseline,
         checks=tuple(checks[k] for k in order if k in checks),
         not_evaluated=not_evaluated,
+        not_applicable=not_applicable,
     )
 
 
@@ -452,6 +493,10 @@ class StrategyValidation:
             missing.update(self.robustness.not_evaluated)
         return missing
 
+    def not_applicable(self, gate: Gate) -> dict[str, str]:
+        """Every criterion of `gate` that does not apply, with the reason (module docstring)."""
+        return self.significance.gate_not_applicable(gate)
+
     def verdict(self, gate: Gate) -> Verdict:
         """``pass``, ``fail`` or ``incomplete`` for `gate` (module docstring)."""
         return verdict_of(self.checks(gate), self.not_evaluated(gate))
@@ -475,6 +520,10 @@ class StrategyValidation:
             lines.extend(
                 f"  {gate} {key}: not evaluated: {why}"
                 for key, why in self.not_evaluated(gate).items()
+            )
+            lines.extend(
+                f"  {gate} {key}: not applicable: {why}"
+                for key, why in self.not_applicable(gate).items()
             )
         lines.append(self.robustness.summary_lines()[0])
         return lines
@@ -519,6 +568,7 @@ class StrategyValidation:
             "verdicts": {g: self.verdict(g) for g in ("R1", "R2")},
             "checks": [check(c) for g in ("R1", "R2") for c in self.checks(g)],
             "not_evaluated": {g: self.not_evaluated(g) for g in ("R1", "R2")},
+            "not_applicable": {g: self.not_applicable(g) for g in ("R1", "R2")},
             "robustness_score": _num(self.robustness.score),
             "robustness_verdict": self.robustness.verdict,
             "stat_tests": [asdict(t) for t in self.significance.stat_tests()],
@@ -551,6 +601,11 @@ def validate_strategy(
         significance=significance,
         robustness=robustness,
     )
+
+
+def _of_gate(entries: dict[str, str], gate: Gate) -> dict[str, str]:
+    prefix = f"{gate} "
+    return {key.removeprefix(prefix): why for key, why in entries.items() if key.startswith(prefix)}
 
 
 def _num(value: Any) -> float | None:

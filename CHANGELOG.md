@@ -757,6 +757,16 @@ IDs from `docs/specs/development-plan.md`.
 
 ### Changed
 
+- C-25 (1) (owner's decision, ADR 0057), VAL-003: PBO does not apply to a family without a
+  meaningful selection. When the family's effective trial count is at most 2
+  (`pbo.not_applicable_max_effective_trials` in `config/validation.yaml`, beside the CSCV block
+  count moved there from code), PBO is reported as "not applicable: no meaningful selection" and
+  R2's `pbo_max` is not applicable; the deflated Sharpe ratio still applies. Reports gain a "not
+  applicable" category, for owner rules only: it is listed with its reason (summary, Markdown,
+  JSON) and does not enter the verdict, while a criterion that could not be computed still makes
+  it `incomplete`. Tested: the simulated genuine edge chosen among near-identical configurations
+  (1 effective trial, CSCV PBO 0.52) is no longer failed by PBO and passes its significance
+  criteria; the overfit family of 50 dispersed configurations still fails PBO.
 - C-24 (1) (owner's decision, ADR 0055), VAL-004: SPA and the Reality Check always take their
   block length from the gates' bootstrap convention (`family_tests(..., bootstrap=...)`, no block
   argument). The size simulation was re-run under it: with AR(1) φ = 0.4, 400 periods and 8

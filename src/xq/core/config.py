@@ -912,12 +912,30 @@ class NoiseConfig(FrozenModel):
     n_seeds: int = Field(ge=1)
 
 
+class PboConfig(FrozenModel):
+    """Probability of backtest overfitting by CSCV (VAL-003; C-25, ADR 0057)."""
+
+    #: Contiguous blocks of the configuration matrix (even).
+    blocks: int = Field(ge=2)
+    #: A family with at most this many effective trials offers no meaningful selection: PBO is
+    #: reported "not applicable" and R2's ``pbo_max`` is not applicable (the DSR still applies).
+    not_applicable_max_effective_trials: float = Field(ge=1)
+
+    @field_validator("blocks")
+    @classmethod
+    def _even(cls, value: int) -> int:
+        if value % 2:
+            raise ValueError("pbo.blocks must be even")
+        return value
+
+
 class ValidationConfig(FrozenModel):
     """Validation and robustness procedures (``config/validation.yaml``, Phases 16 and 17).
 
     Pass/fail thresholds are not here: they are in ``config/gates.yaml``.
     """
 
+    pbo: PboConfig
     spa_size_check: SpaSizeCheckConfig
     perturbation: PerturbationConfig
     monte_carlo: MonteCarloConfig
