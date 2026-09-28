@@ -48,6 +48,8 @@ HOUR_MS: Final = 3_600_000
 #: Typed column holding each row's time in the source clock, as milliseconds since 1970-01-01.
 TS_SOURCE_MS: Final = "ts_source_ms"
 CSV_COLUMNS: Final = ("timestamp", "askPrice", "bidPrice")
+#: Integer CSV timestamps below this (2001-09-09) are not Unix milliseconds of Dukascopy data.
+MIN_EPOCH_MS: Final = 1_000_000_000_000
 CSV_VOLUMES: Final = ("askVolume", "bidVolume")
 
 _BI5_NAME = re.compile(
@@ -279,6 +281,13 @@ def _source_millis(cells: pd.Series, name: str) -> npt.NDArray[np.int64]:
     epoch = cells.str.fullmatch(_EPOCH_MS.pattern).to_numpy(dtype=bool)
     if epoch.any():
         result[epoch] = cells[epoch].astype(np.int64).to_numpy()
+        too_small = np.flatnonzero(epoch & (result < MIN_EPOCH_MS))
+        if len(too_small):
+            row = int(too_small[0])
+            raise SourceFormatError(
+                f"{name}: timestamp {cells.iloc[row]!r} at data row {row} is not in Unix "
+                "milliseconds (seconds?)"
+            )
     text = cells[~epoch]
     if len(text):
         stripped = text.str.replace(_UTC_SUFFIX, "", regex=True)

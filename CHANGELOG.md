@@ -765,8 +765,8 @@ IDs from `docs/specs/development-plan.md`.
     empty file is an hour without ticks; an offset outside the hour, a partial record, a
     corrupt stream or another symbol is refused (`SourceFormatError`);
   - dukascopy-node tick CSVs (`timestamp,askPrice,bidPrice[,askVolume,bidVolume]`, Unix ms or
-    UTC ISO 8601; another UTC offset is refused), the fallback while the `.bi5` endpoint is
-    unavailable.
+    UTC ISO 8601; another UTC offset, or an integer too small to be Unix milliseconds of
+    Dukascopy data, is refused), the fallback while the `.bi5` endpoint is unavailable.
 
   Every row carries both sides: nothing is carried forward, and a missing side is flagged
   `MISSING_QUOTE`. Volumes stay in the raw frame and the mirror; canonical sizes are NaN (their

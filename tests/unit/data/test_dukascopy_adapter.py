@@ -256,6 +256,7 @@ def test_read_csv_parses_utc_iso_text(
     [
         ("timestamp,askPrice,bidPrice\n2024-03-11T15:00:00.100+02:00,1,1\n", "not UTC"),
         ("timestamp,askPrice,bidPrice\nyesterday,1,1\n", "unparseable timestamp"),
+        ("timestamp,askPrice,bidPrice\n1710162000,1,1\n", "not in Unix milliseconds"),
         ("timestamp,askPrice,bidPrice\n1710162000100,abc,1\n", "askPrice value"),
         ("time,ask,bid\n1710162000100,1,1\n", "not a dukascopy-node tick CSV"),
     ],
