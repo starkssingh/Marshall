@@ -31,14 +31,23 @@ measures the plateau:
   flat in each parameter alone that falls apart when two move together.
 
 Each distinct point is evaluated once.
+
+**Parameter-free strategies** (C-25, ADR 0057). A strategy whose parameters were not chosen from a
+grid (a baseline rule, a forecast-sign strategy with fixed models) still has constants: its
+lookbacks, thresholds and targets. Unless its hypothesis declares them fixed a priori with a
+source, every numeric constant of its configuration is perturbed as a parameter
+(`config_constants`, and `with_constants` to evaluate a point). A constant of zero has no relative
+scale and is held; booleans and text are not numbers.
 """
 
 from __future__ import annotations
 
+import copy
 import itertools
 import math
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
+from typing import Any
 
 import numpy as np
 import numpy.typing as npt
@@ -324,6 +333,54 @@ def perturb(
     return PerturbationResult(
         params, grid_levels, periods_per_year, points, sharpe, joint, grid_size
     )
+
+
+def config_constants(
+    config: Mapping[str, Any], *, prefix: str = ""
+) -> tuple[tuple[Parameter, ...], tuple[str, ...]]:
+    """Every numeric constant of a (nested) strategy configuration as a parameter, by dotted
+    path, and the paths of the constants held because they are zero (module docstring).
+
+    An integer constant stays an integer, at least 1 when its nominal is positive.
+    """
+    parameters: list[Parameter] = []
+    held: list[str] = []
+    for key in sorted(config):
+        value = config[key]
+        path = f"{prefix}{key}"
+        if isinstance(value, Mapping):
+            inner, zeros = config_constants(value, prefix=f"{path}.")
+            parameters.extend(inner)
+            held.extend(zeros)
+        elif isinstance(value, bool) or not isinstance(value, int | float):
+            continue
+        elif value == 0 or not math.isfinite(value):
+            held.append(path)
+        elif isinstance(value, int):
+            parameters.append(
+                Parameter(path, float(value), integer=True, minimum=1.0 if value > 0 else None)
+            )
+        else:
+            parameters.append(Parameter(path, float(value)))
+    return tuple(parameters), tuple(held)
+
+
+def with_constants(config: Mapping[str, Any], values: Mapping[str, float]) -> dict[str, Any]:
+    """A copy of `config` with the constants at the dotted paths of `values` replaced.
+
+    Raises:
+        KeyError: for a path that is not a constant of `config`.
+    """
+    result: dict[str, Any] = copy.deepcopy(dict(config))
+    for path, value in values.items():
+        *parents, leaf = path.split(".")
+        node = result
+        for part in parents:
+            node = node[part]
+        if leaf not in node:
+            raise KeyError(f"{path!r} is not a constant of the configuration")
+        node[leaf] = int(value) if isinstance(node[leaf], int) else float(value)
+    return result
 
 
 def _replace(point: Point, index: int, value: float) -> Point:

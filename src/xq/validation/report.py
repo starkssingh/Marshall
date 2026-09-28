@@ -520,7 +520,10 @@ class StrategyValidation:
 
     def not_applicable(self, gate: Gate) -> dict[str, str]:
         """Every criterion of `gate` that does not apply, with the reason (module docstring)."""
-        return self.significance.gate_not_applicable(gate)
+        missing = self.significance.gate_not_applicable(gate)
+        if gate == "R2":
+            missing.update(self.robustness.not_applicable)
+        return missing
 
     def verdict(self, gate: Gate) -> Verdict:
         """``pass``, ``fail`` or ``incomplete`` for `gate` (module docstring)."""

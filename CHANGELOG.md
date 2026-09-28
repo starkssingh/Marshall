@@ -767,6 +767,17 @@ IDs from `docs/specs/development-plan.md`.
   it `incomplete`. Tested: the simulated genuine edge chosen among near-identical configurations
   (1 effective trial, CSCV PBO 0.52) is no longer failed by PBO and passes its significance
   criteria; the overfit family of 50 dispersed configurations still fails PBO.
+- C-25 (4) (owner's decision, ADR 0057), ROB-001 / ROB-008 / EXP-002: a parameter-free
+  strategy's neighbourhood gate is not applicable only when its hypothesis declares
+  `parameters_fixed_a_priori: true` with a `source` (refused at registration without a source, or
+  a source without the flag; `fixed_parameters_source` reads it from the locked text). Otherwise
+  every numeric constant of its configuration is perturbed (`config_constants`, `with_constants`;
+  zeros held). `StrategySubject` gains `parameter_kind`, `held_constants` and
+  `parameters_fixed_a_priori`; tuned parameters cannot be declared fixed a priori, and
+  `xq validate-strategy` refuses a simulated run under such a hypothesis. With the declaration the
+  perturbation is still reported, not gated, and every other gate applies. Tested: the genuine
+  trend edge as a parameter-free strategy has its constants perturbed and passes; declared fixed a
+  priori it passes on the six other gates, and fails when it loses; the registration rules.
 - C-25 (3) (owner's decision, ADR 0057), VAL-004: when the per-sample size check flags
   over-rejection, the R2 SPA gate reads a size-adjusted p-value, `(1 + #{p_null <= p}) / (1 +
   n_sim)` over the null families the size check simulates with the sample's dependence, at the

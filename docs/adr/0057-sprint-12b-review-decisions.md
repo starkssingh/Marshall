@@ -171,3 +171,59 @@ can be corrected for the test's size there, without moving the threshold.
   zero, monotone in the raw p); a raw SPA p of 0.08 that would pass 0.10 fails when 28 % of the
   sample's null families are as strong; on a flagged dependent sample the gate reads the adjusted
   p-value at the unchanged threshold and names the raw one; on an iid sample it reads the raw one.
+
+## 4. Parameter-free strategies: the neighbourhood is N/A only by an a-priori declaration
+
+**Decision.** For a strategy without tuned parameters, the neighbourhood gate is not applicable
+only if the hypothesis file declares `parameters_fixed_a_priori: true` with a `source`.
+Otherwise every numeric constant in the strategy's configuration is perturbed. All other gates
+apply.
+
+**Why.** ADR 0056 left a strategy without tunable parameters (buy and hold, a board rule, a
+forecast-sign strategy) with no neighbourhood, so its R2 verdict could never pass. Treating the
+neighbourhood as vacuously satisfied would have let any strategy escape the gate by hard-coding
+its parameters. A rule's constants (a 50/200 moving average, a 20-day channel) are parameters
+someone chose; unless they were fixed before any data was seen, and the hypothesis says where
+they come from, their neighbourhood is tested like any other.
+
+**Implementation.**
+
+- **The declaration** (`HypothesisDoc`): `parameters_fixed_a_priori: true` and `source:` (where
+  the parameters come from, for example a publication). The flag without a non-empty source, or a
+  source without the flag, is refused at registration. The declaration is locked with the text,
+  so adding it is a new version. `fixed_parameters_source` reads it from the locked text of the
+  version a run tested. The template shows it, commented out.
+- **The constants** (`xq.robustness.perturb`): `config_constants(config)` makes every numeric
+  constant of a (nested) configuration a `Parameter`, by dotted path (`params.fast`,
+  `vol_target.annual_vol`). Integers stay integers, at least 1 when positive. A constant of zero
+  has no relative scale and is held (listed in the report); booleans and text are not numbers.
+  `with_constants(config, values)` builds the configuration at a perturbed point. The joint ±20 %
+  grid, its seeded sample above 243 points and the one-at-a-time table are unchanged (ADR 0055).
+- **The subject** (`StrategySubject`) carries `parameter_kind` (`tuned` or `constants`), the
+  held constants, and `parameters_fixed_a_priori` (the source). Tuned parameters cannot be
+  declared fixed a priori: the subject refuses it, and `xq validate-strategy` refuses a simulated
+  run (whose candidate is chosen from a grid) under a hypothesis that declares it.
+- **The report** (`robustness_report`): with a declaration the neighbourhood gate is **not
+  applicable**, listed with its source (the category of decision 1); the perturbation, when there
+  are constants, is still computed and reported, not gated (`robustness_results.passed` null).
+  Without one, the constants' neighbourhood is gated like tuned parameters. A strategy with
+  neither a tuned parameter nor a constant keeps "not evaluated", so its verdict is incomplete,
+  as before.
+- The robustness score is the share of the evaluated, applicable gates passed. With the
+  neighbourhood not applicable the R2 verdict can pass on the other gates, and fails on any of
+  them.
+
+**Known truth** (`tests/unit/robustness/test_report.py`, `test_perturb.py`,
+`tests/integration/tracking/test_hypotheses.py`, `test_validate_strategy.py`).
+
+- The simulated genuine trend edge rebuilt as a parameter-free strategy (its lookback and
+  deadband constants of its configuration, and a zero `exit` held): its constants are perturbed,
+  the neighbourhood gate passes, and the verdict is `pass`.
+- The same strategy with its parameters declared fixed a priori: the neighbourhood is not
+  applicable with the source named, reported but not gated; the six other gates are evaluated and
+  pass, so the verdict is `pass` with a score of 1.0. With its returns made to lose, the verdict
+  is `fail`: the declaration removes one gate, never the others.
+- The hypothesis flag without a source, with a blank source, and a source without the flag are
+  refused; with both it registers as a new version and the source is read back.
+- A simulated run under a hypothesis declaring its parameters fixed a priori is refused by
+  `xq validate-strategy` ("grid of 24 configurations").

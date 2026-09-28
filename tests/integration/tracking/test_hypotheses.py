@@ -14,7 +14,12 @@ from xq.cli.main import app
 from xq.core.config import AppConfig
 from xq.core.errors import ConfigError
 from xq.tracking.db import create_db_engine, upgrade_to_head
-from xq.tracking.hypotheses import is_registered, load_hypothesis, register_hypothesis
+from xq.tracking.hypotheses import (
+    fixed_parameters_source,
+    is_registered,
+    load_hypothesis,
+    register_hypothesis,
+)
 from xq.tracking.registry import (
     MODEL_FAMILIES,
     RESERVED_FAMILIES,
@@ -203,3 +208,26 @@ def test_declared_slices_from_the_vocabulary_register(
     doc, _ = load_hypothesis(write(tmp_path, slices=slices), cfg)
     assert doc.slices == slices  # the text is locked as written; names are only checked
     assert register_hypothesis(cfg, engine, tmp_path / "H-0001.yaml").version == 1
+
+
+def test_parameters_fixed_a_priori_need_a_source(
+    cfg: AppConfig, engine: Engine, tmp_path: Path
+) -> None:
+    """C-25 (4): the only way the neighbourhood gate becomes not applicable is a locked
+    declaration with the source of the parameters."""
+    with pytest.raises(ConfigError, match="needs a source"):
+        load_hypothesis(write(tmp_path, parameters_fixed_a_priori=True), cfg)
+    with pytest.raises(ConfigError, match="needs a source"):
+        load_hypothesis(write(tmp_path, parameters_fixed_a_priori=True, source=" "), cfg)
+    with pytest.raises(ConfigError, match="set parameters_fixed_a_priori: true"):
+        load_hypothesis(write(tmp_path, source="Faber (2007)"), cfg)
+    plain = register_hypothesis(cfg, engine, write(tmp_path))
+    assert fixed_parameters_source(engine, plain.hypothesis_id, plain.version) is None
+    source = "Faber (2007), 10-month moving average"
+    path = write(tmp_path, parameters_fixed_a_priori=True, source=source)
+    doc, _ = load_hypothesis(path, cfg)
+    assert doc.parameters_fixed_a_priori
+    fixed = register_hypothesis(cfg, engine, path)
+    assert fixed.version == plain.version + 1  # a declaration is an edit: a new version
+    assert fixed_parameters_source(engine, fixed.hypothesis_id, fixed.version) == source
+    assert fixed_parameters_source(engine, plain.hypothesis_id, plain.version) is None

@@ -33,3 +33,8 @@ planned_tests:
 slices:                          # pre-declared subsets to report (ROB-006): year, session,
   - session                      # volatility tercile (cut ex post); regime slices wait for
   - volatility tercile           # REG-007; other names are refused at registration
+# Only for a strategy whose parameters were fixed BEFORE any data was seen (a published rule, a
+# market convention): the R2 neighbourhood gate is then not applicable, and every other gate still
+# applies. Without it, every numeric constant of a parameter-free strategy is perturbed (C-25).
+# parameters_fixed_a_priori: true
+# source: Moskowitz, Ooi and Pedersen (2012), 12-month time-series momentum

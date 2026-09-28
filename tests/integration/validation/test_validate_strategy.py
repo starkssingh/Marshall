@@ -51,7 +51,7 @@ def xq(root: Path, *args: str) -> tuple[int, str]:
     return result.exit_code, result.output
 
 
-def hypothesis(root: Path, hypothesis_id: str, family: str) -> None:
+def hypothesis(root: Path, hypothesis_id: str, family: str, **extra: Any) -> None:
     data: dict[str, Any] = yaml.safe_load(TEMPLATE.read_text())
     data.update(
         {
@@ -59,6 +59,7 @@ def hypothesis(root: Path, hypothesis_id: str, family: str) -> None:
             "family": family,
             "title": f"simulated strategy ({family})",
             "slices": ["year", "volatility tercile"],
+            **extra,
         }
     )
     path = root / f"{hypothesis_id}.yaml"
@@ -183,3 +184,20 @@ def test_runs_that_cannot_be_validated_are_refused(root: Path, engine: Engine) -
     code, output = xq(root, "robustness", "simulate", "--truth", "lucky", "--hypothesis", "H-0900")
     assert code == 2
     assert "invalid simulation" in output
+
+
+def test_a_strategy_tuned_on_a_grid_cannot_claim_parameters_fixed_a_priori(root: Path) -> None:
+    """C-25 (4): the declaration would be false for a candidate chosen from a grid, so the
+    neighbourhood gate cannot be switched off for it."""
+    hypothesis(
+        root,
+        "H-0903",
+        "simulated_claims_fixed",
+        parameters_fixed_a_priori=True,
+        source="a claim the run contradicts",
+    )
+    run_id = simulate(root, "genuine", 5, "H-0903")
+    code, output = xq(root, "validate-strategy", run_id, "--exploratory")
+    assert code == 2
+    assert "declares its parameters fixed a priori" in output
+    assert "grid of 24 configurations" in output

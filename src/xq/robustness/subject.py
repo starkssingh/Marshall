@@ -110,7 +110,9 @@ class StrategySubject:
     #: Walk-forward test fold of each evaluated day.
     folds: pd.Series
     trials: TrialSummary
-    #: Tunable parameters at their chosen values; empty when the strategy has none.
+    #: The parameters the neighbourhood perturbs, at their chosen values: the tuned parameters,
+    #: or every numeric constant of a parameter-free strategy (`parameter_kind`); empty when there
+    #: is none.
     parameters: tuple[Parameter, ...]
     #: Daily net returns at a parameter point (None without parameters).
     evaluate: Evaluate | None
@@ -129,6 +131,15 @@ class StrategySubject:
     #: The slices the tested hypothesis declared (ROB-006); None when there is no hypothesis.
     slices: DeclaredSlices | None = None
     sessions: SessionsConfig | None = None
+    #: ``tuned``: `parameters` were chosen from the family's grid. ``constants``: the strategy
+    #: has no tuned parameter and `parameters` are its configuration's numeric constants (C-25).
+    parameter_kind: Literal["tuned", "constants"] = "tuned"
+    #: Constants of a parameter-free strategy held because they are zero (no relative scale).
+    held_constants: tuple[str, ...] = ()
+    #: The source the tested hypothesis gives for parameters fixed a priori
+    #: (``parameters_fixed_a_priori: true`` with a ``source``): the neighbourhood gate is then not
+    #: applicable, and every other gate still is (C-25, ADR 0057).
+    parameters_fixed_a_priori: str | None = None
 
     def __post_init__(self) -> None:
         if self.name not in self.family.columns:
@@ -146,6 +157,14 @@ class StrategySubject:
             raise ValueError("the baselines must cover the strategy's days")
         if self.parameters and self.evaluate is None:
             raise ValueError("a strategy with parameters needs an evaluate function")
+        if self.parameters_fixed_a_priori is not None:
+            if not self.parameters_fixed_a_priori.strip():
+                raise ValueError("parameters fixed a priori need a source")
+            if self.parameter_kind == "tuned" and self.parameters:
+                raise ValueError(
+                    "parameters chosen from a grid are not fixed a priori: the neighbourhood "
+                    "gate applies to them"
+                )
 
     @property
     def daily_pnl(self) -> pd.Series:
