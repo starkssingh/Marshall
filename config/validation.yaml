@@ -1,5 +1,5 @@
 # Validation and robustness procedures (Phases 16 and 17: VAL-003 ... VAL-006, ROB-001 ... ROB-008;
-# ADR 0054, ADR 0055, ADR 0057). Every value is fixed before any candidate result exists; changing
+# ADR 0054, ADR 0055, ADR 0058). Every value is fixed before any candidate result exists; changing
 # one needs an ADR. The pass/fail thresholds are not here: they are in config/gates.yaml, and the bootstrap
 # convention (n_boot, Politis-White block, at least 5 days) is the gates' own.
 

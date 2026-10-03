@@ -32,7 +32,7 @@ measures the plateau:
 
 Each distinct point is evaluated once.
 
-**Parameter-free strategies** (C-25, ADR 0057). A strategy whose parameters were not chosen from a
+**Parameter-free strategies** (C-25, ADR 0058). A strategy whose parameters were not chosen from a
 grid (a baseline rule, a forecast-sign strategy with fixed models) still has constants: its
 lookbacks, thresholds and targets. Unless its hypothesis declares them fixed a priori with a
 source, every numeric constant of its configuration is perturbed as a parameter

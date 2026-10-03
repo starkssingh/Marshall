@@ -1,4 +1,4 @@
-"""`xq validate-strategy` on a baseline board run (the board's subject adapter, ADR 0058),
+"""`xq validate-strategy` on a baseline board run (the board's subject adapter, ADR 0059),
 end to end on synthetic ticks: one strategy of the board is validated at a time; a rule's numeric
 constants are perturbed (C-25 (4)), or its neighbourhood is not applicable when the hypothesis
 declares them fixed a priori; a forecast-sign strategy's neighbourhood is not evaluated; the

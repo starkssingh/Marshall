@@ -1,4 +1,4 @@
-"""Subject adapters for recorded runs (ROB-008, `xq validate-strategy`; ADR 0058).
+"""Subject adapters for recorded runs (ROB-008, `xq validate-strategy`; ADR 0059).
 
 A subject adapter rebuilds, from a recorded run, the strategy it chose as a `StrategySubject`:
 its daily net returns, closed trades and folds, the family it was selected from, and functions
@@ -23,7 +23,7 @@ strategies; one is validated at a time (``--strategy``).
 3. **The family** is every strategy of the board, with its recorded daily returns. The
    **baselines** of R1 are the board's other strategies: a baseline validated as a candidate must
    beat the best of the others.
-4. **Parameters** (C-25, ADR 0057). Board strategies have no tuned parameter. A rule's numeric
+4. **Parameters** (C-25, ADR 0058). Board strategies have no tuned parameter. A rule's numeric
    constants (its ``params``, and the volatility target of a ``_vol`` rule) are perturbed, unless
    the hypothesis declares them fixed a priori with a source. A perturbed point that the rule
    refuses (for example a fast moving average no longer faster than the slow one) never trades:

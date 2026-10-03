@@ -21,7 +21,7 @@ is refused here, at registration, before the text is locked (C-24, ADR 0055).
 A strategy whose parameters were fixed before any data was seen (a published rule, a market
 convention) may say so: ``parameters_fixed_a_priori: true`` with a ``source`` naming where they
 come from. The declaration is locked with the text, and it is the only way the R2 neighbourhood
-gate becomes not applicable (C-25, ADR 0057); without it, every numeric constant of a
+gate becomes not applicable (C-25, ADR 0058); without it, every numeric constant of a
 parameter-free strategy is perturbed. A flag without a source, or a source without the flag, is
 refused.
 

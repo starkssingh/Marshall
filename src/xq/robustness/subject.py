@@ -138,7 +138,7 @@ class StrategySubject:
     held_constants: tuple[str, ...] = ()
     #: The source the tested hypothesis gives for parameters fixed a priori
     #: (``parameters_fixed_a_priori: true`` with a ``source``): the neighbourhood gate is then not
-    #: applicable, and every other gate still is (C-25, ADR 0057).
+    #: applicable, and every other gate still is (C-25, ADR 0058).
     parameters_fixed_a_priori: str | None = None
     #: Why the adapter cannot perturb the strategy's parameters (the neighbourhood is then not
     #: evaluated, with this reason, unless the parameters are declared fixed a priori).

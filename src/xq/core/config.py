@@ -913,7 +913,7 @@ class NoiseConfig(FrozenModel):
 
 
 class PboConfig(FrozenModel):
-    """Probability of backtest overfitting by CSCV (VAL-003; C-25, ADR 0057)."""
+    """Probability of backtest overfitting by CSCV (VAL-003; C-25, ADR 0058)."""
 
     #: Contiguous blocks of the configuration matrix (even).
     blocks: int = Field(ge=2)

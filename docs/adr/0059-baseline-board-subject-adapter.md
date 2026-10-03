@@ -1,4 +1,4 @@
-# ADR 0058 — The baseline-board subject adapter for `xq validate-strategy`
+# ADR 0059 — The baseline-board subject adapter for `xq validate-strategy`
 
 - **Status:** accepted
 - **Date:** 2026-09-28

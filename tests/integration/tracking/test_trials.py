@@ -1,5 +1,5 @@
 """EXP-004: every evaluated configuration is counted; near-duplicate trials count once, and so
-does a rule and its mirror image (absolute correlation, C-25, ADR 0057)."""
+does a rule and its mirror image (absolute correlation, C-25, ADR 0058)."""
 
 import subprocess
 from collections.abc import Iterator

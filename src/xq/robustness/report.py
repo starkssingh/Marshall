@@ -26,7 +26,7 @@ those that could be evaluated. The **verdict** is:
   no tuned parameter and no numeric constant has no neighbourhood; one without closed trades has
   nothing to resample.
 
-A gate is never passed by default. **Parameter-free strategies** (C-25, ADR 0057): a strategy
+A gate is never passed by default. **Parameter-free strategies** (C-25, ADR 0058): a strategy
 with no tuned parameter has its neighbourhood formed by every numeric constant of its
 configuration (`xq.robustness.perturb.config_constants`). Only when the tested hypothesis declares
 ``parameters_fixed_a_priori: true`` with a ``source`` is the neighbourhood gate **not

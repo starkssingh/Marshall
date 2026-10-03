@@ -3,7 +3,7 @@ edge passes every R2 robustness gate and the simulated single-point optimum on n
 measure is reported with its gate; a gate that cannot be evaluated makes the verdict incomplete,
 never a pass. A parameter-free strategy has every numeric constant perturbed, and its
 neighbourhood gate is not applicable only when its parameters are declared fixed a priori with a
-source (C-25, ADR 0057)."""
+source (C-25, ADR 0058)."""
 
 import dataclasses
 import json

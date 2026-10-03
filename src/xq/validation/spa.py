@@ -38,7 +38,7 @@ tests on each and counts rejections at the gate's level. A gate result that uses
 Reality Check carries the warning "test over-rejects on this sample" when that rate exceeds
 ``warn_ratio`` (1.5) times the level.
 
-**Size-adjusted p-value** (C-25, ADR 0057). The simulated null families also give each test's
+**Size-adjusted p-value** (C-25, ADR 0058). The simulated null families also give each test's
 null distribution of p-values on this sample. The size-adjusted p-value of an observed p is the
 share of simulated null families whose p-value is at most p, ``(1 + #{p_null <= p}) / (1 +
 n_sim)``: the probability, under nulls with this sample's dependence, of a result at least as

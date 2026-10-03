@@ -4,7 +4,7 @@ SPA's power over the Reality Check when poor strategies dilute the family; under
 convention strong serial dependence in a short sample still over-rejects, and the per-sample size
 check attaches its warning to the SPA gate result (C-24, ADR 0055); when it flags over-rejection
 the gate reads the size-adjusted p-value from the sample's simulated null at the same threshold
-(C-25, ADR 0057)."""
+(C-25, ADR 0058)."""
 
 import dataclasses
 

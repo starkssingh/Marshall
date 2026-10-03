@@ -13,7 +13,7 @@ configuration.
   highly correlated **in absolute value** are near-duplicates or mirror images of each other, so
   they are clustered (average linkage on ``1 - |rho|``, cut at ``1 - correlation_threshold``) and
   each cluster counts once. A rule and its mirror (the same signal traded the other way) are one
-  choice, not two independent ones (C-25, ADR 0057). Returns are first summed per trading day
+  choice, not two independent ones (C-25, ADR 0058). Returns are first summed per trading day
   (17:00 New York roll), so trials sampled at different frequencies compare on the same footing
   and intraday noise does not dilute the correlation (ADR 0026). Trials without returns, and pairs
   with fewer than ``min_common_days`` common trading days, count as independent — the

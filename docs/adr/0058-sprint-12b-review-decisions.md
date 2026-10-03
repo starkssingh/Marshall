@@ -1,4 +1,4 @@
-# ADR 0057 — Sprint 12 B review decisions (C-25)
+# ADR 0058 — Sprint 12 B review decisions (C-25)
 
 - **Status:** accepted
 - **Date:** 2026-09-28
@@ -13,7 +13,7 @@ data.
 
 ADR 0055 and ADR 0056 left eight open points for the owner (C-25). The owner decided four of them
 and approved three as they stand. The remaining point, the baseline-board subject adapter for
-`xq validate-strategy`, is the next build task (ADR 0058).
+`xq validate-strategy`, is the next build task (ADR 0059).
 
 **Approved as they stand:**
 

@@ -754,7 +754,7 @@ IDs from `docs/specs/development-plan.md`.
     correction.
 
   ADR 0056.
-- `xq validate-strategy` for baseline board runs (ADR 0058, closes C-25 (7)): the board's subject
+- `xq validate-strategy` for baseline board runs (ADR 0059, closes C-25 (7)): the board's subject
   adapter (`xq.validation.subjects.board_subject`) rebuilds the board's screening context from the
   run (`xq.models.board.screening_context`, now shared with `run_baseline_board`, with
   `rule_signal_bars` and `rule_positions`), rebuilds one strategy (`--strategy`, required for a
@@ -769,7 +769,7 @@ IDs from `docs/specs/development-plan.md`.
 
 ### Changed
 
-- C-25 (1) (owner's decision, ADR 0057), VAL-003: PBO does not apply to a family without a
+- C-25 (1) (owner's decision, ADR 0058), VAL-003: PBO does not apply to a family without a
   meaningful selection. When the family's effective trial count is at most 2
   (`pbo.not_applicable_max_effective_trials` in `config/validation.yaml`, beside the CSCV block
   count moved there from code), PBO is reported as "not applicable: no meaningful selection" and
@@ -779,7 +779,7 @@ IDs from `docs/specs/development-plan.md`.
   it `incomplete`. Tested: the simulated genuine edge chosen among near-identical configurations
   (1 effective trial, CSCV PBO 0.52) is no longer failed by PBO and passes its significance
   criteria; the overfit family of 50 dispersed configurations still fails PBO.
-- C-25 (2) (owner's decision, ADR 0057), EXP-004: trial clustering uses the absolute
+- C-25 (2) (owner's decision, ADR 0058), EXP-004: trial clustering uses the absolute
   correlation (|ρ| ≥ 0.7, at least 60 common days; the frozen parameters are unchanged), so a rule
   and its mirror image are one cluster. The Sharpe variance that feeds the deflated Sharpe ratio is
   now taken across clusters: each cluster contributes the mean Sharpe ratio of its members trading
@@ -790,7 +790,7 @@ IDs from `docs/specs/development-plan.md`.
   registry. On the simulated genuine family with mirrors the DSR no longer collapses (0.007–0.31
   before, now equal to the rules alone). The `test_trials.py` fixture's variance changed with the
   definition (its near-duplicates count once).
-- C-25 (3) (owner's decision, ADR 0057), VAL-004: when the per-sample size check flags
+- C-25 (3) (owner's decision, ADR 0058), VAL-004: when the per-sample size check flags
   over-rejection, the R2 SPA gate reads a size-adjusted p-value, `(1 + #{p_null <= p}) / (1 +
   n_sim)` over the null families the size check simulates with the sample's dependence, at the
   unchanged threshold (0.10). The size check keeps those null p-values; `SizeCheck.adjusted_p`
@@ -799,7 +799,7 @@ IDs from `docs/specs/development-plan.md`.
   that the sample's null does not support fails, and the gate reads the adjusted p-value only when
   flagged. Characterized on 600 dependent null samples (AR(1) φ = 0.4, 8 strategies, 400 periods):
   SPA rejects 16.8 % raw and 9.0 % size-adjusted at 10 %, the Reality Check 15.3 % and 10.0 %.
-- C-25 (4) (owner's decision, ADR 0057), ROB-001 / ROB-008 / EXP-002: a parameter-free
+- C-25 (4) (owner's decision, ADR 0058), ROB-001 / ROB-008 / EXP-002: a parameter-free
   strategy's neighbourhood gate is not applicable only when its hypothesis declares
   `parameters_fixed_a_priori: true` with a `source` (refused at registration without a source, or
   a source without the flag; `fixed_parameters_source` reads it from the locked text). Otherwise

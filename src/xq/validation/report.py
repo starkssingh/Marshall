@@ -19,11 +19,11 @@ bootstrap convention):
   at most two effective trials (``pbo.not_applicable_max_effective_trials``) offers no meaningful
   selection: PBO judges the choice among configurations, and there is no choice to judge. PBO is
   then reported as "not applicable: no meaningful selection" and the criterion is not applicable;
-  the deflated Sharpe ratio still applies (C-25, ADR 0057).
+  the deflated Sharpe ratio still applies (C-25, ADR 0058).
 - R2 ``spa_p_max``: Hansen's SPA over the family against cash (VAL-004). It carries the size
   check's warning "test over-rejects on this sample" when the simulated size exceeds 1.5 times
   the level (ADR 0055), and the gate then reads the size-adjusted p-value from that sample's
-  simulated null, at the same threshold (C-25, ADR 0057). Both p-values are reported, and the
+  simulated null, at the same threshold (C-25, ADR 0058). Both p-values are reported, and the
   Reality Check's too. The Reality Check and the Romano-Wolf survivors are reported with it, and
   every configuration's bootstrap p-value is Holm-adjusted within the family (VAL-006).
 - R2 ``decay_trend``: no significantly negative slope of the walk-forward folds' performance
@@ -37,7 +37,7 @@ bootstrap convention):
 - ``fail`` when any fails;
 - ``incomplete`` when none fails but one could not be evaluated, with the reason.
 
-A criterion is **not applicable** only by a rule the owner decided (C-25, ADR 0057): PBO without a
+A criterion is **not applicable** only by a rule the owner decided (C-25, ADR 0058): PBO without a
 meaningful selection, and the parameter neighbourhood of a strategy whose hypothesis declares its
 parameters fixed a priori. It is listed with its reason and does not enter the verdict. A
 criterion that merely could not be computed is never not applicable: it makes the verdict
