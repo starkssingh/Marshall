@@ -22,12 +22,15 @@ and never again:
    - The bundle's rule is evaluated on the vault by the code the board ran: the feature set's own
      function on the bars (`feature_set(...).compute`, in memory, never materialized as a
      dataset), the board's signal bars and rule positions, the screener with the configured cost
-     model and sigma-hat. Warm-up history comes from before the vault, the decisions and fills
-     from inside it.
+     model and sigma-hat, on the signal bars of the bundle's ``signal_timeframe``. Warm-up
+     history comes from before the vault (loaded from the dataset's start, less its warm-up and
+     one bar of the longest of the signal and context timeframes), the decisions and fills from
+     inside it.
 3. **R3** is recorded on the bundle (MREG-002) from the vault run:
    - ``net_sharpe_min``: the vault's annualized net Sharpe ratio;
    - ``walk_forward_interval``: the quantile of the vault's per-period Sharpe ratio among
-     stationary-bootstrap resamples of the strategy's walk-forward (out-of-sample) daily returns,
+     stationary-bootstrap resamples of the strategy's walk-forward (out-of-sample, fold-aligned)
+     daily returns,
      each truncated to the vault's length (the gates' bootstrap convention). It must lie inside the
      central 90 %;
    - ``risk_limit_breaches_max``: days whose net loss reaches the risk profile's daily loss limit,
@@ -220,7 +223,7 @@ def run_vault_evaluation(
         raise VaultProcedureError(f"the vault window must end after vault.start ({vault})")
     load_start = ensure_utc(spec.start - spec.warmup) - max(
         [
-            Timeframe(board.signal_timeframe).duration,
+            Timeframe(content.strategy.signal_timeframe).duration,
             *(tf.duration for tf in spec.context_timeframes),
         ]
     )
@@ -359,7 +362,9 @@ def _vault_returns(
     rule = RuleStrategyConfig.model_validate(content.strategy.config["rule"])
     raw_target = content.strategy.config.get("vol_target")
     target = VolTargetConfig.model_validate(raw_target) if raw_target else board.vol_target
-    signal, bar_periods = rule_signal_bars(cfg, features, board, cfg.gate_periods_per_year())
+    signal, bar_periods = rule_signal_bars(
+        cfg, features, content.strategy.signal_timeframe, cfg.gate_periods_per_year()
+    )
     positions = rule_positions(signal, rule, target, bar_periods, pd.DatetimeIndex(decisions))
     costs = CostModel.from_config(cfg, spec.instrument, engine=engine, source_id=spec.source)
     days = sorted({d.item() for d in trading_days(pd.DatetimeIndex(decisions))})

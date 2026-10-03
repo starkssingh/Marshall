@@ -10,16 +10,21 @@ research runs.
 strategies; one is validated at a time (``--strategy``).
 
 1. **The screening context is rebuilt** from the run's recorded configuration (the board and its
-   targets) and dataset, by the code the board ran (`xq.models.board.screening_context`): the
-   same walk-forward folds and out-of-sample decisions, quotes, cost model, market clock and
-   sigma-hat. A dataset whose directory is gone is rebuilt from its recorded spec, and must build
-   the same dataset id. The quotes also cover ROB-002's latency stress.
+   targets) and dataset, by the code the board ran (`xq.models.board.screening_context`): every
+   decision of the dataset, the same walk-forward folds and out-of-sample decisions, quotes, cost
+   model, market clock and sigma-hat. A dataset whose directory is gone is rebuilt from its
+   recorded spec, and must build the same dataset id. The quotes also cover ROB-002's latency
+   stress.
 2. **The strategy is rebuilt and checked.** A rule baseline (``rule`` or ``rule_vol``) is
-   recomputed from the dataset's signal bars. A forecast-sign strategy is rebuilt from the
-   predictions the run stored (verified against their recorded SHA-256). Its daily net returns
-   on every out-of-sample day must equal the ones the run recorded (``returns.parquet``, also
+   recomputed from the dataset's signal bars of its own timeframe and screened over every
+   decision, as the board screened it. A forecast-sign strategy is rebuilt from the predictions
+   the run stored (verified against their recorded SHA-256). The validation judges every
+   strategy on its **fold-aligned** record (ADR 0061): its daily net returns on every
+   out-of-sample day, which must equal the ones the run recorded (``returns.parquet``, also
    verified), within ``1e-9 + 1e-6 |x|``; otherwise the code or the data changed and the run is
-   refused: reproduce it first (`xq exp reproduce`).
+   refused: reproduce it first (`xq exp reproduce`). Every re-evaluation below (parameters,
+   costs, delays, noise) screens the full history the same way and reads the out-of-sample days
+   only.
 3. **The family** is every strategy of the board, with its recorded daily returns. The
    **baselines** of R1 are the board's other strategies: a baseline validated as a candidate must
    beat the best of the others.
@@ -34,10 +39,11 @@ strategies; one is validated at a time (``--strategy``).
    noise disturbs a rule's signal bars by multiples of the median quoted spread; the fills stay
    on the true quotes (ROB-005). Rules read no other feature, and forecast-sign strategies would
    need their models refitted on noisy inputs, so those kinds of noise are not applicable.
-6. **Trades** are the screen's closed holding episodes. ``trade_return`` is the episode's net
-   P&L over its notional at entry, and ``sigma_daily`` the sigma-hat of 1-minute returns at the
-   entry decision scaled to a regular trading day. Episodes entered before any sigma-hat is known
-   are left out of the trade list (they stay in the returns).
+6. **Trades** are the screen's closed holding episodes entered at or after the first
+   out-of-sample decision. ``trade_return`` is the episode's net P&L over its notional at entry,
+   and ``sigma_daily`` the sigma-hat of 1-minute returns at the entry decision scaled to a
+   regular trading day. Episodes entered before any sigma-hat is known are left out of the trade
+   list (they stay in the returns).
 
 Net figures carry the cost model's label ("screening, placeholder costs" while it is
 provisional).
@@ -59,7 +65,6 @@ from xq.backtest.vectorized import BacktestResult
 from xq.core.config import AppConfig, GatesConfig
 from xq.core.errors import ConfigError, XQError
 from xq.core.ids import git_sha
-from xq.core.time import trading_days
 from xq.data.calendar import regular_trading_day
 from xq.data.raw_store import sha256_file
 from xq.datasets.builder import (
@@ -182,10 +187,11 @@ def board_subject(
             periods_per_year=context.periods_per_year,
             gates=gates,
             sigma_1m_bps=context.sigma,
+            days=context.oos_days,
         )
 
     minutes = regular_trading_day(cfg.sessions_config()) / pd.Timedelta(minutes=1)
-    sigma_daily = _day_sigma(context, minutes)
+    sigma_daily = _day_sigma(context)
     others = family.drop(columns=[strategy])
     return StrategySubject(
         name=strategy,
@@ -243,8 +249,8 @@ def _rule(
     rules = board.strategies()
     if strategy not in rules:
         return None
-    rule = rules[strategy]
-    bars, bar_periods = rule_signal_bars(cfg, context.features, board, context.periods_per_year)
+    rule, timeframe = rules[strategy].rule, rules[strategy].timeframe
+    bars, bar_periods = rule_signal_bars(cfg, context.features, timeframe, context.periods_per_year)
     constants: dict[str, Any] = {"params": dict(rule.params)}
     if rule.vol_target and board.vol_target is not None:
         constants["vol_target"] = board.vol_target.model_dump(mode="json")
@@ -258,7 +264,7 @@ def _rule(
             else board.vol_target
         )
         changed = rule.model_copy(update={"params": moved["params"]})
-        return rule_positions(signal, changed, target, bar_periods, context.oos)
+        return rule_positions(signal, changed, target, bar_periods, context.decisions)
 
     quotes = context.quotes
     spread = float(np.median((quotes["ask"] - quotes["bid"]).to_numpy(np.float64)))
@@ -312,11 +318,13 @@ def _returns(context: ScreeningContext, positions: pd.Series) -> FloatArray:
 
 
 def _trades(result: BacktestResult, context: ScreeningContext, minutes: float) -> pd.DataFrame:
-    """Closed episodes in `TRADE_COLUMNS` (module docstring, item 6)."""
+    """Closed episodes entered at or after the first OOS decision, in `TRADE_COLUMNS` (module
+    docstring, item 6)."""
     closed = result.trades.loc[~result.trades["open"].astype(bool)]
     fills = result.fills
     fill_times = pd.DatetimeIndex(fills["fill_time"])
     sigma = context.sigma
+    first_oos = context.oos[0]
     rows = []
     for entry, exit_, side, pnl in zip(
         pd.DatetimeIndex(closed["entry_time"]),
@@ -329,6 +337,8 @@ def _trades(result: BacktestResult, context: ScreeningContext, minutes: float) -
         if not len(at):
             continue
         fill = fills.iloc[int(at[-1])]  # the fill that opened the episode (after any close)
+        if fill["decision_time"] < first_oos:
+            continue  # entered before the out-of-sample days (a rule's full-history screen)
         sigma_1m = float(sigma.get(fill["decision_time"], math.nan))
         if not math.isfinite(sigma_1m):
             continue
@@ -349,16 +359,10 @@ def _trades(result: BacktestResult, context: ScreeningContext, minutes: float) -
     return pd.DataFrame(rows, columns=list(TRADE_COLUMNS))
 
 
-def _day_sigma(context: ScreeningContext, minutes: float) -> pd.Series:
-    """Daily sigma-hat known at each OOS day's first decision (for volatility-tercile slices)."""
-    frame = pd.DataFrame(
-        {
-            "day": [d.item() for d in trading_days(context.oos)],
-            "sigma": context.sigma.to_numpy(np.float64) / _BPS * math.sqrt(minutes),
-        }
-    )
-    first = frame.groupby("day", sort=True)["sigma"].first()
-    return first.reindex(context.oos_days).rename("sigma_daily")
+def _day_sigma(context: ScreeningContext) -> pd.Series:
+    """Daily sigma-hat known at each OOS day's first decision (for volatility-tercile slices):
+    the context's sigma-hat spans every decision, so it is read on the OOS decisions."""
+    return context.daily_sigma(context.oos, context.oos_days)
 
 
 def _recorded_returns(engine: Engine, run: RunRef) -> pd.DataFrame:

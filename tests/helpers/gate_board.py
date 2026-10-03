@@ -31,7 +31,7 @@ BOARD: dict[str, Any] = {
     "targets": ["fwd_ret_mid_1h"],
     "walk_forward": {"min_train": "5D", "test_len": "2D", "embargo": "1h"},
     "forecast_baselines": ["zero_return", "historical_mean"],
-    "signal_timeframe": "1h",
+    "signal_timeframes": ["1h", "4h"],
     "rules": {
         "buy_and_hold": {"rule": "buy_and_hold"},
         "tsmom_8": {"rule": "time_series_momentum", "params": {"lookback": 8}},
