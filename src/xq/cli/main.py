@@ -43,6 +43,15 @@ from xq.datasets.builder import build_dataset, verify_dataset
 from xq.datasets.spec import load_spec
 from xq.models.board import load_board_config, run_baseline_board
 from xq.quality.validate import validate_source
+from xq.registry.bundles import (
+    bundle_from_board_run,
+    get_bundle,
+    list_bundles,
+    load_bundle,
+    register_bundle,
+)
+from xq.registry.gates import list_gate_results, promote, retire
+from xq.registry.models import Status, SubjectKind, status_history
 from xq.research.eda.horizons import write_admission
 from xq.research.eda.run import run_eda
 from xq.robustness.simulated import SimulationSpec
@@ -850,10 +859,110 @@ def validate_strategy_command(
     typer.echo(f"validation run {outcome.run.run_id}; report: {outcome.report_dir / 'report.md'}")
 
 
+registry_app = typer.Typer(
+    help="Strategy bundles and their status (MREG-001 ... MREG-005).", no_args_is_help=True
+)
+app.add_typer(registry_app, name="registry")
+ActorOption = Annotated[str, typer.Option("--actor", help="Who makes the change (recorded).")]
+ReasonOption = Annotated[str, typer.Option("--reason", help="Why (recorded).")]
+
+
+@registry_app.command("register")
+def registry_register(
+    ctx: typer.Context,
+    run_id: Annotated[str, typer.Option("--run", help="Baseline board run the strategy is from.")],
+    strategy: Annotated[str, typer.Option("--strategy", help="The board's rule to bundle.")],
+    actor: ActorOption,
+    name: Annotated[str | None, typer.Option("--name", help="Display name.")] = None,
+) -> None:
+    """Bundle a rule baseline of a board run (content-hashed; idempotent; status draft)."""
+    with pipeline_run(ctx.obj) as run, cli_errors():
+        content = bundle_from_board_run(run.cfg, run.engine, run_id, strategy)
+        ref = register_bundle(
+            run.engine,
+            content,
+            name=name or strategy,
+            origin_run_id=run_id,
+            origin_strategy=strategy,
+            actor=actor,
+        )
+    typer.echo(f"bundle {ref.bundle_id} ({ref.name}): {ref.status}")
+
+
+@registry_app.command("list")
+def registry_list(ctx: typer.Context) -> None:
+    """Every bundle with its status."""
+    with pipeline_run(ctx.obj) as run:
+        bundles = list_bundles(run.engine)
+    for ref in bundles:
+        origin = f"{ref.origin_run_id}:{ref.origin_strategy}" if ref.origin_run_id else "-"
+        typer.echo(f"{ref.short_id}\t{ref.status}\t{ref.name}\t{origin}")
+
+
+@registry_app.command("show")
+def registry_show(
+    ctx: typer.Context,
+    bundle_id: Annotated[str, typer.Argument(help="Bundle id or a unique prefix (8+ digits).")],
+) -> None:
+    """A bundle's content (checked against its id), gate results and status history."""
+    with pipeline_run(ctx.obj) as run, cli_errors():
+        content = load_bundle(run.engine, bundle_id)
+        ref = get_bundle(run.engine, bundle_id)
+        results = list_gate_results(run.engine, SubjectKind.BUNDLE, ref.bundle_id)
+        history = status_history(run.engine, SubjectKind.BUNDLE, ref.bundle_id)
+    typer.echo(f"bundle {ref.bundle_id} ({ref.name}): {ref.status}")
+    typer.echo(f"origin: {ref.origin_run_id or '-'} {ref.origin_strategy or ''}".rstrip())
+    typer.echo(json.dumps(content.model_dump(mode="json"), indent=2, sort_keys=True))
+    for result in results:
+        typer.echo(f"gate: {result.describe()}")
+    for change in history:
+        typer.echo(
+            f"status: {change.from_status or '-'} -> {change.to_status} by {change.actor} "
+            f"({change.reason}) at {change.changed_at}"
+        )
+
+
+@registry_app.command("promote")
+def registry_promote(
+    ctx: typer.Context,
+    bundle_id: Annotated[str, typer.Argument(help="Bundle id or a unique prefix (8+ digits).")],
+    to: Annotated[str, typer.Option("--to", help="The next status.")],
+    actor: ActorOption,
+    reason: ReasonOption,
+) -> None:
+    """Promote a bundle one step; needs a passing latest result of the matching gate."""
+    with pipeline_run(ctx.obj) as run, cli_errors():
+        try:
+            target = Status(to)
+        except ValueError as exc:
+            raise ConfigError(f"unknown status {to!r}") from exc
+        ref = get_bundle(run.engine, bundle_id)
+        change = promote(
+            run.engine, SubjectKind.BUNDLE, ref.bundle_id, target, actor=actor, reason=reason
+        )
+    typer.echo(
+        f"bundle {ref.short_id}: {change.from_status} -> {change.to_status} "
+        f"(gate result {change.gate_result_id})"
+    )
+
+
+@registry_app.command("retire")
+def registry_retire(
+    ctx: typer.Context,
+    bundle_id: Annotated[str, typer.Argument(help="Bundle id or a unique prefix (8+ digits).")],
+    actor: ActorOption,
+    reason: ReasonOption,
+) -> None:
+    """Retire a bundle (no gate needed)."""
+    with pipeline_run(ctx.obj) as run, cli_errors():
+        ref = get_bundle(run.engine, bundle_id)
+        change = retire(run.engine, SubjectKind.BUNDLE, ref.bundle_id, actor=actor, reason=reason)
+    typer.echo(f"bundle {ref.short_id}: {change.from_status} -> {change.to_status}")
+
+
 # Command groups for later phases. Each is registered now so the CLI surface is stable; the
 # commands arrive in the sprint named in the help text.
 _PLANNED_GROUPS = {
-    "registry": "Model registry and strategy bundles (Sprint 13: MREG-001..005).",
     "gate": "Evidence gates and vault evaluation (Sprint 13: GATE-001..003).",
 }
 

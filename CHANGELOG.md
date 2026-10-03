@@ -825,6 +825,15 @@ IDs from `docs/specs/development-plan.md`.
   paper R3, live_eligible R4) on the latest result of the gate; `live` is refused (GATE-004);
   `retire` needs no gate. The status trigger checks the same steps and gates; a test confirms the
   database and the service agree on every status pair. ADR 0060.
+- MREG-003: content-hashed strategy bundles (`xq.registry.bundles`, migration 0013:
+  `strategy_bundles`). The id is the SHA-256 of the canonical content (model versions,
+  feature-set version, strategy configuration, risk profile, cost-model version), so the same
+  inputs give the same id; registration is idempotent; the content is immutable in the database
+  and `load_bundle` refuses a bundle whose stored content no longer hashes to its id.
+  `bundle_from_board_run` bundles a rule baseline of a board run (forecast-sign strategies wait
+  for ML-009). Bundles are promoted through the same gates as model versions. CLI:
+  `xq registry register --run --strategy`, `list`, `show` (content checked against its id, gate
+  results, history), `promote --to`, `retire`, each recording `--actor`. ADR 0060.
 
 ### Changed
 

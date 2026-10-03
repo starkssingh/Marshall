@@ -606,3 +606,19 @@ class GateResultRecord(Base):
     gates_hash: Mapped[str] = mapped_column(String(16))
     run_id: Mapped[str | None] = mapped_column(String(26))
     created_at: Mapped[pd.Timestamp]
+
+
+class StrategyBundleRecord(Base):
+    """A deployable strategy bundle (MREG-003): its id is the SHA-256 of its canonical content
+    (model versions, feature-set version, strategy configuration, risk configuration, cost-model
+    version). The content never changes; the origin names the run and strategy it came from."""
+
+    __tablename__ = "strategy_bundles"
+
+    bundle_id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    name: Mapped[str] = mapped_column(String(128))
+    content_json: Mapped[dict[str, Any]]
+    origin_run_id: Mapped[str | None] = mapped_column(ForeignKey("runs.run_id"))
+    origin_strategy: Mapped[str | None] = mapped_column(String(160))
+    status: Mapped[str] = mapped_column(String(16))
+    created_at: Mapped[pd.Timestamp]

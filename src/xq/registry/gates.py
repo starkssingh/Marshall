@@ -53,7 +53,12 @@ from xq.registry.models import (
     SubjectKind,
 )
 from xq.tracking.db import session_factory
-from xq.tracking.models import GateResultRecord, ModelVersionRecord, StatusHistoryRecord
+from xq.tracking.models import (
+    GateResultRecord,
+    ModelVersionRecord,
+    StatusHistoryRecord,
+    StrategyBundleRecord,
+)
 
 GATES = ("R1", "R2", "R3", "R4")
 #: The gate a promotion to each status needs (module docstring).
@@ -68,9 +73,10 @@ GATE_FOR: Mapping[Status, str] = {
 NOT_APPLICABLE: Mapping[str, frozenset[str]] = {
     "R2": frozenset({"pbo_max", "parameter_neighbourhood.profitable_share_min"}),
 }
-#: Subject kind -> (table model, id column); strategy bundles are added by MREG-003.
-SUBJECTS: dict[SubjectKind, tuple[Any, str]] = {
+#: Subject kind -> (table model, id column).
+SUBJECTS: Mapping[SubjectKind, tuple[Any, str]] = {
     SubjectKind.MODEL_VERSION: (ModelVersionRecord, "model_version_id"),
+    SubjectKind.BUNDLE: (StrategyBundleRecord, "bundle_id"),
 }
 
 

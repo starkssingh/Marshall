@@ -79,3 +79,30 @@ only; the first registered subjects are strategy bundles.
    impossible through its code and visible in its tables (every result names its evaluator,
    evidence and policy hash), not impossible for an administrator. The CLI has no command that
    records a gate result by hand.
+
+## MREG-003 — content-hashed strategy bundles
+
+1. **Content** (`xq.registry.bundles.StrategyBundle`): the model versions pinned by id and
+   artifact SHA-256, the feature-set version, the source, instrument, base timeframe and price
+   basis, the strategy's configuration, the whole risk profile, and the cost-model version (venue
+   and configuration hash, as backtest records carry it). For a rule baseline the strategy
+   configuration is the rule and its volatility target, and there is no model version.
+2. **Identity is the content.** The bundle id is the SHA-256 of the canonical JSON (sorted keys,
+   no whitespace): the same inputs give the same id, any changed input another bundle.
+   Registering the same content again returns the bundle already registered (its first name and
+   origin stand).
+3. **Origin is provenance, not content**: the run and strategy a bundle was built from are stored
+   with it but are not hashed. They are where the gate evaluator finds the evidence (GATE-001).
+4. **Immutable, and checked on load.** Migration 0013's triggers refuse content edits and
+   deletions, and apply the same status steps and gates as model versions. `load_bundle`
+   re-hashes the stored content and refuses a bundle whose content no longer matches its id
+   ("runtimes load only bundles"; PAPER-001 will load through it). A test shows a bundle edited
+   after an administrator dropped the trigger is refused.
+5. **What can be bundled now.** `bundle_from_board_run` bundles a rule baseline of a board run,
+   with the configured risk profile and cost model. A forecast-sign strategy needs registered
+   model versions (ML-009) and is refused. A signal-engine strategy (SIGNAL-004) will add a
+   strategy kind when a candidate exists.
+6. **CLI.** `xq registry register --run <board run> --strategy <rule>`, `list`, `show` (the
+   content checked against its id, the gate results and the history), `promote --to <status>`
+   and `retire`. Every change records its `--actor` and `--reason`. There is no command that sets
+   a status or records a gate result directly.

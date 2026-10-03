@@ -41,6 +41,7 @@ TABLES = {
     "model_versions",
     "status_history",
     "gate_results",
+    "strategy_bundles",
     "vault_access_log",
     "dataset_versions",
     "hypotheses",
@@ -56,7 +57,7 @@ TABLES = {
     "stat_tests",
     "robustness_results",
 }
-LATEST = "0012"
+LATEST = "0013"
 NOW = pd.Timestamp("2026-09-26 01:00:00.123456789", tz="UTC")
 
 
