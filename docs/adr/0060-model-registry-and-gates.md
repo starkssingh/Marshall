@@ -106,3 +106,25 @@ only; the first registered subjects are strategy bundles.
    content checked against its id, the gate results and the history), `promote --to <status>`
    and `retire`. Every change records its `--actor` and `--reason`. There is no command that sets
    a status or records a gate result directly.
+
+## MREG-005 — the active bundle of each environment, and rollback
+
+1. **An append-only pointer** (migration 0014, `active_bundles`): each row activates a bundle in
+   an environment or rolls back, naming the bundle active before it, the actor and the reason.
+   The latest row of an environment is its active bundle; the whole history stays.
+2. **Status decides where a bundle may run**: `paper` needs paper, live_eligible or live; `prod`
+   needs live (so nothing can be active in prod until GATE-004). The service checks it, and an
+   insert trigger refuses a row whose bundle's status does not allow the environment.
+3. **Rollback restores the exact previous bundle** (`xq registry rollback --env paper`): the same
+   id, and repeated rollbacks walk further back through the history. A bundle retired since it was
+   active cannot be rolled back to, and `load_active_bundle` refuses an active bundle whose status
+   no longer allows the environment.
+4. **Hot reload.** The runtime does not exist yet (PAPER-001). The policy it must follow is
+   `may_switch(flat, at_bar_boundary)`: switch to a newly active bundle only when flat or at the
+   next bar boundary, never in the middle of handling one.
+5. **Open point for the owner.** The plan's decision point says that if no bundle passes R2,
+   Sprints 14–16 validate the infrastructure "using a baseline bundle in paper mode". Under these
+   rules a bundle reaches paper only through R1, R2 and R3. Running an ungated baseline bundle on
+   the paper infrastructure would need a separate, clearly labelled environment (for example
+   `paper_infra`, whose results are never evidence). That is the owner's decision; it is not
+   built.

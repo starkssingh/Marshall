@@ -834,6 +834,13 @@ IDs from `docs/specs/development-plan.md`.
   for ML-009). Bundles are promoted through the same gates as model versions. CLI:
   `xq registry register --run --strategy`, `list`, `show` (content checked against its id, gate
   results, history), `promote --to`, `retire`, each recording `--actor`. ADR 0060.
+- MREG-005: the active bundle of each environment (`xq.registry.bundles`, migration 0014:
+  `active_bundles`, append-only). `activate` needs a status that allows the environment (paper:
+  paper or beyond; prod: live), checked by the service and an insert trigger; `rollback` restores
+  the exact previous bundle id and walks back on repeat; `load_active_bundle` refuses a bundle
+  whose status no longer allows the environment; `may_switch` is the runtime's hot-reload rule
+  (only when flat or at the next bar). CLI: `xq registry activate --env`, `rollback --env`,
+  `active --env`. ADR 0060.
 
 ### Changed
 

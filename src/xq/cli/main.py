@@ -44,11 +44,14 @@ from xq.datasets.spec import load_spec
 from xq.models.board import load_board_config, run_baseline_board
 from xq.quality.validate import validate_source
 from xq.registry.bundles import (
+    activate,
+    activation_history,
     bundle_from_board_run,
     get_bundle,
     list_bundles,
     load_bundle,
     register_bundle,
+    rollback,
 )
 from xq.registry.gates import list_gate_results, promote, retire
 from xq.registry.models import Status, SubjectKind, status_history
@@ -958,6 +961,50 @@ def registry_retire(
         ref = get_bundle(run.engine, bundle_id)
         change = retire(run.engine, SubjectKind.BUNDLE, ref.bundle_id, actor=actor, reason=reason)
     typer.echo(f"bundle {ref.short_id}: {change.from_status} -> {change.to_status}")
+
+
+EnvOption = Annotated[str, typer.Option("--env", help="Environment: paper or prod.")]
+
+
+@registry_app.command("activate")
+def registry_activate(
+    ctx: typer.Context,
+    bundle_id: Annotated[str, typer.Argument(help="Bundle id or a unique prefix (8+ digits).")],
+    environment: EnvOption,
+    actor: ActorOption,
+    reason: ReasonOption,
+) -> None:
+    """Point an environment at a bundle its status allows (paper: paper or beyond)."""
+    with pipeline_run(ctx.obj) as run, cli_errors():
+        change = activate(run.engine, environment, bundle_id, actor=actor, reason=reason)
+    previous = change.previous_bundle_id[:12] if change.previous_bundle_id else "none"
+    typer.echo(f"{environment}: {change.bundle_id} active (was {previous})")
+
+
+@registry_app.command("rollback")
+def registry_rollback(
+    ctx: typer.Context, environment: EnvOption, actor: ActorOption, reason: ReasonOption
+) -> None:
+    """Restore the bundle active in an environment before the current one (the same hash)."""
+    with pipeline_run(ctx.obj) as run, cli_errors():
+        change = rollback(run.engine, environment, actor=actor, reason=reason)
+    typer.echo(f"{environment}: rolled back to {change.bundle_id}")
+
+
+@registry_app.command("active")
+def registry_active(ctx: typer.Context, environment: EnvOption) -> None:
+    """The active bundle of an environment and the history of its pointer."""
+    with pipeline_run(ctx.obj) as run, cli_errors():
+        history = activation_history(run.engine, environment)
+    if not history:
+        typer.echo(f"{environment}: no active bundle")
+        return
+    typer.echo(f"{environment}: {history[-1].bundle_id} active")
+    for change in history:
+        typer.echo(
+            f"  {change.activated_at} {change.action} {change.bundle_id[:12]} by {change.actor} "
+            f"({change.reason})"
+        )
 
 
 # Command groups for later phases. Each is registered now so the CLI surface is stable; the

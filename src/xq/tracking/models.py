@@ -622,3 +622,19 @@ class StrategyBundleRecord(Base):
     origin_strategy: Mapped[str | None] = mapped_column(String(160))
     status: Mapped[str] = mapped_column(String(16))
     created_at: Mapped[pd.Timestamp]
+
+
+class ActiveBundleRecord(Base):
+    """One change of an environment's active bundle (MREG-005): an activation or a rollback, the
+    bundle active before it, who made it and why. Append-only; the latest row is the pointer."""
+
+    __tablename__ = "active_bundles"
+
+    activation_id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    environment: Mapped[str] = mapped_column(String(16))
+    bundle_id: Mapped[str] = mapped_column(ForeignKey("strategy_bundles.bundle_id"))
+    previous_bundle_id: Mapped[str | None] = mapped_column(String(64))
+    action: Mapped[str] = mapped_column(String(16))
+    actor: Mapped[str] = mapped_column(String(128))
+    reason: Mapped[str] = mapped_column(Text)
+    activated_at: Mapped[pd.Timestamp]

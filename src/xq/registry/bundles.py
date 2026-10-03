@@ -18,6 +18,15 @@ evaluator finds the evidence (GATE-001).
 
 `bundle_from_board_run` builds the bundle of a rule baseline of a baseline board run. A
 forecast-sign strategy needs registered model versions (ML-009) and is refused until they exist.
+
+**The active bundle of an environment** (MREG-005). `activate` points an environment (``paper``,
+``prod``) at a bundle whose status allows it (paper: paper, live_eligible or live; prod: live);
+`rollback` restores the bundle that was active before the current one, exactly (the same id), and
+repeated rollbacks walk further back. Every change is a row of an append-only history.
+`load_active_bundle` gives a runtime the active bundle's content, checked against its id, and
+refuses one whose status no longer allows the environment (retired since, for example). A runtime
+switches to a newly active bundle only when it is flat or at the next bar (`may_switch`), never in
+the middle of handling one.
 """
 
 from __future__ import annotations
@@ -40,7 +49,11 @@ from xq.models.board import BoardConfig
 from xq.registry.models import RegistryStateError, Status, SubjectKind
 from xq.tracking import registry
 from xq.tracking.db import session_factory
-from xq.tracking.models import StatusHistoryRecord, StrategyBundleRecord
+from xq.tracking.models import (
+    ActiveBundleRecord,
+    StatusHistoryRecord,
+    StrategyBundleRecord,
+)
 
 BOARD_KIND = "baseline_board"
 
@@ -266,3 +279,161 @@ def _bundle(r: StrategyBundleRecord) -> BundleRef:
         status=Status(r.status),
         created_at=r.created_at,
     )
+
+
+#: Environment -> the statuses a bundle needs to be active there (migration 0014 enforces it).
+ENVIRONMENTS: dict[str, frozenset[Status]] = {
+    "paper": frozenset({Status.PAPER, Status.LIVE_ELIGIBLE, Status.LIVE}),
+    "prod": frozenset({Status.LIVE}),
+}
+
+
+@dataclass(frozen=True)
+class Activation:
+    """One change of an environment's active bundle."""
+
+    environment: str
+    bundle_id: str
+    previous_bundle_id: str | None
+    action: Literal["activate", "rollback"]
+    actor: str
+    reason: str
+    activated_at: pd.Timestamp
+
+
+def activate(
+    engine: Engine, environment: str, bundle_id: str, *, actor: str, reason: str
+) -> Activation:
+    """Make `bundle_id` the active bundle of `environment` (module docstring).
+
+    Raises:
+        RegistryStateError: for an unknown environment or bundle, a bundle whose status does not
+            allow the environment, or the bundle already active there.
+    """
+    ref = get_bundle(engine, bundle_id)
+    _check_allowed(environment, ref)
+    current = active_bundle(engine, environment)
+    if current == ref.bundle_id:
+        raise RegistryStateError(f"bundle {ref.short_id} is already active in {environment}")
+    return _append(engine, environment, ref.bundle_id, current, "activate", actor, reason)
+
+
+def rollback(engine: Engine, environment: str, *, actor: str, reason: str) -> Activation:
+    """Restore the bundle that was active in `environment` before the current one.
+
+    Raises:
+        RegistryStateError: for an unknown environment, nothing to roll back to, or a previous
+            bundle whose status no longer allows the environment.
+    """
+    history = activation_history(engine, environment)
+    if not history or history[-1].previous_bundle_id is None:
+        raise RegistryStateError(f"{environment} has no previous bundle to roll back to")
+    target = history[-1].previous_bundle_id
+    _check_allowed(environment, get_bundle(engine, target))
+    # the bundle active before the target became active, so a further rollback walks back
+    before = next(
+        (a.previous_bundle_id for a in reversed(history[:-1]) if a.bundle_id == target), None
+    )
+    return _append(engine, environment, target, before, "rollback", actor, reason)
+
+
+def active_bundle(engine: Engine, environment: str) -> str | None:
+    """The id of `environment`'s active bundle, or None.
+
+    Raises:
+        RegistryStateError: for an unknown environment.
+    """
+    history = activation_history(engine, environment)
+    return history[-1].bundle_id if history else None
+
+
+def activation_history(engine: Engine, environment: str) -> list[Activation]:
+    """Every change of `environment`'s active bundle, oldest first.
+
+    Raises:
+        RegistryStateError: for an unknown environment.
+    """
+    _environment(environment)
+    with session_factory(engine)() as session:
+        rows = session.scalars(
+            select(ActiveBundleRecord)
+            .where(ActiveBundleRecord.environment == environment)
+            .order_by(ActiveBundleRecord.activation_id)
+        ).all()
+        return [
+            Activation(
+                r.environment,
+                r.bundle_id,
+                r.previous_bundle_id,
+                "rollback" if r.action == "rollback" else "activate",
+                r.actor,
+                r.reason,
+                r.activated_at,
+            )
+            for r in rows
+        ]
+
+
+def load_active_bundle(engine: Engine, environment: str) -> StrategyBundle:
+    """The active bundle's content for a runtime, checked against its id and its status.
+
+    Raises:
+        RegistryStateError: for no active bundle, or one whose status no longer allows the
+            environment.
+        BundleIntegrityError: if its stored content no longer hashes to its id.
+    """
+    current = active_bundle(engine, environment)
+    if current is None:
+        raise RegistryStateError(f"{environment} has no active bundle")
+    _check_allowed(environment, get_bundle(engine, current))
+    return load_bundle(engine, current)
+
+
+def may_switch(*, flat: bool, at_bar_boundary: bool) -> bool:
+    """Whether a runtime may switch to a newly active bundle now: only when it is flat, or at the
+    next bar boundary (module docstring)."""
+    return flat or at_bar_boundary
+
+
+def _environment(environment: str) -> frozenset[Status]:
+    try:
+        return ENVIRONMENTS[environment]
+    except KeyError:
+        raise RegistryStateError(
+            f"unknown environment {environment!r}; environments: {sorted(ENVIRONMENTS)}"
+        ) from None
+
+
+def _check_allowed(environment: str, ref: BundleRef) -> None:
+    allowed = _environment(environment)
+    if ref.status not in allowed:
+        raise RegistryStateError(
+            f"bundle {ref.short_id} is {ref.status}; {environment} needs "
+            f"{' or '.join(sorted(allowed))}"
+        )
+
+
+def _append(
+    engine: Engine,
+    environment: str,
+    bundle_id: str,
+    previous: str | None,
+    action: Literal["activate", "rollback"],
+    actor: str,
+    reason: str,
+) -> Activation:
+    now = utc_now()
+    with session_factory(engine)() as session:
+        session.add(
+            ActiveBundleRecord(
+                environment=environment,
+                bundle_id=bundle_id,
+                previous_bundle_id=previous,
+                action=action,
+                actor=actor,
+                reason=reason,
+                activated_at=now,
+            )
+        )
+        session.commit()
+    return Activation(environment, bundle_id, previous, action, actor, reason, now)
