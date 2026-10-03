@@ -1,6 +1,7 @@
 """MREG-001: models and model versions with statuses. A version records its artifact's SHA-256,
 data, target, window, hyperparameters, metrics, code and run; it is immutable and never deleted,
-its status history is append-only, and a direct database edit of its status fails (ADR 0060)."""
+its status history is append-only, and a direct database edit of its status fails: a promotion
+needs a passing gate result (MREG-002), and ``live`` is never set (ADR 0060)."""
 
 from collections.abc import Iterator
 from pathlib import Path
@@ -98,7 +99,7 @@ def test_the_database_refuses_edits_deletions_and_unauthorised_promotions(
         (version_row.format("hyperparams_json = '{}'"), "immutable"),
         ("DELETE FROM model_versions WHERE model_version_id = :id", "never deleted"),
         ("DELETE FROM models", "never deleted"),
-        (version_row.format("status = 'candidate'"), "not allowed"),
+        (version_row.format("status = 'candidate'"), "needs a passing gate result"),
         (version_row.format("status = 'live'"), "not allowed"),
         ("UPDATE status_history SET actor = 'someone else'", "append-only"),
         ("DELETE FROM status_history", "append-only"),

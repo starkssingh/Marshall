@@ -818,6 +818,13 @@ IDs from `docs/specs/development-plan.md`.
   snapshot, git sha and run, starts as draft and is immutable. SQLite triggers refuse content
   edits, deletions and history rewrites, and until MREG-002 every status change but retiring; the
   migration refuses a database without the triggers. ADR 0060.
+- MREG-002: gate records and enforced transitions (`xq.registry.gates`, migration 0012:
+  `gate_results`, append-only). `record_gate_result` computes whether a result passed: every
+  criterion of the gate must be a check, not evaluated or not applicable (owner's rules only), and
+  any missing one fails it. `promote` moves one step (candidate R1, validated R2, vault_passed and
+  paper R3, live_eligible R4) on the latest result of the gate; `live` is refused (GATE-004);
+  `retire` needs no gate. The status trigger checks the same steps and gates; a test confirms the
+  database and the service agree on every status pair. ADR 0060.
 
 ### Changed
 

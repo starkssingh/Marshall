@@ -585,3 +585,24 @@ class StatusHistoryRecord(Base):
     actor: Mapped[str] = mapped_column(String(128))
     reason: Mapped[str] = mapped_column(Text)
     changed_at: Mapped[pd.Timestamp]
+
+
+class GateResultRecord(Base):
+    """One evaluation of a gate (R1 ... R4) on a model version or a strategy bundle (MREG-002):
+    the criteria, the measured values, whether it passed, the evaluator, the evidence files and
+    the evidence policy's hash. Append-only; a promotion reads the latest one of its gate."""
+
+    __tablename__ = "gate_results"
+
+    gate_result_id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    subject_kind: Mapped[str] = mapped_column(String(16))
+    subject_id: Mapped[str] = mapped_column(String(64))
+    gate: Mapped[str] = mapped_column(String(8))
+    criteria_json: Mapped[list[dict[str, Any]]] = mapped_column(JSON)
+    values_json: Mapped[dict[str, Any]]
+    passed: Mapped[bool] = mapped_column(Boolean)
+    evaluator: Mapped[str] = mapped_column(String(128))
+    evidence_paths: Mapped[list[str]]
+    gates_hash: Mapped[str] = mapped_column(String(16))
+    run_id: Mapped[str | None] = mapped_column(String(26))
+    created_at: Mapped[pd.Timestamp]

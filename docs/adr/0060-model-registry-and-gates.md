@@ -40,3 +40,42 @@ review. Its failure conditions are mutable bundles and manual database edits to 
 
 No forecasting model exists yet (ML-009 is not built), so model versions are exercised by tests
 only; the first registered subjects are strategy bundles.
+
+## MREG-002 — gate records and enforced transitions
+
+1. **Gate results** (migration 0012, `xq.registry.gates.record_gate_result`): one append-only row
+   per evaluation of a gate on a subject, with the plan's columns (subject, gate, criteria,
+   values, passed, evaluator, evidence paths, time) plus the evidence policy's hash and the run
+   that produced the evidence.
+2. **Whether a result passed is computed, never supplied.**
+   - Every criterion of the gate (from `GatesConfig.criteria`) must appear as a check, as not
+     evaluated or as not applicable. One that appears nowhere is recorded as missing.
+   - It passes only when every check passes and nothing is not evaluated or missing.
+   - Not applicable is accepted only for the owner's rules (C-25: R2 `pbo_max` and the parameter
+     neighbourhood). Anything else is refused as an error, not recorded.
+   - A check of another gate, an unknown criterion or a criterion listed twice is refused.
+3. **Transitions** (`promote`, `retire`): one step up the promotion order, with the subject's
+   **latest** result of the matching gate passing:
+
+   | To | Gate |
+   | --- | --- |
+   | candidate | R1 |
+   | validated | R2 |
+   | vault_passed | R3 |
+   | paper | R3 (the gate that moves a candidate to paper trading) |
+   | live_eligible | R4 |
+
+   - The latest result decides, so a later failure withdraws an earlier pass.
+   - `live` is refused: it needs the GATE-004 human review (the plan's "not yet").
+   - Retiring needs no gate, from any status but retired.
+   - Every change appends a history row naming the gate result that allowed it.
+4. **The database enforces the same rules.** The status trigger of `model_versions` is replaced
+   by one that checks the step and the latest gate result (the SQL is generated from the same
+   step and gate tables in the migration). A test tries every (from, to) pair of statuses, with
+   and without a passing result, and checks that a direct `UPDATE` succeeds exactly when the
+   service's rules allow it.
+5. **What this does not stop.** Anyone with write access to the database file can insert a
+   passing gate row by hand, or drop a trigger. The registry makes promotion without evidence
+   impossible through its code and visible in its tables (every result names its evaluator,
+   evidence and policy hash), not impossible for an administrator. The CLI has no command that
+   records a gate result by hand.
