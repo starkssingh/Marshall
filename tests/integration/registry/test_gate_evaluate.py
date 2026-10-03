@@ -44,8 +44,8 @@ def test_a_bundle_is_registered_with_its_backtest_history(
     world: tuple[Path, AppConfig, Engine, str],
 ) -> None:
     root, _, engine, run_id = world
-    bundle_id = register(root, run_id, "tsmom_8")
-    assert register(root, run_id, "tsmom_8") == bundle_id  # the same content: the same bundle
+    bundle_id = register(root, run_id, "tsmom_8@1h")
+    assert register(root, run_id, "tsmom_8@1h") == bundle_id  # the same content: the same bundle
     history = performance_history(engine, bundle_id, "backtest")
     returns = registry.list_artifacts(engine, run_id)
     assert len(history) > 0
@@ -66,10 +66,10 @@ def test_the_gate_evaluator_records_r1_and_r2_from_a_validation(
     world: tuple[Path, AppConfig, Engine, str],
 ) -> None:
     root, _, engine, run_id = world
-    bundle_id = register(root, run_id, "tsmom_8")
+    bundle_id = register(root, run_id, "tsmom_8@1h")
     code, output = xq(root, "gate", "evaluate", bundle_id[:12])
     assert code == 0, output  # a failed gate is a result, not an error
-    (validation,) = validations(engine, run_id, "tsmom_8")
+    (validation,) = validations(engine, run_id, "tsmom_8@1h")
     assert validation.confirmatory  # a clean tree: the evidence is citable
     results = list_gate_results(engine, SubjectKind.BUNDLE, bundle_id)
     assert [r.gate for r in results] == ["R1", "R2"]
@@ -100,7 +100,7 @@ def test_the_gate_evaluator_records_r1_and_r2_from_a_validation(
     # GATE-003: the human review template, filled in next to the report, signed by nobody yet
     review = report.with_name("review.md").read_text()
     assert review.startswith("# Gate review and sign-off (GATE-003)")
-    assert f"- Bundle: `{bundle_id}` (tsmom_8), status at evaluation: draft" in review
+    assert f"- Bundle: `{bundle_id}` (tsmom_8@1h), status at evaluation: draft" in review
     assert f"- Validation run: {validation.run_id}" in review
     assert results[0].describe() in review
     assert "{" not in review.split("## Evidence checklist")[0]  # every field filled
@@ -121,16 +121,16 @@ def test_an_existing_validation_is_read_only_if_it_validates_the_bundle(
     world: tuple[Path, AppConfig, Engine, str],
 ) -> None:
     root, _, engine, run_id = world
-    bundle_id = register(root, run_id, "tsmom_8")
-    other = register(root, run_id, "buy_and_hold")
-    (validation,) = validations(engine, run_id, "tsmom_8")
+    bundle_id = register(root, run_id, "tsmom_8@1h")
+    other = register(root, run_id, "buy_and_hold@1h")
+    (validation,) = validations(engine, run_id, "tsmom_8@1h")
     code, output = xq(root, "gate", "evaluate", other[:12], "--validation", validation.run_id)
     assert code == 2
-    assert "validated 'tsmom_8', not 'buy_and_hold'" in output
+    assert "validated 'tsmom_8@1h', not 'buy_and_hold@1h'" in output
     before = len(list_gate_results(engine, SubjectKind.BUNDLE, bundle_id))
     code, output = xq(root, "gate", "evaluate", bundle_id[:12], "--validation", validation.run_id)
     assert code == 0, output
-    assert len(validations(engine, run_id, "tsmom_8")) == 1  # read, not rerun
+    assert len(validations(engine, run_id, "tsmom_8@1h")) == 1  # read, not rerun
     assert len(list_gate_results(engine, SubjectKind.BUNDLE, bundle_id)) == before + 2
     path = next(
         Path(a.path)

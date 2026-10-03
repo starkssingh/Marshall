@@ -2,14 +2,16 @@
 end to end on synthetic ticks: one strategy of the board is validated at a time; a rule's numeric
 constants are perturbed (C-25 (4)), or its neighbourhood is not applicable when the hypothesis
 declares them fixed a priori; a forecast-sign strategy's neighbourhood is not evaluated; the
-rebuilt returns must equal the recorded ones, and altered artifacts are refused. Synthetic data:
-an engineering check, never evidence."""
+rebuilt returns must equal the recorded ones, and altered artifacts are refused. Rules are
+screened over the full history and judged on the out-of-sample days (C-15, ADR 0061). Synthetic
+data: an engineering check, never evidence."""
 
 import json
 from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
 
+import numpy as np
 import pandas as pd
 import pytest
 import yaml
@@ -20,12 +22,15 @@ from helpers.datasets import dataset_spec, validated_pipeline
 from helpers.pipeline import REPO, config
 from helpers.ticks import dense_ticks, write_mt5
 from xq.backtest.costs import SCREENING_LABEL
+from xq.backtest.metrics import return_metrics
 from xq.cli.main import app
 from xq.core.config import AppConfig
 from xq.datasets.builder import DatasetRef, build_dataset
+from xq.robustness.subject import TrialSummary
 from xq.tracking import registry
 from xq.tracking.trials import trial_count
 from xq.validation.strategy import VALIDATION_KIND
+from xq.validation.subjects import board_subject
 
 TEMPLATE = REPO / "experiments" / "hypotheses" / "TEMPLATE.yaml"
 FWD = {"name": "fwd_returns", "version": "v1"}
@@ -33,7 +38,7 @@ BOARD = {
     "targets": ["fwd_ret_mid_1h"],
     "walk_forward": {"min_train": "5D", "test_len": "2D", "embargo": "1h"},
     "forecast_baselines": ["zero_return", "historical_mean"],
-    "signal_timeframe": "1h",
+    "signal_timeframes": ["1h", "4h"],
     "rules": {
         "buy_and_hold": {"rule": "buy_and_hold"},
         "tsmom_8": {"rule": "time_series_momentum", "params": {"lookback": 8}},
@@ -164,11 +169,11 @@ def test_a_rule_has_its_constants_perturbed(
 ) -> None:
     before = trial_count(cfg, engine, "board_plain").n_trials
     code, output = xq(
-        root, "validate-strategy", plain_run, "--strategy", "ma_4_12_vol", "--exploratory"
+        root, "validate-strategy", plain_run, "--strategy", "ma_4_12_vol@1h", "--exploratory"
     )
     assert code == 0, output
     assert f"net figures: {SCREENING_LABEL}" in output
-    payload = report_of(engine, root, plain_run, "ma_4_12_vol")
+    payload = report_of(engine, root, plain_run, "ma_4_12_vol@1h")
     assert payload["cost_basis"] == SCREENING_LABEL
     assert payload["synthetic"] is False  # the adapter cannot tell; the run is exploratory
     row = rob001(payload)
@@ -191,6 +196,43 @@ def test_a_rule_has_its_constants_perturbed(
     assert trial_count(cfg, engine, "board_plain").n_trials == before  # validation adds none
 
 
+def test_a_rule_screened_over_its_full_history_is_judged_on_the_test_days(
+    cfg: AppConfig, root: Path, engine: Engine, plain_run: str
+) -> None:
+    strategy = "tsmom_8@1h"
+    subject = board_subject(
+        cfg,
+        engine,
+        registry.get_run(engine, plain_run),
+        strategy,
+        trials=TrialSummary(n_raw=1, n_effective=1.0, sharpe_variance=0.0, gated="raw"),
+        slices=None,
+        parameters_fixed_a_priori=None,
+    )
+    (artifact,) = [
+        a for a in registry.list_artifacts(engine, plain_run) if a.kind == "baseline_returns"
+    ]
+    recorded = pd.read_parquet(artifact.path)[strategy]
+    np.testing.assert_allclose(subject.returns.to_numpy(), recorded.to_numpy(), atol=1e-9)
+    board = json.loads((Path(artifact.path).parent / "board.json").read_text())
+    (row,) = [r for r in board["strategies"] if r["strategy"] == strategy]
+    first_oos = pd.Timestamp(board["oos_start"])
+    assert pd.Timestamp(row["evaluation_start"]) < first_oos
+    # trades are the episodes entered on the test days, fewer than over the evaluation period
+    assert len(subject.trades)
+    assert (pd.DatetimeIndex(subject.trades["entry_time"]) >= first_oos).all()
+    assert len(subject.trades) < row["trade_count"]
+    # cost stress reads the test days only, like the fold-aligned record
+    stress = subject.cost_stress(cfg.gates_config()).table.loc["baseline"]
+    assert stress["net_pnl"] == pytest.approx(row["fold_net_pnl"])
+    assert stress["net_sharpe"] == pytest.approx(row["fold_sharpe"])
+    assert stress["net_sharpe"] == pytest.approx(return_metrics(subject.returns, 252)["sharpe"])
+    # the daily sigma-hat is read on the test days' first decisions
+    assert subject.sigma_daily is not None
+    assert list(subject.sigma_daily.index) == list(subject.returns.index)
+    assert subject.sigma_daily.notna().all()
+
+
 def test_a_forecast_sign_strategy_has_no_neighbourhood_to_evaluate(
     root: Path, engine: Engine, plain_run: str
 ) -> None:
@@ -207,10 +249,13 @@ def test_parameters_declared_fixed_a_priori_make_the_neighbourhood_not_applicabl
     root: Path, dataset: DatasetRef, engine: Engine
 ) -> None:
     run_id = board_run(root, dataset, engine, "H-0802")
-    code, output = xq(root, "validate-strategy", run_id, "--strategy", "tsmom_8", "--exploratory")
+    # a rule on the second signal timeframe rebuilds from its own (4h) bars
+    code, output = xq(
+        root, "validate-strategy", run_id, "--strategy", "tsmom_8@4h", "--exploratory"
+    )
     assert code == 0, output
     assert f"not applicable: parameters fixed a priori (source: {SOURCE})" in output
-    payload = report_of(engine, root, run_id, "tsmom_8")
+    payload = report_of(engine, root, run_id, "tsmom_8@4h")
     assert "parameter_neighbourhood.profitable_share_min" in payload["not_applicable"]["R2"]
     assert "parameter_neighbourhood.profitable_share_min" not in [
         c["key"] for c in payload["checks"]
@@ -235,10 +280,10 @@ def test_a_rebuild_that_does_not_match_the_record_is_refused(
     original = path.read_bytes()
     frame = pd.read_parquet(path)
     try:
-        frame["tsmom_8"] = frame["tsmom_8"] + 0.001
+        frame["tsmom_8@1h"] = frame["tsmom_8@1h"] + 0.001
         frame.to_parquet(path)
         code, output = xq(
-            root, "validate-strategy", plain_run, "--strategy", "tsmom_8", "--exploratory"
+            root, "validate-strategy", plain_run, "--strategy", "tsmom_8@1h", "--exploratory"
         )
         assert code == 2
         assert "missing or altered since it was recorded" in output

@@ -65,6 +65,12 @@ an active bundle per environment with rollback, a performance history, `xq gate 
 and R2 from a validation, the plan's ten gate items and a human-review template), and the
 one-time vault evaluation (one token per validated bundle, ever; R3 recorded). It is tested end
 to end on synthetic ticks against a test vault start; the vault has never been opened.
+The baseline board now runs the revised H-0001 (C-15, ADR 0061): every rule on 1d and 1h signal
+bars (`<name>@<timeframe>`, 36 strategies with the forecast-sign ones), evaluated over the full
+pre-vault history after its own warm-up, with the fold-aligned view (the same returns on the
+walk-forward test days) kept in `returns.parquet` for paired comparisons, validation and the
+registry, and descriptive year and session slices. H-0001 is still unregistered: its windows
+are set from the real data's depth at registration. Synthetic data only.
 See
 [`CHANGELOG.md`](CHANGELOG.md) for
 completed backlog tasks and [`docs/STATUS.md`](docs/STATUS.md) for the current sprint, open
@@ -96,14 +102,15 @@ uv run xq validate                            # data-quality checks (pre-vault) 
 uv run xq dataset build experiments/configs/ds_base.yaml   # versioned dataset with targets
 uv run xq exp register experiments/hypotheses/H-XXXX.yaml  # pre-register (copy TEMPLATE.yaml)
 uv run xq exp trials                          # trial counts for multiple-testing corrections
-uv run xq baselines run --dataset <ds-id>     # baseline board in reports/baselines/ (screening)
+uv run xq baselines run --dataset <ds-id>     # baseline board in reports/baselines/ (screening;
+                                              # needs a registered hypothesis, H-0001 by default)
 uv run xq research eda --dataset <ds-id> --hypothesis <H>  # EDA report on the discovery window
 uv run xq exp close <experiment-id> --conclusion <yaml>    # close with a verdict (research log)
 uv run xq exp audit                           # experiments still without a conclusion
 uv run xq exp reproduce <run-id>              # rebuild the dataset, rerun, compare the metrics
 uv run xq robustness simulate --truth genuine --hypothesis <H>  # known-truth run (synthetic)
 uv run xq validate-strategy <run-id>          # significance + robustness report vs the gates
-uv run xq validate-strategy <board-run> --strategy <name>  # one strategy of a baseline board
+uv run xq validate-strategy <board-run> --strategy <name>  # one board strategy, e.g. tsmom_252@1d
 uv run xq registry register --run <board-run> --strategy <rule> --actor <you>  # hashed bundle
 uv run xq gate evaluate <bundle>              # R1/R2 from a validation: gate report and review
 uv run xq registry promote <bundle> --to candidate --actor <you> --reason <review>

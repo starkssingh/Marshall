@@ -871,8 +871,35 @@ IDs from `docs/specs/development-plan.md`.
   the vault), the decision and the sign-off of the reviewer and the owner. `xq gate evaluate`
   writes it filled in (`review.md`) next to each gate report. No LLM makes or signs the decision.
   ADR 0060.
+- C-15, BASE-005: the revised H-0001 in the board runner (ADR 0035, readings approved in
+  ADR 0041). Rules run on every timeframe of `signal_timeframes` (`[1d, 1h]` in the repository's
+  board), named `<name>@<timeframe>`: 24 rule and 12 forecast-sign strategies, H-0001's budget of
+  36. Each rule's warm-up is computed from its parameters (`rule_warmup`); the rule is screened
+  over every decision of the dataset and evaluated from the first decision after its warm-up bar
+  to the dataset's end (`full_history`), with its statistics, DSR, trial and random-entry null
+  (template restricted to the evaluation decisions) on that period. A position before the
+  evaluation starts, or a dataset too short for a warm-up, stops the board (`BoardError`).
+  Forecast-sign strategies stay on the test folds. The fold-aligned view (the same returns on the
+  OOS days, not a trial) stays `returns.parquet`; `returns_evaluation.parquet` (kind
+  `baseline_returns_evaluation`) holds the evaluation-period returns. The report adds the signal
+  timeframe, warm-up, evaluation start, days and period, the fold-aligned Sharpe ratio, annual
+  return and net P&L (descriptive), and year and session slices of the evaluation period from the
+  hypothesis's declared slices (descriptive; a slice that cannot be computed is reported). H-0001
+  stays unregistered. Synthetic data only. ADR 0061.
 
 ### Changed
+
+- C-15 (ADR 0061): the board configuration's `signal_timeframe` is replaced by
+  `signal_timeframes` (the old key is refused); `BoardConfig.strategies()` returns a `BoardRule`
+  (rule and timeframe) per `<name>@<timeframe>`; `rule_signal_bars` takes a timeframe. The
+  screening context holds every decision and day, with quotes and sigma-hat over the full span.
+  `xq validate-strategy` rebuilds a rule from its own timeframe over every decision and judges it
+  on the OOS days (its trades are the episodes entered from the first OOS decision, its daily
+  sigma-hat is read on the OOS decisions); `cost_stress` takes optional `days` (Sharpe ratio, P&L,
+  costs and break-even read those days only). A bundle's `signal_timeframe` is its rule's, and the
+  vault evaluation loads warm-up and signal bars by it. `donchian_breakout` enters only once its
+  exit channel is known too (configurations with `exit > max(entry, atr_window)` only; the unit
+  test that entered with an unknown exit channel now uses a known one).
 
 - C-25 (1) (owner's decision, ADR 0058), VAL-003: PBO does not apply to a family without a
   meaningful selection. When the family's effective trial count is at most 2

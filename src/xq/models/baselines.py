@@ -39,11 +39,18 @@ and count signal bars; every window includes the current bar unless stated:
   *before* it, short when it falls below their lowest low; a long exits when the close falls
   below the lowest low of the ``exit`` bars before it or below its stop, a short symmetrically.
   The stop is fixed at entry, ``atr_stop`` average true ranges (simple mean over
-  ``atr_window`` bars) from the entry close; no entry while the ATR is unknown;
+  ``atr_window`` bars) from the entry close; no entry while the ATR or either channel is unknown;
 - volatility-targeted versions scale any rule's exposure by
   ``min(max_exposure, annual_vol / realized)``, where ``realized`` is the standard deviation of
   the last ``lookback`` log returns of closes, annualized with ``sqrt(periods_per_year)``; the
   exposure is 0 while it is unknown.
+
+**Warm-up** (`rule_warmup`, ADR 0061): the number of signal bars a rule needs before its state is
+defined, computed from its parameters: ``buy_and_hold`` 1, ``time_series_momentum``
+``lookback + 1``, ``zscore_reversion`` ``lookback``, ``ma_crossover`` ``slow``,
+``donchian_breakout`` ``max(entry, exit, atr_window) + 1``, and ``lookback + 1`` of the volatility
+target for a volatility-targeted rule (the larger of the two). Before its warm-up bar a rule's
+exposure is 0; from it on the rule is fully defined.
 
 **Random-entry null.** `random_entry` keeps a template position series' holding episodes (maximal
 runs of non-zero exposure of one sign, with their exposure paths, so trade count, holding times
@@ -271,7 +278,7 @@ def donchian_breakout(bars: pd.DataFrame, params: Mapping[str, Any]) -> pd.Serie
         long_exit = state > 0 and (c < exit_low[i] or c < stop)
         if long_exit or (state < 0 and (c > exit_high[i] or c > stop)):
             state = 0.0
-        if state == 0.0 and not math.isnan(atr[i]):
+        if state == 0.0 and not math.isnan(atr[i] + exit_low[i] + upper[i]):
             if c > upper[i]:
                 state, stop = 1.0, c - atr_stop * atr[i]
             elif c < lower[i]:
@@ -344,6 +351,35 @@ def rule_exposure(
     if vol_target is None:
         raise ConfigError(f"rule {strategy.rule!r} is volatility-targeted but no target is set")
     return vol_targeted(exposure, bars, vol_target, periods_per_year)
+
+
+def rule_warmup(strategy: RuleStrategyConfig, vol_target: VolTargetConfig | None = None) -> int:
+    """Signal bars a rule needs before its state is defined (module docstring, "Warm-up"): its
+    first possible non-zero exposure is on this bar (1 = the first bar).
+
+    Raises:
+        ConfigError: for an unknown rule, bad parameters, or volatility targeting without its
+            settings.
+    """
+    params = strategy.params
+    if strategy.rule == "buy_and_hold":
+        bars = 1
+    elif strategy.rule == "time_series_momentum":
+        bars = _positive(params, "lookback") + 1
+    elif strategy.rule == "zscore_reversion":
+        bars = _positive(params, "lookback")
+    elif strategy.rule == "ma_crossover":
+        bars = _positive(params, "slow")
+    elif strategy.rule == "donchian_breakout":
+        bars = max(_positive(params, k) for k in ("entry", "exit", "atr_window")) + 1
+    else:
+        known = ", ".join(sorted(RULES))
+        raise ConfigError(f"unknown rule {strategy.rule!r}; available: {known}")
+    if not strategy.vol_target:
+        return bars
+    if vol_target is None:
+        raise ConfigError(f"rule {strategy.rule!r} is volatility-targeted but no target is set")
+    return max(bars, vol_target.lookback + 1)
 
 
 def positions_at(decisions: pd.DatetimeIndex, exposure: pd.Series) -> pd.Series:

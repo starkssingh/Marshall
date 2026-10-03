@@ -1,9 +1,10 @@
-# DRAFT for owner review — NOT REGISTERED (revised at the start of Sprint 5, ADR 0035, C-15).
-# `xq exp register` locks this exact text; register it only after the owner has approved the
-# revision and the windows below are set from the real data's depth. Until then the two window
-# fields are deliberately not timestamps, so registration is refused. The board runner must also
-# implement the revision (C-15) before H-0001 runs on real data. The plan records the first
-# baseline board as H-0001.
+# DRAFT — NOT REGISTERED (revised at the start of Sprint 5, ADR 0035; readings approved, ADR 0041).
+# `xq exp register` locks this exact text; register it only once the windows below are set from
+# the real data's depth (the owner's step, C-15). Until then the two window fields are
+# deliberately not timestamps, so registration is refused. The board runner implements the
+# revision (ADR 0061): rules on 1d and 1h signal bars named <name>@<timeframe>, evaluated over the
+# full pre-vault history after their own warm-up, with the fold-aligned view stored, and the
+# descriptive slices below. The plan records the first baseline board as H-0001.
 id: H-0001
 title: Do simple strategies make money after costs? (the baseline board)
 family: baselines

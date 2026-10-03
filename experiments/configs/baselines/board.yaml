@@ -20,9 +20,15 @@ walk_forward:
 
 forecast_baselines: [zero_return, random_walk, historical_mean, climatology]
 
-# Rules run on the daily context bars (17:00 New York roll), traded at the first decision after
-# the reopen. Lookbacks count daily bars.
-signal_timeframe: 1d
+# Rules run on the daily (17:00 New York roll) and the hourly context bars (H-0001, ADR 0035), each
+# strategy named <name>@<timeframe>, and are traded on the 15m decision grid at the first decision
+# after a signal bar is available. Lookbacks count bars of the signal timeframe (ADR 0041). A rule
+# is screened over the full pre-vault history and evaluated from the first decision after its own
+# warm-up (the bars its lookbacks and volatility target need, computed from its parameters); its
+# fold-aligned view (the same returns on the walk-forward test days) is stored for comparison and
+# is not a trial (ADR 0061). 6 rules x plain/vol x 2 timeframes = 24 rule strategies, plus 4
+# targets x 3 forecast-sign strategies = 36, H-0001's trial budget.
+signal_timeframes: [1d, 1h]
 rules:
   buy_and_hold:
     rule: buy_and_hold
@@ -42,9 +48,10 @@ rules:
     rule: donchian_breakout
     params: {entry: 20, exit: 10, atr_window: 20, atr_stop: 2.0}
 
-# Every rule also runs volatility-targeted as <name>_vol.
+# Every rule also runs volatility-targeted as <name>_vol (lookback in bars of the signal timeframe,
+# annualized with that timeframe's bars per year).
 vol_target: {annual_vol: 0.10, lookback: 20, max_exposure: 2.0}
 
-# Random-entry null per strategy (the plan's 1,000 seeds).
+# Random-entry null per strategy (the plan's 1,000 seeds), placed on its evaluation decisions only.
 random_entry_seeds: 1000
 ci_level: 0.95
