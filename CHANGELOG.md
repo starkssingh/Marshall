@@ -841,6 +841,11 @@ IDs from `docs/specs/development-plan.md`.
   whose status no longer allows the environment; `may_switch` is the runtime's hot-reload rule
   (only when flat or at the next bar). CLI: `xq registry activate --env`, `rollback --env`,
   `active --env`. ADR 0060.
+- MREG-004: performance history per bundle (`xq.registry.bundles`, migration 0015:
+  `bundle_performance`, append-only). `append_performance` appends daily rows per source
+  (backtest, vault, paper, live) in order and never rewrites a day; `xq registry register` appends
+  the origin board strategy's verified out-of-sample returns as the backtest history;
+  `xq registry history` summarizes it. ADR 0060.
 
 ### Changed
 

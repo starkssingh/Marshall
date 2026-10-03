@@ -27,6 +27,13 @@ repeated rollbacks walk further back. Every change is a row of an append-only hi
 refuses one whose status no longer allows the environment (retired since, for example). A runtime
 switches to a newly active bundle only when it is flat or at the next bar (`may_switch`), never in
 the middle of handling one.
+
+**Performance history** (MREG-004). `append_performance` appends one row per trading day and
+source (``backtest``, ``vault``, ``paper``, ``live``): the net return on the capital, the net P&L
+and the trades closed, with the run that produced it. Days are appended in order and never
+rewritten. Registering a bundle from a board run appends its out-of-sample screen as its
+``backtest`` history (`append_board_history`); the vault evaluation appends ``vault`` rows
+(GATE-002), paper and live trading their own later (PAPER-004, PAPER-006).
 """
 
 from __future__ import annotations
@@ -34,16 +41,20 @@ from __future__ import annotations
 import hashlib
 import json
 from dataclasses import dataclass
+from datetime import date
+from pathlib import Path
 from typing import Any, Literal
 
+import numpy as np
 import pandas as pd
 from pydantic import BaseModel, ConfigDict, Field
-from sqlalchemy import Engine, select
+from sqlalchemy import Engine, func, select
 
 from xq.backtest.costs import CostModel
 from xq.backtest.report import cost_model_version
 from xq.core.config import AppConfig
 from xq.core.time import utc_now
+from xq.data.raw_store import sha256_file
 from xq.datasets.builder import recorded_spec
 from xq.models.board import BoardConfig
 from xq.registry.models import RegistryStateError, Status, SubjectKind
@@ -51,6 +62,7 @@ from xq.tracking import registry
 from xq.tracking.db import session_factory
 from xq.tracking.models import (
     ActiveBundleRecord,
+    BundlePerformanceRecord,
     StatusHistoryRecord,
     StrategyBundleRecord,
 )
@@ -437,3 +449,121 @@ def _append(
         )
         session.commit()
     return Activation(environment, bundle_id, previous, action, actor, reason, now)
+
+
+#: Where a bundle's daily performance comes from.
+SOURCES = ("backtest", "vault", "paper", "live")
+RETURNS_ARTIFACT = "baseline_returns"
+
+
+def append_performance(
+    engine: Engine,
+    bundle_id: str,
+    source: str,
+    daily: pd.DataFrame,
+    *,
+    run_id: str | None,
+) -> int:
+    """Append daily rows (index: trading days; ``net_return``, optional ``net_pnl`` and
+    ``trades``) to a bundle's history from `source`; return the rows appended.
+
+    Raises:
+        RegistryStateError: for an unknown bundle or source, a missing or non-finite net return,
+            or a day not after the last one already recorded for this source.
+    """
+    if source not in SOURCES:
+        raise RegistryStateError(f"unknown performance source {source!r}; sources: {SOURCES}")
+    ref = get_bundle(engine, bundle_id)
+    if "net_return" not in daily.columns or not np.isfinite(daily["net_return"]).all():
+        raise RegistryStateError("every day needs a finite net_return")
+    days = [pd.Timestamp(d).date() for d in daily.index]
+    if days != sorted(set(days)):
+        raise RegistryStateError("days must be distinct and in order")
+    with session_factory(engine)() as session:
+        last = session.scalar(
+            select(func.max(BundlePerformanceRecord.trading_day)).where(
+                BundlePerformanceRecord.bundle_id == ref.bundle_id,
+                BundlePerformanceRecord.source == source,
+            )
+        )
+        if last is not None and days and days[0] <= last:
+            raise RegistryStateError(
+                f"bundle {ref.short_id} already has {source} performance up to {last}; days are "
+                "appended, never rewritten"
+            )
+        now = utc_now()
+        for day, row in zip(days, daily.to_dict(orient="records"), strict=True):
+            pnl = row.get("net_pnl")
+            trades = row.get("trades")
+            session.add(
+                BundlePerformanceRecord(
+                    bundle_id=ref.bundle_id,
+                    source=source,
+                    trading_day=day,
+                    net_return=float(row["net_return"]),
+                    net_pnl=None if pnl is None or pd.isna(pnl) else float(pnl),
+                    trades=None if trades is None or pd.isna(trades) else int(trades),
+                    run_id=run_id,
+                    recorded_at=now,
+                )
+            )
+        session.commit()
+    return len(days)
+
+
+def performance_history(engine: Engine, bundle_id: str, source: str | None = None) -> pd.DataFrame:
+    """A bundle's daily performance (all sources, or one), ordered by source and day."""
+    ref = get_bundle(engine, bundle_id)
+    with session_factory(engine)() as session:
+        query = select(BundlePerformanceRecord).where(
+            BundlePerformanceRecord.bundle_id == ref.bundle_id
+        )
+        if source is not None:
+            query = query.where(BundlePerformanceRecord.source == source)
+        rows = session.scalars(
+            query.order_by(BundlePerformanceRecord.source, BundlePerformanceRecord.trading_day)
+        ).all()
+        return pd.DataFrame(
+            [
+                {
+                    "source": r.source,
+                    "trading_day": r.trading_day,
+                    "net_return": r.net_return,
+                    "net_pnl": r.net_pnl,
+                    "trades": r.trades,
+                    "run_id": r.run_id,
+                }
+                for r in rows
+            ],
+            columns=["source", "trading_day", "net_return", "net_pnl", "trades", "run_id"],
+        )
+
+
+def append_board_history(cfg: AppConfig, engine: Engine, bundle_id: str) -> int:
+    """Append the out-of-sample screen of a bundle's origin board strategy as its ``backtest``
+    history (the daily returns the run recorded, verified against their SHA-256); return the
+    rows appended (0 when already recorded).
+
+    Raises:
+        RegistryStateError: for a bundle without a board origin, or an altered returns file.
+    """
+    ref = get_bundle(engine, bundle_id)
+    if ref.origin_run_id is None or ref.origin_strategy is None:
+        raise RegistryStateError(f"bundle {ref.short_id} has no board run origin")
+    if len(performance_history(engine, ref.bundle_id, "backtest")):
+        return 0
+    artifacts = [
+        a for a in registry.list_artifacts(engine, ref.origin_run_id) if a.kind == RETURNS_ARTIFACT
+    ]
+    if len(artifacts) != 1:
+        raise RegistryStateError(f"run {ref.origin_run_id} has no single returns artifact")
+    path = Path(artifacts[0].path)
+    if not path.is_file() or sha256_file(path) != artifacts[0].sha256:
+        raise RegistryStateError(f"{path} is missing or altered since it was recorded")
+    returns = pd.read_parquet(path)[ref.origin_strategy]
+    capital = cfg.backtest_config().capital_usd
+    daily = pd.DataFrame(
+        {"net_return": returns.to_numpy(np.float64), "net_pnl": returns.to_numpy() * capital},
+        index=[date.fromisoformat(str(d)) for d in returns.index],
+    )
+    return append_performance(engine, ref.bundle_id, "backtest", daily, run_id=ref.origin_run_id)

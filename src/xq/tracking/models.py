@@ -638,3 +638,21 @@ class ActiveBundleRecord(Base):
     actor: Mapped[str] = mapped_column(String(128))
     reason: Mapped[str] = mapped_column(Text)
     activated_at: Mapped[pd.Timestamp]
+
+
+class BundlePerformanceRecord(Base):
+    """One trading day of a bundle's performance from one source: backtest, vault, paper or live
+    (MREG-004). Append-only."""
+
+    __tablename__ = "bundle_performance"
+
+    bundle_id: Mapped[str] = mapped_column(
+        ForeignKey("strategy_bundles.bundle_id"), primary_key=True
+    )
+    source: Mapped[str] = mapped_column(String(16), primary_key=True)
+    trading_day: Mapped[date] = mapped_column(Date, primary_key=True)
+    net_return: Mapped[float] = mapped_column(Float)
+    net_pnl: Mapped[float | None] = mapped_column(Float)
+    trades: Mapped[int | None] = mapped_column(Integer)
+    run_id: Mapped[str | None] = mapped_column(String(26))
+    recorded_at: Mapped[pd.Timestamp]

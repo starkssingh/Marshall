@@ -46,10 +46,12 @@ from xq.quality.validate import validate_source
 from xq.registry.bundles import (
     activate,
     activation_history,
+    append_board_history,
     bundle_from_board_run,
     get_bundle,
     list_bundles,
     load_bundle,
+    performance_history,
     register_bundle,
     rollback,
 )
@@ -878,7 +880,8 @@ def registry_register(
     actor: ActorOption,
     name: Annotated[str | None, typer.Option("--name", help="Display name.")] = None,
 ) -> None:
-    """Bundle a rule baseline of a board run (content-hashed; idempotent; status draft)."""
+    """Bundle a rule baseline of a board run (content-hashed; idempotent; status draft); its
+    out-of-sample screen becomes the bundle's backtest history (MREG-004)."""
     with pipeline_run(ctx.obj) as run, cli_errors():
         content = bundle_from_board_run(run.cfg, run.engine, run_id, strategy)
         ref = register_bundle(
@@ -889,7 +892,10 @@ def registry_register(
             origin_strategy=strategy,
             actor=actor,
         )
+        days = append_board_history(run.cfg, run.engine, ref.bundle_id)
     typer.echo(f"bundle {ref.bundle_id} ({ref.name}): {ref.status}")
+    if days:
+        typer.echo(f"backtest history: {days} trading days from run {run_id}")
 
 
 @registry_app.command("list")
@@ -961,6 +967,24 @@ def registry_retire(
         ref = get_bundle(run.engine, bundle_id)
         change = retire(run.engine, SubjectKind.BUNDLE, ref.bundle_id, actor=actor, reason=reason)
     typer.echo(f"bundle {ref.short_id}: {change.from_status} -> {change.to_status}")
+
+
+@registry_app.command("history")
+def registry_history(
+    ctx: typer.Context,
+    bundle_id: Annotated[str, typer.Argument(help="Bundle id or a unique prefix (8+ digits).")],
+) -> None:
+    """A bundle's daily performance per source (backtest, vault, paper, live)."""
+    with pipeline_run(ctx.obj) as run, cli_errors():
+        history = performance_history(run.engine, bundle_id)
+    if history.empty:
+        typer.echo("no performance recorded")
+        return
+    for source, rows in history.groupby("source", sort=False):
+        typer.echo(
+            f"{source}: {len(rows)} trading days, {rows['trading_day'].iloc[0]} to "
+            f"{rows['trading_day'].iloc[-1]}, net return {rows['net_return'].sum():.4%}"
+        )
 
 
 EnvOption = Annotated[str, typer.Option("--env", help="Environment: paper or prod.")]

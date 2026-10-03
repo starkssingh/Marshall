@@ -128,3 +128,18 @@ only; the first registered subjects are strategy bundles.
    the paper infrastructure would need a separate, clearly labelled environment (for example
    `paper_infra`, whose results are never evidence). That is the owner's decision; it is not
    built.
+
+## MREG-004 — performance history per bundle
+
+1. **Daily rows** (migration 0015, `bundle_performance`): bundle, source (`backtest`, `vault`,
+   `paper`, `live`), trading day, net return on the capital, net P&L, trades closed, and the run
+   that produced them. The key is (bundle, source, day).
+2. **Appended, never rewritten.** `append_performance` takes the days in order and refuses a day
+   at or before the last one recorded for that source; triggers refuse updates and deletions.
+3. **Where rows come from.** `xq registry register` appends the origin board strategy's recorded
+   out-of-sample returns (verified against their SHA-256) as the `backtest` history; the vault
+   evaluation appends `vault` rows (GATE-002). Paper and live rows come with PAPER-004 and
+   PAPER-006, which compare them with the Monte Carlo bands. `xq registry history` summarizes
+   them per source.
+4. The board records daily returns only, so a board strategy's `backtest` rows have no trade
+   counts.
