@@ -812,6 +812,12 @@ IDs from `docs/specs/development-plan.md`.
   `prediction_file_name`, `StrategySubject.neighbourhood_unavailable`, and a fix: ROB-001's
   median-to-nominal ratio, NaN when the nominal Sharpe ratio is not positive, is stored as null
   instead of breaking the report's JSON. Tested end to end on synthetic ticks.
+- MREG-001: the model registry's models, model versions and statuses (`xq.registry.models`,
+  migration 0011: `models`, `model_versions`, `status_history`). A version records its artifact's
+  SHA-256, dataset, feature-set version, target, training window, hyperparameters, metrics
+  snapshot, git sha and run, starts as draft and is immutable. SQLite triggers refuse content
+  edits, deletions and history rewrites, and until MREG-002 every status change but retiring; the
+  migration refuses a database without the triggers. ADR 0060.
 
 ### Changed
 

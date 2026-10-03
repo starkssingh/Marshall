@@ -32,6 +32,7 @@ from sqlalchemy import (
     String,
     Text,
     TypeDecorator,
+    UniqueConstraint,
 )
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
@@ -525,3 +526,62 @@ class TargetSetRecord(Base):
     spec_json: Mapped[dict[str, Any]]
     hash: Mapped[str] = mapped_column(String(64))
     created_at: Mapped[pd.Timestamp]
+
+
+# --- model registry (MREG-001 ... MREG-005, Sprint 13) -----------------------------------------
+# Enforcing triggers live in the migrations (0011 ...): versions and bundles are immutable,
+# histories append-only, and a status moves only as `xq.registry.gates` allows (ADR 0060).
+
+
+class ModelRecord(Base):
+    """A named forecasting model (MREG-001); its fitted instances are `ModelVersionRecord`s."""
+
+    __tablename__ = "models"
+    __table_args__ = (UniqueConstraint("name"),)
+
+    model_id: Mapped[str] = mapped_column(String(26), primary_key=True)
+    name: Mapped[str] = mapped_column(String(128))
+    task: Mapped[str] = mapped_column(String(32))
+    description: Mapped[str] = mapped_column(Text)
+    created_at: Mapped[pd.Timestamp]
+
+
+class ModelVersionRecord(Base):
+    """One fitted model: its artifact, data, target, training window, hyperparameters, metrics at
+    registration, code and run, and its status (MREG-001). Only the status ever changes."""
+
+    __tablename__ = "model_versions"
+    __table_args__ = (UniqueConstraint("model_id", "version"),)
+
+    model_version_id: Mapped[str] = mapped_column(String(26), primary_key=True)
+    model_id: Mapped[str] = mapped_column(ForeignKey("models.model_id"))
+    version: Mapped[int] = mapped_column(Integer)
+    artifact_uri: Mapped[str] = mapped_column(Text)
+    artifact_sha256: Mapped[str] = mapped_column(String(64))
+    dataset_id: Mapped[str | None] = mapped_column(String(32))
+    feature_set_version: Mapped[str] = mapped_column(String(64))
+    target: Mapped[str] = mapped_column(String(64))
+    train_window_json: Mapped[dict[str, Any]]
+    hyperparams_json: Mapped[dict[str, Any]]
+    metrics_snapshot_json: Mapped[dict[str, Any]]
+    git_sha: Mapped[str] = mapped_column(String(64))
+    run_id: Mapped[str | None] = mapped_column(ForeignKey("runs.run_id"))
+    status: Mapped[str] = mapped_column(String(16))
+    created_at: Mapped[pd.Timestamp]
+
+
+class StatusHistoryRecord(Base):
+    """One status change of a model version or a strategy bundle, with the gate record that
+    allowed it (MREG-001, MREG-002). Append-only."""
+
+    __tablename__ = "status_history"
+
+    history_id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    subject_kind: Mapped[str] = mapped_column(String(16))
+    subject_id: Mapped[str] = mapped_column(String(64))
+    from_status: Mapped[str | None] = mapped_column(String(16))
+    to_status: Mapped[str] = mapped_column(String(16))
+    gate_result_id: Mapped[int | None] = mapped_column(Integer)
+    actor: Mapped[str] = mapped_column(String(128))
+    reason: Mapped[str] = mapped_column(Text)
+    changed_at: Mapped[pd.Timestamp]
