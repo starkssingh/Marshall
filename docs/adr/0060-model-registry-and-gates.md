@@ -236,3 +236,37 @@ days to the history; a second evaluation with the spent token, and a new token, 
 bundle moves to `vault_passed` exactly when R3 passed. The R1 and R2 results that bring the test
 bundles to `validated` are recorded directly from synthetic checks, labelled as such: that module
 tests the vault procedure, and the evaluator is tested on its own.
+
+## GATE-003 — the human review template and sign-off
+
+1. **The template** is `docs/specs/gate-review.md` (the plan's deliverable). It names the subject
+   (bundle, origin, gate report, validation run, gate results, reproduction status), a checklist
+   of the ten release-gate items with their default criteria, the questions a reviewer answers
+   (results too good to be true, the honesty of the trial count, every not-applicable and
+   not-evaluated criterion and the source behind it, the warnings, placeholder costs,
+   pre-registration, the vault's integrity), the decision (the next status only, a rejection, or
+   more evidence) and a sign-off table for the reviewer and the owner.
+2. **Filled in by the evaluator.** `xq gate evaluate` writes `review.md` next to each gate report,
+   with the subject's fields filled in and every checklist box empty: the review is the human's.
+3. **The rules it states**: a reviewer may refuse a bundle that passed the gates, never pass one
+   that failed them or change a threshold; no LLM, Claude included, makes or signs the decision; a
+   promotion names its review in `--reason`.
+4. **What is not built.** The signed review is a document, not a database record. GATE-004 (the
+   live-readiness checklist) will decide whether a signed review must be recorded before a live
+   transition; until then no bundle can reach `live`.
+
+**Known truth** (`tests/integration/registry/test_gate_evaluate.py`): the evaluation writes the
+review with the bundle, its status, the validation run and the gate results filled in, ten
+unticked checklist rows and an empty sign-off.
+
+## Open points for the owner
+
+- MREG-005: whether an ungated baseline bundle may run on the paper infrastructure for
+  infrastructure tests (a separate, labelled environment), as the plan's decision point suggests.
+- GATE-002: a failed vault evaluation spends the bundle's vault access; any exception needs the
+  owner's ADR.
+- GATE-002: R3's risk-limit breaches are read from the screener's daily returns against the risk
+  profile, not from the risk engine's refusals, until a candidate runs on the event tier.
+- MREG-002: enforcement is in the code and the database's triggers, which an administrator with
+  write access to the database file can bypass; every gate result names its evaluator, evidence
+  and policy hash so a bypass is visible.

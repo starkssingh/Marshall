@@ -865,6 +865,12 @@ IDs from `docs/specs/development-plan.md`.
   the vault days appended to the bundle's history. `usable_quotes` takes a vault token; the
   board's `sigma_1m_bps` and `daily_returns_on` are public. Tested end to end on synthetic ticks
   spanning a test vault start. ADR 0060.
+- GATE-003: the human review template and sign-off (`docs/specs/gate-review.md`): the subject,
+  a checklist of the ten release-gate items, the reviewer's questions (too-good results, the trial
+  count, not-applicable and not-evaluated criteria, warnings, placeholder costs, pre-registration,
+  the vault), the decision and the sign-off of the reviewer and the owner. `xq gate evaluate`
+  writes it filled in (`review.md`) next to each gate report. No LLM makes or signs the decision.
+  ADR 0060.
 
 ### Changed
 

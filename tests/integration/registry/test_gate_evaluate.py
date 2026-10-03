@@ -1,8 +1,8 @@
 """GATE-001 end to end on synthetic ticks: a baseline strategy bundle is registered with its
 backtest history (MREG-004), `xq gate evaluate` validates its origin strategy, records R1 and R2
-from that validation (it may fail) and writes the gate report with the plan's ten items; an ungated
-promotion is refused; a validation of another strategy, or an altered one, is refused. Synthetic
-data: an engineering check, never evidence."""
+from that validation (it may fail) and writes the gate report with the plan's ten items and the
+filled-in human review (GATE-003); an ungated promotion is refused; a validation of another
+strategy, or an altered one, is refused. Synthetic data: an engineering check, never evidence."""
 
 import json
 from collections.abc import Iterator
@@ -97,6 +97,15 @@ def test_the_gate_evaluator_records_r1_and_r2_from_a_validation(
     assert (
         "Reproduction of the origin run (EXP-006, reported): not attempted." in report.read_text()
     )
+    # GATE-003: the human review template, filled in next to the report, signed by nobody yet
+    review = report.with_name("review.md").read_text()
+    assert review.startswith("# Gate review and sign-off (GATE-003)")
+    assert f"- Bundle: `{bundle_id}` (tsmom_8), status at evaluation: draft" in review
+    assert f"- Validation run: {validation.run_id}" in review
+    assert results[0].describe() in review
+    assert "{" not in review.split("## Evidence checklist")[0]  # every field filled
+    assert review.count("| [ ] |") == 10  # one unticked row per release-gate item
+    assert "| Reviewer | | | |" in review
     # the evaluator never promotes, and an ungated promotion is refused
     assert get_bundle(engine, bundle_id).status is Status.DRAFT
     if not results[0].passed:
