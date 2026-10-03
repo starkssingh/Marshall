@@ -5,43 +5,66 @@ sprint and whenever a decision or carry-over item changes; anything decided in c
 recorded in an ADR and here in the same session. If a memory of an earlier conversation conflicts
 with the repository, the repository wins.
 
-- **Last updated:** 2026-09-28, during Sprint 13 (branch `claude/clever-hamilton-wva7le`): the
-  owner's Sprint 12 B review decisions (C-25, ADR 0058) are being implemented, one commit each
-- **Merged to `main`:** Sprints 1–6, 9, 11, 12 A and 12 B with the revised H-0001 draft and the
-  Sprint 5 and Sprint 6 review fixes (PRs #2, #3, #6, #7, #8, #9, #10, #11, #12, #13, #14, #15).
+- **Last updated:** 2026-10-03, during Sprint 13 (branch `claude/clever-hamilton-wva7le`): the
+  owner's Sprint 12 B review decisions (C-25, ADR 0058) are being implemented, one commit each;
+  the branch is merged with `main` after the Dukascopy data session (ADR 0057, PR #16)
+- **Merged to `main`:** Sprints 1–6, 9, 11, 12 A and 12 B and the Dukascopy data session, with the
+  revised H-0001 draft and the Sprint 5 and Sprint 6 review fixes (PRs #2, #3, #6, #7, #8, #9,
+  #10, #11, #12, #13, #14, #15, #16).
 
 ## Current sprint
 
-- **Sprint:** 12 B — the Sprint 9 review decisions and the rest of Sprint 12 (ROB-004, ROB-005,
-  ROB-008) with `xq validate-strategy` (ADR 0055, ADR 0056) — **complete, in review, synthetic
-  data only**.
-  - First, `STATUS` recorded Sprint 9 as merged in PR #14 (`21db00d`).
-  - Then the owner's C-24 decisions, one commit each with tests (ADR 0055):
-    1. SPA and the Reality Check always use the gates' bootstrap convention; the size re-run
-       still over-rejects, so a per-sample size check puts "test over-rejects on this sample" on
-       the gate result (`468b2f0`);
-    2. BT-003 drawdowns start from the capital (`6ca4562`);
-    3. the neighbourhood gate reads the full ±20 % grid, with a seeded sample of 243 points above
-       3^5, a one-at-a-time table and a failing ridge test (`acb47b1`);
-    4. slice names are validated at registration, and volatility terciles are labelled
-       "descriptive, cut ex post" (`b22a50d`);
-    5. a reproduction is REPRODUCED only on the same git sha, config hash and lock hash, otherwise
-       RERUN_DIFFERENT_CODE (`cf12d15`).
-  - Then, one commit each (ADR 0056):
-    - ROB-004, Monte Carlo through the real `RiskEngine` (`0cf6137`);
-    - ROB-005, noise injection (`fa556fa`);
-    - ROB-008, the robustness report and score, with the known-truth simulated strategies
-      (`15047ad`);
-    - `xq validate-strategy` with `xq robustness simulate`, the R1 best-baseline test, the R2
-      decay test and the `stat_tests` and `robustness_results` tables (`fe627fa`);
-    - a fix to that decay test, which now regresses walk-forward fold means. The daily
-      Newey–West version over-rejected genuine edges that drift in regimes (`bbb4d70`).
-  - Validated on simulated strategies only: a recorded genuine trend edge passes R1 and R2, and a
-    recorded single-point optimum on noise fails R2. The new open points are C-25. **Nothing has
-    run on real data.**
-  - The previous sprint, 9 (statistical validation and robustness, ADR 0054), was merged in PR
-    #14; 12 A (risk and signal engines, ADR 0052, ADR 0053) in PR #13; 11 (event-driven
-    backtester) in PR #12.
+- **Session:** the Dukascopy primary feed (owner's decision, ADR 0057), between sprints —
+  **complete, merged in PR #16, synthetic fixtures only**. One commit each:
+  1. DATA-013, the Dukascopy tick adapter (`dukascopy_ticks`): native hourly `.bi5` files and
+     dukascopy-node CSVs, UTC, prices = points / 1000; synthetic fixtures across both 2024 US DST
+     changes with their weekend gaps (`89a5b67`);
+  2. `xq fetch dukascopy`, the owner's downloader: resumable, SHA-256 manifest, one polite request
+     at a time, never overwrites, empty market hours recorded only once confirmed (`ca8f1ec`);
+  3. `dukascopy` is the default source: `data.primary_source`, `--source` optional in the pipeline
+     commands, `ds_base.yaml` (`9dd2f17`);
+  4. a guard: CSV timestamps in Unix seconds are refused, not read as 1970 (`edec7e5`);
+  5. this STATUS, ADR 0057 and the README.
+  - Tested: file hours never move with DST, gaps land at the calendar's UTC hours on both sides
+    of each change, a misdeclared `NY+7` clock fails every calendar check, a clean week of hourly
+    files passes every quality check through `xq validate`, and the downloader resumes, verifies
+    and refuses to overwrite. **Nothing has run on real data**, and neither the `.bi5` endpoint
+    nor dukascopy-node could be reached from the sandbox.
+  - The previous sprint, 12 B (ROB-004, ROB-005, ROB-008, `xq validate-strategy`, ADR 0055,
+    ADR 0056), was merged in PR #15. The owner's review of it (C-25, ADR 0058) and the
+    baseline-board subject adapter (ADR 0059) are Sprint 13, in progress on
+    `claude/clever-hamilton-wva7le`.
+- **Owner's next step (C-8):** download and ingest on your machine, from the repository root.
+  Market data stays under `data/`, which is git-ignored.
+
+  ```bash
+  uv sync
+  uv run xq fetch dukascopy --instrument xauusd --from 2003-05-05 --to <yesterday> --out data/downloads
+  uv run xq ingest --source dukascopy --path data/downloads/XAUUSD
+  ```
+
+  - The full history is about 205,000 hourly requests at two a second, so more than a day. It
+    can run in pieces (for example a year at a time) and resumes where it stopped. If time is
+    short, fetch `--from 2021-09-01` first (the base dataset's window, and more than the year
+    C-8 needs), then the earlier years.
+  - If `xq fetch` stops with "no answer (timed out) after 4 attempts", the `.bi5` endpoint is
+    down (reported since July 2026, ADR 0057). Use the dukascopy-node CSV route in the README
+    (one CSV per month), then `uv run xq ingest --source dukascopy --path data/downloads/csv`,
+    and tell Claude which route was used.
+  - Then the next session runs, where the ingested `data/` directory is available (it is never
+    committed, so on your machine or with that directory attached):
+
+    ```bash
+    uv run xq clean --source dukascopy
+    uv run xq build-bars --source dukascopy
+    uv run xq spread-stats --source dukascopy
+    uv run xq validate --source dukascopy
+    ```
+
+    `xq validate` grades every ingested trading day before the vault (`--start`/`--end` narrow
+    it); the report is written to `reports/quality/<run id>/report.md`. That session reads the
+    report per check and per year, compares the calendar with Dukascopy's real hours (ADR 0057,
+    decision 4), then prepares the DQ-008 human review. It runs nothing else on the data.
 - **Working system:** library code and CLI, exercised by the tests.
   - **Event backtester** (`run_event_backtest`, tick or bar mode). It runs the whole chain the
     plan prescribes:
@@ -68,18 +91,18 @@ with the repository, the repository wins.
       strategy as a run (synthetic, always exploratory);
     - `xq validate-strategy <run_id>`, the combined significance and robustness report with R1
       and R2 verdicts (`pass`, `fail` or `incomplete`). It writes `reports/validation/` and the
-      `stat_tests` and `robustness_results` tables. Its subject adapter exists only for
-      `simulated_strategy` runs; baseline-board runs are refused by name until their adapter is
-      built (C-25).
+      `stat_tests` and `robustness_results` tables. Its subject adapters cover
+      `simulated_strategy` and, from Sprint 13, `baseline_board` runs (ADR 0059).
   - `xq exp reproduce <run_id>` rebuilds a baseline-board run's dataset, reruns it and reports
     REPRODUCED, NOT_REPRODUCED or RERUN_DIFFERENT_CODE.
   - Validation and robustness settings are in `config/validation.yaml`; the thresholds stay in
     `config/gates.yaml`.
-- **Next:** the owner's review of Sprint 12 B (C-25), then the owner chooses the next sprint.
-  - Candidate follow-ups in Claude's scope: the baseline-board subject adapter for
-    `xq validate-strategy` (C-25), and the revised H-0001 in the board runner (C-15).
-  - With real data (C-8): the research halves of Sprint 5 (C-16) and Sprint 6 (C-18), then
-    Sprints 7, 8, 10 and 13.
+- **Next:** the owner downloads and ingests Dukascopy data (above); the next session runs
+  `xq validate` on it (C-8) and prepares DQ-008. The owner also reviews the Dukascopy session's
+  open points (C-26). Sprint 13 (C-25, ADR 0058, ADR 0059) is in progress.
+  - Candidate follow-up in Claude's scope: the revised H-0001 in the board runner (C-15).
+  - With real data, after the quality review (C-8): the research halves of Sprint 5 (C-16) and
+    Sprint 6 (C-18), then Sprints 7, 8, 10 and 13.
   - The real regime filter waits for REG-007 (Sprint 8).
 - **Not allowed yet:**
   - running H-0001 (or any board) on real data before the owner has approved and registered it;
@@ -97,7 +120,12 @@ with the repository, the repository wins.
     pseudo-real results, or citing their output as evidence, before a candidate exists and the
     owner allows it;
   - recording simulated strategies under a real hypothesis's family;
-  - starting the next sprint before the owner's review of Sprint 12 B;
+  - running anything on real Dukascopy data beyond the data pipeline and `xq validate` before the
+    DQ-008 review (the owner's instruction for this session: synthetic fixtures only here, and
+    the next session runs `xq validate`);
+  - committing market data (it stays under the git-ignored `data/`);
+  - treating Dukascopy's spreads as execution costs (no venue; costs stay placeholders,
+    ADR 0057);
   - pushing to `main`.
 - **Earlier sprint (6, merged in PR #11):** statistical and volatility research, build-only —
   STAT-001, STAT-002, STAT-003, STAT-006, STAT-008 (framework), VOL-001 … VOL-006 and BASE-003,
@@ -117,7 +145,7 @@ with the repository, the repository wins.
 | C-5 | Trading-time horizons (market-open minutes only) and a `crosses_close` target column; leakage tests and `label_end` checks updated | Sprint 3 review | Claude | `523821d` |
 | C-6 | Rebuild the Docker image and run the suite inside it (`scipy` added unchecked) | Sprint 3 review | Claude | `0b84ca7`: CI `docker` job (owner's choice, ADR 0032); first run 36290821094 built and started the runtime image and passed 796 tests inside the test stage as the non-root user under `TZ=Asia/Tokyo` |
 | C-7 | `resample_causal` must respect availability (latency argument, test with latency > 0) | Sprint 3 review | Claude | `157a78c` |
-| C-8 | Run `xq validate` on ≥ 1 year of real broker ticks, then the DQ-008 human review | Sprint 2 | Owner (data), then Claude | open — blocked on real data |
+| C-8 | Run `xq validate` on ≥ 1 year of real ticks, then the DQ-008 human review. The feed is now Dukascopy (ADR 0057): the owner runs `xq fetch dukascopy` and `xq ingest` (commands under "Owner's next step"); the next session runs clean, bars, spread statistics and `xq validate` where the data is | Sprint 2 | Owner (download, ingest), then Claude | open — the downloader and adapter are built; waiting on the owner's download |
 | C-9 | Commit the approved `config/gates.yaml` (VAL-007) with its rationale in an ADR | Sprint 4 hold point | Claude | `72a8cdc` (ADR 0032) |
 | C-10 | `1d` = one trading day (23 market hours); `4h` = 4 market hours | Sprint 4 hold point | Claude | `34dd006` |
 | C-11 | No label and no entry for decisions taken while the market is closed; open decisions crossing a close keep their label (`crosses_close`) | Sprint 4 hold point | Claude | `d9aa756` |
@@ -126,7 +154,7 @@ with the repository, the repository wins.
 | C-14 | Review the draft `experiments/hypotheses/H-0001.yaml` (the baseline board), then register it before any real-data run | Sprint 4 | Owner | reviewed at the start of Sprint 5: revision requested (ADR 0035), continued as C-15 |
 | C-15 | H-0001 draft revised as the owner asked (ADR 0035), still **unregistered**: rule baselines over the full pre-vault history after each rule's warm-up, with the fold-aligned version stored for comparison; rules on 1d and 1h signal bars (not 15m); trial budget 36 (24 rule + 12 forecast-sign strategies); discovery and evaluation windows "set from the real data's depth at registration" (registration is refused until they are); descriptive slices by year and by session (reported, not tested). Owner: review the revision, including two readings of Claude's (lookbacks count bars of the signal timeframe; the fold-aligned version is not a separate trial) — both **approved** at the Sprint 5 review (ADR 0041). Remaining: Claude implements the revision in the board runner; H-0001 is registered with windows from the real data, alongside H-0000 | Sprint 5 start | Claude (board runner), then owner (registration with real windows) | open — readings approved |
 | C-16 | Research half of Sprint 5, after real data (C-8): fix `eda.discovery.end` from the data's depth; pre-register the standing descriptive hypothesis H-0000 (zero trial budget, family `descriptive`; the EXP-002 schema accepts it since `89f241a`, ADR 0042) alongside H-0001, and run EDA under it (ADR 0041); run the EDA confirmatory; review it; write `config/horizons.yaml` with `xq research admit-horizons`; write `docs/research/hypotheses-backlog.md` and pre-register its top items | Sprint 5 (build-only) | Owner (data, window, approval), then Claude | open — schema prerequisite done; blocked on C-8 and the owner's go-ahead |
-| C-17 | DATA-013 secondary long-history adapter: build only if the owner decides a secondary feed is needed (depends on the broker's history depth) | Sprint 5 start | Owner (decision) | open |
+| C-17 | DATA-013 secondary long-history adapter: build only if the owner decides a secondary feed is needed (depends on the broker's history depth) | Sprint 5 start | Owner (decision) | decided (ADR 0057): Dukascopy is the primary feed. Built: `89a5b67` (adapter), `ca8f1ec` (`xq fetch dukascopy`), `9dd2f17` (default source), `edec7e5` (CSV timestamp guard) |
 | C-18 | Research half of Sprint 6, after real data (C-8) and the owner's go-ahead: pre-register the statistical and volatility studies (families and trial budgets); run STAT-001/002/003 on the discovery window and STAT-006 in walk-forward at the admitted horizons (needs `config/horizons.yaml`, C-16) and write the verdict report; run the volatility board on real 1m/5m bars (daily and hourly periods) on identical folds; apply `select_forecaster`; the owner decides whether the selected forecaster replaces the interim sigma-hat (an ADR and a configuration change); add a CLI for these reports; measure their speed on real data. Trial rules approved (ADR 0046): STAT-001 … STAT-003 record none (descriptive, under H-0000); STAT-006 and the volatility board record one per (model, horizon) in the `linear_forecasts` and `volatility_models` families. If STAT-002 or STAT-003 finds dependence in returns, write and pre-register H-0002 (linear predictability, with `ar1`) | Sprint 6 (build-only) | Owner (data, go-ahead, promotion), then Claude | open — blocked on C-8 and C-16 |
 | C-19 | Whether the `ar1` forecast baseline (BASE-003) joins H-0001's board, which raises its approved trial budget from 36 to 40, or is evaluated under its own pre-registered hypothesis | Sprint 6 (ADR 0045) | Owner (decision) | decided (ADR 0046): `ar1` stays off H-0001 (budget 36), stays on benchmark boards, and gets H-0002 only if STAT-002/003 find dependence on real data (C-18) |
 | C-20 | Owner review of Sprint 11's open points (ADR 0049): the weekly-close blackout length (60 min) and weekend-exit lead (30 min), provisional; the reconciliation tolerance applied to the raw equity difference, sizing included (at 100,000 USD, lot-step rounding alone can exceed 5 % of costs; reported separately); limit orders never filling better than their price; the provisional margin rate 0.05; Sprint 12's scope under ADR 0048 | Sprint 11 | Owner, then Claude | decided (ADR 0050, ADR 0051): tolerance after the sizing effect; 60-min blackout, optional weekend exit (off) and 5 % margin approved; limit orders fill only on a trade through by ≥ 1 tick, never better; Sprint 12's data-independent part now, then Sprint 9. Implemented: `c4c490b` (tolerance after sizing), `d835141` (limit trade-through) |
@@ -135,13 +163,15 @@ with the repository, the repository wins.
 | C-23 | PAPER-001 requirement: the paper and live runtimes refuse to start without a kill-switch source (a file, an environment variable or the database flag); the backtester may run without one | Sprint 12 A review (ADR 0053) | Claude, when PAPER-001 is built | open |
 | C-24 | Owner review of Sprint 9's open points (ADR 0054). (1) SPA and the Reality Check over-reject under strong serial dependence in short samples (AR(1) φ = 0.4, 400 periods: 15 % and 20 % at a 10 % level); test such families on non-overlapping periods. (2) The ±20 % neighbourhood gate reads the joint neighbourhood (3^k − 1 points), stricter than one parameter at a time. (3) Cost stress runs the plan's grid one dimension at a time plus the gate's joint scenario (no full factorial); a financing credit is divided by the multiplier. (4) Robustness drawdowns start from the capital; BT-003's `drawdown_metrics` does not (known issue, fix proposed as a separate task). (5) Volatility terciles are cut on the whole sliced period (descriptive only); slice names are checked when loaded, not at registration; the template's `volatility regime` became `volatility tercile`. (6) The execution delay shifts entries and exits alike. (7) `xq exp reproduce`: a reproduction adds no trials, the DSR is shown but not judged, provenance differences are reported rather than refused, and only `baseline_board` runs have a reproducer. (8) `xq validate-strategy` is not built: no Sprint 9 task covers it; proposed with ROB-008 and GATE-001 | Sprint 9 | Owner, then Claude | decided (ADR 0055): (1) SPA/Reality Check on the gates' bootstrap convention, size re-run (still above 1.5x nominal: 18.5 % SPA, 15.4 % Reality Check at 10 %), so a per-sample size check puts "test over-rejects on this sample" on the gate result; (2) BT-003 drawdowns start from the capital; (3) the neighbourhood gate on the full ±20 % grid (seeded sample of 243 points above 3^5), a one-at-a-time table in the report, a ridge optimum fails; (4) slice names validated at registration, volatility terciles labelled "descriptive, cut ex post"; (5) a reproduction is REPRODUCED only with the same git sha, config hash and lock hash and metrics within tolerance, otherwise RERUN_DIFFERENT_CODE; approved as they stand: one-dimension cost stress plus the combined scenario, financing credit divided by the multiplier, equal entry and exit delay, reproductions add no trials, DSR shown not judged. Implemented: (1) `468b2f0`, (2) `6ca4562`, (3) `acb47b1`, (4) `b22a50d`, (5) `cf12d15`; Claude's readings are carried into C-25 |
 | C-25 | Owner review of Sprint 12 B's open points (ADR 0055, ADR 0056). (1) The SPA/RC over-rejection warning is decided per sample by a size check (AR sieve null families, 500 by default), not attached to every result: on iid-like samples the tests are near nominal; its Monte Carlo error is about 1.5 points at 500 families. (2) A reproduction with the same code but a metric out of tolerance is a third status, NOT_REPRODUCED (not "different code"); never counted as reproduced. (3) PBO judges the choice among configurations: a genuine edge in a homogeneous family (near-identical configurations) has PBO near 0.5 and fails R2's `pbo_max`; mirror-image configurations break the DSR's benchmark instead; gates unchanged. (4) A gate that cannot be evaluated makes a verdict `incomplete`, never `pass`: a strategy without tunable parameters has no neighbourhood and never reaches R2 `pass`. (5) A validation run records no trials (it selects nothing; a variant picked from its diagnostics needs a new run). (6) The Monte Carlo keeps R-multiples as observed (a loss beyond the stop keeps its size) and calls a path ruined at half the capital (provisional). (7) `xq validate-strategy` has a subject adapter only for simulated runs; the baseline-board adapter (rebuilding the board's screening context) is the next build task. (8) Volatility-tercile slices bucket the sigma-hat warm-up days as `no_sigma_hat` | Sprint 12 B | Owner, then Claude | decided (ADR 0058): (1) PBO not applicable, and R2 `pbo_max` N/A, when the family has at most 2 effective trials (DSR still applies); (2) trial clustering on absolute correlation (\|ρ\| ≥ 0.7, ≥ 60 common days), mirror images one cluster; (3) SPA/Reality Check gated on a size-adjusted p-value from the sample's simulated null when the size check flags over-rejection (threshold 0.10 unchanged), both p-values reported; (4) the neighbourhood gate N/A only when the hypothesis declares `parameters_fixed_a_priori: true` with a `source`, otherwise every numeric constant of the strategy's config is perturbed; approved as they stand: NOT_REPRODUCED, no trials for validation runs, ruin at 50 % (provisional) with gap losses at observed size; (7) the baseline-board adapter is the next build task. Implemented: (1), (2), (3) and (4) this sprint; (7) the board's subject adapter (ADR 0059) |
+| C-26 | Owner review of the Dukascopy session's open points (ADR 0057). (1) The `.bi5` endpoint has been reported to time out since 7 July 2026 (dukascopy-node issue #254) and could not be tested: if it is still down, keep the dukascopy-node CSV route, or have Claude add Dukascopy's JSON API to `xq fetch` (hourly JSON files, same guarantees). (2) Files are stored as the vendor's bytes, one per hour, named after the UTC hour; empty hours get no file. (3) Canonical tick sizes stay NaN (volume units undocumented); volumes are kept in the raw mirror. (4) Download pace: one request at a time, 0.5 s apart, 4 attempts with backoff, empty market hours asked twice and recorded only once a later hour has ticks, 24 in a row stop the run. (5) The calendar is unchanged until `xq validate` on real data shows Dukascopy's hours (Dukascopy's hours pages were blocked here); the table in ADR 0057 lists the checks. (6) `ds_base.yaml` keeps its ~4-year window (start 2021-09-26) although Dukascopy goes back to 2003: a longer window is the owner's decision, before results. (7) `--source` now defaults to `data.primary_source` in the pipeline commands | Dukascopy session | Owner, then Claude | open |
 
 ## Open owner decisions
 
 | Question | Options | Default in use |
 | --- | --- | --- |
-| Execution broker, venue and primary feed | MT5 broker (to be named), OANDA, cTrader | `mt5_primary` placeholder (ADR 0004): MT5 tick export, server clock `NY+7` |
-| Secondary long-history feed if broker history is short (DATA-013, C-17) | Dukascopy, none | none; DATA-013 deferred until the owner decides (ADR 0035) |
+| Execution venue | none for now (data-only project, ADR 0057); OANDA v20 is the candidate live feed; MT5 or cTrader brokers | no venue; costs stay placeholders; `mt5_primary` kept as an optional source (ADR 0004) |
+| Dukascopy route if the `.bi5` endpoint is down (C-26) | dukascopy-node CSV exports; Claude adds Dukascopy's JSON API to `xq fetch` | `.bi5` via `xq fetch dukascopy`, with the dukascopy-node CSV route documented as the fallback (ADR 0057) |
+| Base dataset window with Dukascopy's depth (C-26) | the plan's ~4 years before the vault; a longer window (history from 2003-05-05) | ~4 years: `ds_base.yaml` from 2021-09-26 |
 | Discovery window (EDA-001) | the first 50–60 % of non-vault data (plan); a fixed end date | first 50 % of the span from the dataset's start to `vault.start`, at a trading-day start; to be fixed as `eda.discovery.end` from the real data's depth (C-16) |
 | Broker cost terms (commission, financing rates, triple day, holiday financing) | broker's published terms | placeholder cost model (ADR 0029), financing a cost on both sides (ADR 0032) |
 | Annualization of daily statistics (gates: "252, provisional") | 252; the calendar's open trading days (257–259 a year in 2022–2025) | 252 (`backtest.periods_per_year`) |
@@ -190,16 +220,22 @@ neighbourhood grid, slice names checked at registration with volatility terciles
 cut ex post", and REPRODUCED only on the same code; one-dimension cost stress with the combined
 scenario, the financing credit divided by the multiplier, equal entry and exit delay, no trials
 for reproductions and the DSR shown not judged approved as they stand. Sprint 12 B's own choices
-are in ADR 0055 and ADR 0056 and wait for the owner's review (C-25).
+(ADR 0055, ADR 0056) were decided at its review (ADR 0058, C-25). Decided on 2026-09-28
+(ADR 0057): the project is data-only for now, with no execution venue; Dukascopy's XAUUSD bid/ask
+ticks are the primary research feed (superseding ADR 0004's choice), `mt5_primary` stays optional,
+OANDA v20 S5 candles are a later cross-check (DATA-011) and candidate live feed, and costs stay
+placeholders until a venue exists. Claude's choices within it wait for the owner's review (C-26).
 
 ## Provisional assumptions not yet confirmed
 
 | Assumption | Value in use | Where | Confirmed by |
 | --- | --- | --- | --- |
-| Broker | unnamed | `config/base.yaml` `sources.mt5_primary` | owner naming the broker |
-| Source clock | `NY+7` (UTC+2/+3, US DST dates) | ADR 0003, ADR 0004 | broker documentation, DQ-004 on real data |
+| Execution venue | none (data-only project); the MT5 broker of the optional `mt5_primary` is unnamed | ADR 0057, `config/base.yaml` | the owner choosing a venue |
+| Source clocks | `dukascopy`: `UTC` (the vendor's hour files are UTC hours); optional `mt5_primary`: `NY+7` (UTC+2/+3, US DST dates) | ADR 0003, ADR 0004, ADR 0057 | DQ-004 gap locations on real Dukascopy data |
+| Dukascopy file format | `.bi5` = LZMA "alone" stream of 20-byte big-endian records (ms offset, ask, bid, ask volume, bid volume), XAUUSD points / 1000, URL months from 00, first tick 2003-05-05; CSV = dukascopy-node's `timestamp,askPrice,bidPrice,askVolume,bidVolume` | `xq.data.adapters.dukascopy`, `config/base.yaml`, ADR 0057 (from dukascopy-node's source; the vendor was unreachable) | the first real download and ingest (plausible prices, no refused files) |
+| Download pace | one request at a time, ≥ 0.5 s apart, 30 s timeout, 4 attempts (backoff 2, 4, 8 s), empty market hours asked again after 5 s and recorded only once confirmed, 24 in a row stop the run | `sources.dukascopy.download`, ADR 0057 | the owner's first download |
 | Contract terms | tick 0.01, 100 oz per lot, lot step 0.01, max 100 | `config/instruments/xauusd.yaml` | broker contract spec |
-| Trading calendar | 18:00–17:00 New York, NYSE holidays, 13:30 early closes | ADR 0002, `config/sessions.yaml` | broker schedule |
+| Trading calendar | 18:00–17:00 New York, NYSE holidays, 13:30 early closes, one schedule for every year | ADR 0002, `config/sessions.yaml`; re-checked against Dukascopy in ADR 0057 (its hours pages were unreachable) | DQ-004 on real Dukascopy data, read per year, then DQ-008 |
 | Costs (commission, slippage, financing) | placeholder model, PROVISIONAL: commission 3.5 USD/lot/side; slippage 0.5 bp + 0.1·σ̂₁ₘ, ×3 rollover window, ×2 US release; financing 6 %/yr long, 2 %/yr short (both a cost, required while provisional), act/360, triple Wednesday; spread fallback p90 | `config/costs/placeholder.yaml`, ADR 0029, ADR 0032 | broker terms, paper trading |
 | Execution latency | 1 s (market time from ADR 0026) | `config/targets.yaml` `fwd_returns.v1`, cost model | BT-001, paper trading |
 | Event-tier execution rules | margin 5 % of notional (1:20); limit orders fill at their price, never better, and only when the price trades through them by at least one tick; bar mode (no ticks) resolves a bar touching both bracket legs to the stop; entry blackouts: rollover window, US release window, last 60 min before a weekly close; optional weekend exit 30 min before it (off) | `config/base.yaml` `backtest.event`, ADR 0049, ADR 0050 (defaults approved by the owner) | broker terms, paper trading |
@@ -212,7 +248,7 @@ are in ADR 0055 and ADR 0056 and wait for the owner's review (C-25).
 | Event windows | US release −5/+30 min; rollover 16:45–18:15 New York (ADR 0026) | `config/sessions.yaml` | EDA |
 | Trial clustering | \|ρ\| 0.7 (absolute correlation, C-25), 60 common trading days; frozen with the gates (ADR 0032); Sharpe variance across clusters (ADR 0058) | `config/base.yaml` `experiments` | fixed before results |
 | Sigma-hat | interim EWMA, span 96 base bars | `fwd_returns.v1` | a VOL-006 selection on real data, approved by the owner and recorded in an ADR (C-18) |
-| `ds_base.yaml` start | 2021-09-26 | `experiments/configs/ds_base.yaml` | broker history depth |
+| `ds_base.yaml` source and start | `dukascopy`, 2021-09-26 | `experiments/configs/ds_base.yaml` | the owner's window decision (C-26), before results |
 | Baseline board | fixed parameters (daily-bar rules, MA 20/50 and 50/200, 10 % vol target, 1,000 random-entry seeds); folds: expanding, ≥ 3 years training, 91-day tests, 1-day embargo | `experiments/configs/baselines/board.yaml`, ADR 0033, ADR 0034 | fixed before results; changes need an ADR |
 | Random-walk forecast baseline | persistence of the latest completed bar return of the horizon's timeframe (`zero_return` covers the price random walk) | ADR 0033 | owner review of Sprint 4 |
 | EDA parameters | bootstrap 1,000 resamples, block ≥ 5 trading days of bars and ≤ n/10; Hill tails 5 %; ≥ 20 lags (one trading day); Bonferroni family-wise 0.05 with cluster-robust Student-t intervals; LBMA windows −5/+30 min; VR q = 2, 4, 16, 92 on 15m; runs on 1h | `config/eda.yaml`, ADR 0038 | fixed before results; changes need an ADR |
@@ -226,6 +262,15 @@ are in ADR 0055 and ADR 0056 and wait for the owner's review (C-25).
 
 - No real market data exists. Sprints 2–6 and 11 are tested only on synthetic data (Sprints 5 and
   6 also on simulated processes); nothing is validated on real data (C-8).
+- The Dukascopy `.bi5` endpoint (`datafeed.dukascopy.com`) has been reported to time out since
+  7 July 2026, and dukascopy-node moved to a JSON API. Neither could be reached from the sandbox,
+  so `xq fetch dukascopy` is tested only against a scripted vendor and a local HTTP server. It
+  stops after four failed attempts and names the dukascopy-node CSV fallback (ADR 0057, C-26).
+- The calendar was not compared with Dukascopy's published hours or trading-breaks calendar: the
+  domain is blocked here. `xq validate` on real data settles it (ADR 0057, decision 4).
+- Dukascopy tick volumes are kept in the raw mirror only; canonical tick sizes are NaN (units
+  undocumented). Ingesting both Dukascopy formats for the same period would duplicate ticks (the
+  second copy is flagged `DUP_EXACT`).
 - The board runner does not yet implement the revised H-0001 (full-history rule evaluation with a
   fold-aligned view, 1d and 1h signal bars in one board, year and session slices): C-15.
 - `config/horizons.yaml` does not exist, and nothing reads it yet: the target sets still emit all
@@ -307,10 +352,10 @@ are in ADR 0055 and ADR 0056 and wait for the owner's review (C-25).
   refusals are explained differences.
 - Exposure by session in the backtest report values positions at their latest fill's mid (the
   screener has no per-quote marks), a description rather than an attribution.
-- Not started, deferred by plan: DQ-005 (feed consistency), DATA-011,
+- Not started, deferred by plan: DQ-005 (feed consistency), DATA-011 (with OANDA v20, ADR 0057),
   DATA-012, BASE-004, EDA-007, STAT-004, STAT-005 (Sprint 8), STAT-007 (gated); SARIMA (only if
   EDA-004 finds a stable daily cycle) and FIGARCH (only if STAT-004 finds long memory) are not
-  built; DATA-013 deferred by the owner (C-17).
+  built.
 - The raw-file permission test is skipped when the suite runs as root (it runs in CI, and in the
   Docker test stage, which runs as the non-root user).
 
@@ -319,7 +364,7 @@ are in ADR 0055 and ADR 0056 and wait for the owner's review (C-25).
 | Phase | Tasks done | Implemented | Tested (synthetic) | Validated on real data |
 | --- | --- | --- | --- | --- |
 | 0 Architecture | ARCH-001 … ARCH-008 | yes | yes (image verified in CI) | not applicable |
-| 1 Market data | DATA-001 … DATA-010 | yes | yes | no |
+| 1 Market data | DATA-001 … DATA-010, DATA-013 (Dukascopy adapter and `xq fetch dukascopy`, the primary feed) | yes | yes (synthetic `.bi5` and CSV fixtures, a scripted vendor, a local HTTP server) | no |
 | 2 Data quality | DQ-001 … DQ-004, DQ-006, DQ-007 (DQ-005, DQ-008 open) | yes | yes | no |
 | 3 Datasets | DS-001 … DS-007 | yes | yes | no |
 | 4 Exploratory research | EDA-001 … EDA-006 (EDA-007 in Sprint 8) | yes | yes (synthetic data, simulated processes) | no (no report on real data yet, C-16) |

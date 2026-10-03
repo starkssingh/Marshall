@@ -194,3 +194,18 @@ def test_app_config_ignores_environment_when_constructed_directly(
     monkeypatch.setenv("XQ_LOGGING__LEVEL", "ERROR")
     cfg = AppConfig(profile="x", vault={"start": "2025-09-25T21:00:00Z"})  # type: ignore[arg-type]
     assert cfg.logging.level == "INFO"
+
+
+def test_the_primary_source_is_dukascopy() -> None:
+    cfg = load_config("research", config_dir=REPO_CONFIG)
+    assert cfg.primary_source() == "dukascopy"
+    assert cfg.source("dukascopy").clock == "UTC"
+    assert cfg.source("mt5_primary").adapter == "mt5_ticks"  # kept as an optional source
+
+
+def test_the_primary_source_must_be_declared() -> None:
+    with pytest.raises(ConfigError, match=r"data\.primary_source 'nope' is not a source"):
+        load_config("research", {"data.primary_source": "nope"}, config_dir=REPO_CONFIG)
+    bare = AppConfig(profile="x", vault={"start": "2025-09-25T21:00:00Z"})  # type: ignore[arg-type]
+    with pytest.raises(ConfigError, match="no primary source"):
+        bare.primary_source()

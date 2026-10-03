@@ -34,6 +34,7 @@ from xq.core.errors import ConfigError, XQError
 from xq.core.ids import git_sha, new_ulid
 from xq.core.logging import configure_logging, shutdown_logging
 from xq.core.time import ensure_utc
+from xq.data.adapters.dukascopy_fetch import DayProgress, fetch_dukascopy
 from xq.data.bars import build_bar_sets
 from xq.data.clean import build_clean
 from xq.data.raw_store import ingest, rebuild_mirror, verify_raw_store
@@ -161,28 +162,45 @@ class PipelineRun:
     engine: Engine
     run_id: str
     git_sha: str
+    source_id: str | None = None
+
+    @property
+    def source(self) -> str:
+        """The data source of a command that reads one: ``--source``, else the primary source."""
+        if self.source_id is None:  # pragma: no cover - a programming error
+            raise ConfigError("this command was not given a source")
+        return self.source_id
 
 
 @contextmanager
-def pipeline_run(state: CliContext, *, source: str | None = None) -> Iterator[PipelineRun]:
-    """Load config, validate `source`, bind run logging and bring the DB to the latest schema."""
+def pipeline_run(
+    state: CliContext, *, source: str | None = None, reads_source: bool = False
+) -> Iterator[PipelineRun]:
+    """Load config, resolve and validate the source, bind run logging and migrate the DB.
+
+    A command that `reads_source` uses `source`, or ``data.primary_source`` when it is None.
+    """
     with cli_errors():
         cfg = state.config
-        if source is not None:
-            cfg.source(source)  # fail on an unknown source before touching anything
+        resolved = source if source is not None or not reads_source else cfg.primary_source()
+        if resolved is not None:
+            cfg.source(resolved)  # fail on an unknown source before touching anything
         run_id = new_ulid()
         sha = git_sha(cfg.paths.resolve(cfg.paths.root))
         configure_logging(cfg, run_id=run_id, git_sha=sha)
         engine = engine_for(cfg)
         try:
             upgrade_to_head(engine, cfg.paths.resolve(cfg.paths.migrations_dir))
-            yield PipelineRun(cfg, engine, run_id, sha)
+            yield PipelineRun(cfg, engine, run_id, sha, resolved)
         finally:
             engine.dispose()
             shutdown_logging()
 
 
-SourceOption = Annotated[str, typer.Option("--source", help="Configured source id.")]
+SourceOption = Annotated[
+    str | None,
+    typer.Option("--source", help="Configured source id [default: data.primary_source]."),
+]
 StartOption = Annotated[
     datetime | None, typer.Option("--start", formats=["%Y-%m-%d"], help="First trading day.")
 ]
@@ -194,16 +212,16 @@ EndOption = Annotated[
 @app.command("ingest")
 def ingest_command(
     ctx: typer.Context,
-    source: SourceOption,
     path: Annotated[Path, typer.Option("--path", help="File or directory of source files.")],
+    source: SourceOption = None,
 ) -> None:
     """Copy source files into the immutable raw store with a Parquet mirror and manifest rows.
 
     Files already in the raw store (same SHA-256) are skipped, so re-running is a no-op.
     """
-    with pipeline_run(ctx.obj, source=source) as run:
+    with pipeline_run(ctx.obj, source=source, reads_source=True) as run:
         result = ingest(
-            run.cfg, source, path, engine=run.engine, run_id=run.run_id, git_sha=run.git_sha
+            run.cfg, run.source, path, engine=run.engine, run_id=run.run_id, git_sha=run.git_sha
         )
     typer.echo(
         f"run {result.run_id}: ingested {len(result.ingested)} file(s) with {result.rows} rows; "
@@ -212,27 +230,27 @@ def ingest_command(
 
 
 @app.command("rebuild-mirror")
-def rebuild_mirror_command(ctx: typer.Context, source: SourceOption) -> None:
+def rebuild_mirror_command(ctx: typer.Context, source: SourceOption = None) -> None:
     """Rewrite the Parquet mirror of a source's raw files from the stored copies."""
-    with pipeline_run(ctx.obj, source=source) as run:
-        count = rebuild_mirror(run.cfg, run.engine, source)
+    with pipeline_run(ctx.obj, source=source, reads_source=True) as run:
+        count = rebuild_mirror(run.cfg, run.engine, run.source)
     typer.echo(f"rebuilt the mirror of {count} raw file(s)")
 
 
 @app.command("clean")
 def clean_command(
     ctx: typer.Context,
-    source: SourceOption,
+    source: SourceOption = None,
     start: StartOption = None,
     end: EndOption = None,
     force: Annotated[bool, typer.Option("--force", help="Rebuild unchanged partitions.")] = False,
 ) -> None:
     """Flag (and, if configured, drop) bad ticks into versioned per-trading-day partitions."""
-    with pipeline_run(ctx.obj, source=source) as run:
+    with pipeline_run(ctx.obj, source=source, reads_source=True) as run:
         result = build_clean(
             run.cfg,
             run.engine,
-            source,
+            run.source,
             start=start.date() if start else None,
             end=end.date() if end else None,
             force=force,
@@ -246,14 +264,17 @@ def clean_command(
 
 @app.command("build-bars")
 def build_bars_command(
-    ctx: typer.Context, source: SourceOption, start: StartOption = None, end: EndOption = None
+    ctx: typer.Context,
+    source: SourceOption = None,
+    start: StartOption = None,
+    end: EndOption = None,
 ) -> None:
     """Build bid/ask/mid bars on all seven timeframes from the source's clean partitions."""
-    with pipeline_run(ctx.obj, source=source) as run:
+    with pipeline_run(ctx.obj, source=source, reads_source=True) as run:
         result = build_bar_sets(
             run.cfg,
             run.engine,
-            source,
+            run.source,
             start=start.date() if start else None,
             end=end.date() if end else None,
         )
@@ -266,14 +287,17 @@ def build_bars_command(
 
 @app.command("spread-stats")
 def spread_stats_command(
-    ctx: typer.Context, source: SourceOption, start: StartOption = None, end: EndOption = None
+    ctx: typer.Context,
+    source: SourceOption = None,
+    start: StartOption = None,
+    end: EndOption = None,
 ) -> None:
     """Compute p50/p90/p99 spreads per New York hour of week (data before the vault only)."""
-    with pipeline_run(ctx.obj, source=source) as run:
+    with pipeline_run(ctx.obj, source=source, reads_source=True) as run:
         result = build_spread_stats(
             run.cfg,
             run.engine,
-            source,
+            run.source,
             start=start.date() if start else None,
             end=end.date() if end else None,
         )
@@ -286,7 +310,7 @@ def spread_stats_command(
 @app.command("validate")
 def validate_command(
     ctx: typer.Context,
-    source: SourceOption,
+    source: SourceOption = None,
     start: StartOption = None,
     end: EndOption = None,
     include_vault: Annotated[
@@ -306,11 +330,11 @@ def validate_command(
     ] = False,
 ) -> None:
     """Grade every data-quality check per trading day and write a report."""
-    with pipeline_run(ctx.obj, source=source) as run:
+    with pipeline_run(ctx.obj, source=source, reads_source=True) as run:
         result = validate_source(
             run.cfg,
             run.engine,
-            source,
+            run.source,
             run_id=run.run_id,
             git_sha=run.git_sha,
             start=start.date() if start else None,
@@ -346,6 +370,87 @@ def verify_raw_command(ctx: typer.Context) -> None:
     if problems:
         raise typer.Exit(1)
     typer.echo("raw store verified: every file matches its manifest entry")
+
+
+fetch_app = typer.Typer(
+    help="Download vendor data to local files (run on a machine with internet access).",
+    no_args_is_help=True,
+)
+app.add_typer(fetch_app, name="fetch")
+
+
+@fetch_app.command("dukascopy")
+def fetch_dukascopy_command(
+    ctx: typer.Context,
+    instrument: Annotated[str, typer.Option("--instrument", help="Instrument id, e.g. xauusd.")],
+    first: Annotated[datetime, typer.Option("--from", formats=["%Y-%m-%d"], help="First UTC day.")],
+    last: Annotated[
+        datetime,
+        typer.Option("--to", formats=["%Y-%m-%d"], help="Last UTC day (inclusive; before today)."),
+    ],
+    out: Annotated[
+        Path, typer.Option("--out", help="Output directory; files go below <out>/<SYMBOL>/.")
+    ],
+    source: Annotated[
+        str, typer.Option("--source", help="Configured Dukascopy source.")
+    ] = "dukascopy",
+    retry_empty: Annotated[
+        bool, typer.Option("--retry-empty", help="Ask again for hours recorded empty.")
+    ] = False,
+) -> None:
+    """Download Dukascopy hourly tick files (.bi5) with a SHA-256 manifest (ADR 0057).
+
+    One polite request at a time; resumable (hours in <out>/<SYMBOL>/manifest.jsonl are verified,
+    not fetched again); never overwrites a file. Then:
+    xq ingest --source dukascopy --path <out>/<SYMBOL>"""
+    state: CliContext = ctx.obj
+    with cli_errors():
+        cfg = state.config
+        declared = cfg.source(source)
+        if declared.instrument != instrument.lower():
+            raise ConfigError(
+                f"source {source!r} is declared for {declared.instrument!r}, not {instrument!r}"
+            )
+        configure_logging(
+            cfg, run_id=new_ulid(), git_sha=git_sha(cfg.paths.resolve(cfg.paths.root))
+        )
+        try:
+            result = fetch_dukascopy(
+                cfg,
+                source,
+                first.date(),
+                last.date(),
+                out,
+                retry_empty=retry_empty,
+                on_day=_echo_day,
+            )
+        finally:
+            shutdown_logging()
+    typer.echo(
+        f"{result.fetched} hour(s) fetched, {result.empty} empty "
+        f"({result.empty_in_market} inside market hours), "
+        f"{result.already_present + result.adopted} already present; "
+        f"{result.requests} request(s); files under {result.folder}; manifest {result.manifest}"
+    )
+    if result.unconfirmed_empty:
+        typer.echo(
+            f"warning: the last {result.unconfirmed_empty} hour(s) inside market hours came back "
+            "empty with no later hour to confirm the feed was answering; they are not recorded "
+            "and the next run asks for them again"
+        )
+    if result.empty_in_market:
+        typer.echo(
+            f"note: {result.empty_in_market} empty hour(s) inside the calendar's market hours "
+            "(holidays or vendor gaps); --retry-empty asks for them again"
+        )
+    typer.echo(f"next: xq ingest --source {source} --path {result.folder}")
+
+
+def _echo_day(progress: DayProgress) -> None:
+    typer.echo(
+        f"{progress.day}: {progress.fetched} fetched, {progress.empty} empty, "
+        f"{progress.already_present} already present"
+    )
 
 
 dataset_app = typer.Typer(

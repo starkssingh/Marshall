@@ -5,11 +5,12 @@
 # of the quote after the execution latency. The builder pins the bar build, the quality run and a
 # config digest when it resolves this spec, and stores the resolved spec with the dataset.
 #
-# The window is about four years before the vault, as the plan asks; confirm `start` against the
-# execution broker's real history depth once the broker is named. `end` equals vault.start:
-# research datasets never reach into the vault.
+# The source is the primary research feed, Dukascopy ticks in UTC (ADR 0057). The window is about
+# four years before the vault, as the plan asks; Dukascopy's history (from 2003-05-05) no longer
+# limits it, so a longer window is the owner's decision (docs/STATUS.md), taken before results.
+# `end` equals vault.start: research datasets never reach into the vault.
 name: ds_base
-source: mt5_primary
+source: dukascopy
 instrument: xauusd
 base_timeframe: 15m
 price_basis: mid
