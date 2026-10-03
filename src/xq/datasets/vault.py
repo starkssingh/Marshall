@@ -8,9 +8,8 @@ A token belongs to one strategy bundle and unlocks the vault for **one run**: th
 presents it redeems it, and any other run is refused. Every granted access is logged as a
 ``vault_access_granted`` warning and stored in ``vault_access_log``.
 
-Tokens are issued only by the release-gate procedure (GATE-002, Sprint 13). This module verifies
-and redeems them; it deliberately has no way to create one, so until GATE-002 exists the vault
-cannot be opened through the library.
+Tokens are issued only by the release-gate procedure (GATE-002, `xq.registry.vault`): one per
+validated bundle, ever. This module verifies and redeems them; it has no way to create one.
 """
 
 from __future__ import annotations

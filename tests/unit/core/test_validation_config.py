@@ -18,6 +18,7 @@ def test_the_repository_settings_load() -> None:
     assert 0.2 in settings.perturbation.levels
     assert settings.pbo.blocks == 16
     assert settings.pbo.not_applicable_max_effective_trials == 2  # the owner's rule (C-25)
+    assert settings.vault_procedure.token_ttl_hours == 24  # GATE-002: an unused token expires
 
 
 def test_pbo_blocks_must_be_even() -> None:

@@ -929,8 +929,16 @@ class PboConfig(FrozenModel):
         return value
 
 
+class VaultProcedureConfig(FrozenModel):
+    """The one-time vault evaluation (GATE-002, ADR 0060)."""
+
+    #: A vault token expires this many hours after it is issued.
+    token_ttl_hours: float = Field(gt=0, le=168)
+
+
 class ValidationConfig(FrozenModel):
-    """Validation and robustness procedures (``config/validation.yaml``, Phases 16 and 17).
+    """Validation and robustness procedures (``config/validation.yaml``, Phases 16 and 17), and
+    the vault procedure of the release gate (Phase 25).
 
     Pass/fail thresholds are not here: they are in ``config/gates.yaml``.
     """
@@ -940,6 +948,7 @@ class ValidationConfig(FrozenModel):
     perturbation: PerturbationConfig
     monte_carlo: MonteCarloConfig
     noise: NoiseConfig
+    vault_procedure: VaultProcedureConfig
 
 
 class SpreadCostConfig(FrozenModel):

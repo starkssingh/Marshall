@@ -28,3 +28,6 @@ noise:                   # ROB-005: noise in the strategy's inputs; fills stay o
   price_levels: [0.25, 0.5, 1.0, 2.0, 5.0]    # multiples of the spread
   feature_levels: [0.1, 0.25, 0.5, 1.0]       # multiples of each feature's causal std
   n_seeds: 20                                 # draws per level (median and 90 % band)
+
+vault_procedure:         # GATE-002: one vault evaluation per validated bundle (ADR 0060)
+  token_ttl_hours: 24    # an unused token expires a day after it is issued

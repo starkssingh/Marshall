@@ -854,6 +854,17 @@ IDs from `docs/specs/development-plan.md`.
   report (`reports/gates/<bundle>/<time>/gate.md`, `gate.json`) lists the plan's ten release-gate
   items, the dataset's quality evidence and the origin's reproduction status. It never promotes.
   Tested end to end on synthetic ticks. ADR 0060.
+- GATE-002: the one-time vault evaluation (`xq.registry.vault`). `xq gate vault-token` issues a
+  validated bundle's only token (a second issuance for the same bundle is refused; the secret is
+  shown once, its hash stored with issuer and expiry, `vault_procedure.token_ttl_hours`).
+  `xq gate vault-evaluate` runs a confirmatory `vault_evaluation`: the token's bundle, a window of
+  complete trading days and a quality run grading every open day without FAIL are checked before
+  the vault is read; the rule is evaluated by the board's own code on catalog bars read with the
+  token (features in memory, no vault dataset), every read logged; R3 is recorded (net Sharpe,
+  walk-forward bootstrap quantile, risk-limit breaches on the screening tier, access logged) and
+  the vault days appended to the bundle's history. `usable_quotes` takes a vault token; the
+  board's `sigma_1m_bps` and `daily_returns_on` are public. Tested end to end on synthetic ticks
+  spanning a test vault start. ADR 0060.
 
 ### Changed
 

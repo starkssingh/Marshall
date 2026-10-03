@@ -41,6 +41,7 @@ from xq.data.raw_store import ingest, rebuild_mirror, verify_raw_store
 from xq.data.spreads import build_spread_stats
 from xq.datasets.builder import build_dataset, verify_dataset
 from xq.datasets.spec import load_spec
+from xq.datasets.vault import GateToken
 from xq.models.board import load_board_config, run_baseline_board
 from xq.quality.validate import validate_source
 from xq.registry.bundles import (
@@ -58,6 +59,7 @@ from xq.registry.bundles import (
 from xq.registry.evaluate import evaluate_bundle
 from xq.registry.gates import list_gate_results, promote, retire
 from xq.registry.models import Status, SubjectKind, status_history
+from xq.registry.vault import issue_vault_token, run_vault_evaluation
 from xq.research.eda.horizons import write_admission
 from xq.research.eda.run import run_eda
 from xq.robustness.simulated import SimulationSpec
@@ -1063,3 +1065,54 @@ def gate_evaluate(
     for line in outcome.summary_lines():
         typer.echo(line)
     typer.echo(f"report: {outcome.report_dir / 'gate.md'}")
+
+
+@gate_app.command("vault-token")
+def gate_vault_token(
+    ctx: typer.Context,
+    bundle_id: Annotated[str, typer.Argument(help="Bundle id or a unique prefix (8+ digits).")],
+    issued_by: Annotated[str, typer.Option("--issued-by", help="Who issues it (recorded).")],
+) -> None:
+    """Issue a validated bundle's one vault token (GATE-002). The secret is shown once; a second
+    token for the same bundle is refused."""
+    with pipeline_run(ctx.obj) as run, cli_errors():
+        token = issue_vault_token(run.cfg, run.engine, bundle_id, issued_by=issued_by)
+    typer.echo("vault token (shown once; it opens the vault for one run):")
+    typer.echo(f"{token.token_id}.{token.secret}")
+
+
+@gate_app.command("vault-evaluate")
+def gate_vault_evaluate(
+    ctx: typer.Context,
+    bundle_id: Annotated[str, typer.Argument(help="Bundle id or a unique prefix (8+ digits).")],
+    token: Annotated[str, typer.Option("--token", help="The bundle's vault token.")],
+    quality_run: Annotated[
+        str, typer.Option("--quality-run", help="Quality run grading the vault days.")
+    ],
+    last_day: Annotated[
+        datetime | None,
+        typer.Option(
+            "--last-day",
+            formats=["%Y-%m-%d"],
+            help="Last trading day of the vault window (default: the last complete one).",
+        ),
+    ] = None,
+) -> None:
+    """Run the bundle's one vault evaluation and record its R3 result (confirmatory: a clean git
+    tree is required). Exit 0 whatever the outcome."""
+    with pipeline_run(ctx.obj) as run, cli_errors():
+        outcome = run_vault_evaluation(
+            run.cfg,
+            run.engine,
+            bundle_id,
+            GateToken.parse(token),
+            quality_run_id=quality_run,
+            last_day=None if last_day is None else last_day.date(),
+        )
+    typer.echo(
+        f"vault evaluation {outcome.run_id}: {outcome.days} trading days, net Sharpe "
+        f"{outcome.net_sharpe:.3f}, walk-forward quantile {outcome.interval_quantile:.3f}, "
+        f"{outcome.breaches} risk-limit breach(es)"
+    )
+    typer.echo(outcome.result.describe())
+    typer.echo(f"report: {outcome.report_dir / 'vault.md'}")

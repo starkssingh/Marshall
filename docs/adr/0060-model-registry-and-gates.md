@@ -177,3 +177,62 @@ verdict is `pass`; the report has the ten items (data validation pass, vault and
 the bundle stays draft, and an ungated promotion is refused; a validation of another strategy,
 and an altered report, are refused; reading an existing validation adds results without
 rerunning it. On three weeks of synthetic ticks both gates fail, as they should on such a sample.
+
+## GATE-002 — the one-time vault evaluation
+
+1. **One token per bundle, ever** (`xq gate vault-token <bundle> --issued-by <name>`). A token is
+   issued only to a bundle whose status is `validated` and whose latest R2 result passed, and
+   only if no token was ever issued for that bundle: a second issuance is refused whatever
+   happened to the first token ("second vault access for same bundle refused", the plan's test).
+   The secret is printed once; `vault_tokens` keeps its SHA-256, the issuer and the expiry
+   (`vault_procedure.token_ttl_hours`, 24, in `config/validation.yaml`). This closes ADR 0015's
+   "no issuance in the library yet".
+2. **The evaluation** (`xq gate vault-evaluate <bundle> --token … --quality-run … [--last-day]`)
+   is a confirmatory run of kind `vault_evaluation`: a dirty tree is refused, with no exploratory
+   option, because its result is evidence.
+   - **Checks before the vault is read**, so they cannot spend the token:
+     - the token belongs to this bundle;
+     - the window ends at the end of a complete trading day (the last complete one by default);
+     - the named quality run grades every open trading day of the window (warm-up and vault,
+       from the market calendar) with no FAIL day. A run made without `--include-vault` is
+       refused for the days it lacks.
+   - **The first read redeems the token** for this run (DS-004). Every read is logged as a
+     `vault_access_granted` warning and in `vault_access_log`; any other run presenting the token
+     is refused.
+   - **The rule is evaluated by the board's own code**: the bars of the dataset's source and
+     timeframes, loaded through the catalog with the token; the feature set's function computed
+     in memory (a vault dataset is never materialized, so no later research run can load it); the
+     board's signal bars and rule positions; the screener with the configured cost model and
+     sigma-hat. Warm-up history comes from before the vault, decisions and fills from inside it.
+3. **R3** is recorded on the bundle from the vault run (`net_sharpe_min`,
+   `walk_forward_interval.low/high`, `risk_limit_breaches_max`, `vault_access_logged`):
+   - the walk-forward interval: the quantile of the vault's per-period Sharpe ratio among
+     stationary-bootstrap resamples of the bundle's backtest history (the walk-forward
+     out-of-sample returns, MREG-004), each truncated to the vault's length, under the gates'
+     bootstrap convention;
+   - risk-limit breaches on the screening tier: days whose loss reaches the risk profile's daily
+     loss limit, plus one if the drawdown (capital as the first peak) reaches the halt. The
+     screener sizes without the risk engine, so this is a reading of the risk profile, not an
+     engine's refusals. The event tier will replace it when a candidate runs there;
+   - access logged: 1 when the access log holds this run's reads.
+
+   The vault's daily returns are appended as the bundle's `vault` history. Promotion to
+   `vault_passed` then reads R3 like any other gate.
+4. **A failed evaluation spends the token.** If the evaluation fails after the vault was read, the
+   bundle's vault access is used up; reopening it needs the owner's decision in an ADR. This is
+   the conservative reading of "one-time"; the checks before the first read exist so that bad
+   inputs fail before it.
+5. **Scope.** Only rule bundles from a board run can be evaluated: a bundle of models needs
+   ML-009. `xq validate --include-vault` keeps its explicit confirmation for grading vault days
+   (ADR 0013): grading data quality is a pipeline stage, not a research read, and the evaluation
+   refuses vault days a quality run has not graded.
+
+**Known truth** (`tests/integration/registry/test_vault.py`, synthetic ticks spanning a test
+`vault.start` of 18 March 2024): a draft bundle gets no token; a validated one gets one, and a
+second is refused; another bundle's token, and a quality run that does not grade the vault days,
+are refused with no vault read; the one evaluation is confirmatory, redeems the token, logs five
+reads (four bar sets and the ticks), records R3 with its five criteria and appends the four vault
+days to the history; a second evaluation with the spent token, and a new token, are refused; the
+bundle moves to `vault_passed` exactly when R3 passed. The R1 and R2 results that bring the test
+bundles to `validated` are recorded directly from synthetic checks, labelled as such: that module
+tests the vault procedure, and the evaluator is tested on its own.

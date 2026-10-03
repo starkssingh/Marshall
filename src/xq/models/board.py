@@ -228,7 +228,7 @@ class ScreeningContext:
 
     def daily_returns(self, result: BacktestResult) -> pd.Series:
         """Daily net returns of a screen on every OOS trading day (0 before the first fill)."""
-        return _daily_returns(result, self.oos_days)
+        return daily_returns_on(result, self.oos_days)
 
     def day_folds(self) -> pd.Series:
         """The walk-forward test fold of each OOS trading day (its first OOS decision's)."""
@@ -286,7 +286,7 @@ def screening_context(
     )
     excluded = {date.fromisoformat(e["trading_day"]) for e in manifest["excluded_partitions"]}
     quotes = _screening_quotes(cfg, spec, oos, excluded, costs, clock, extra_latencies_ms)
-    sigma = _sigma_1m_bps(cfg, spec, features).reindex(oos)
+    sigma = sigma_1m_bps(cfg, spec, features).reindex(oos)
     return ScreeningContext(
         dataset_id=dataset_id,
         spec=spec,
@@ -628,7 +628,7 @@ def _screening_quotes(
     return quotes.loc[:, ["ts_utc", "bid", "ask"]].reset_index(drop=True)
 
 
-def _sigma_1m_bps(cfg: AppConfig, spec: DatasetSpec, features: pd.DataFrame) -> pd.Series:
+def sigma_1m_bps(cfg: AppConfig, spec: DatasetSpec, features: pd.DataFrame) -> pd.Series:
     """Sigma-hat of 1-minute log returns (bps) at each decision, from the target set's estimator."""
     if spec.target_set is None:
         raise BoardError("the board needs a dataset with a target set")
@@ -651,7 +651,7 @@ def _horizon_label(cfg: AppConfig, spec: DatasetSpec, target: str) -> str:
     return max(labels, key=len)
 
 
-def _daily_returns(result: BacktestResult, days: list[date]) -> pd.Series:
+def daily_returns_on(result: BacktestResult, days: list[date]) -> pd.Series:
     """Daily net returns on every OOS trading day; 0 before the first fill."""
     daily = result.daily["return"] if len(result.daily) else pd.Series(dtype="float64")
     values = daily.reindex(days).fillna(0.0).to_numpy(np.float64)
@@ -797,7 +797,7 @@ def _random_entry_p(
     null = []
     for draw in random_entry_null(positions, board.random_entry_seeds, seed=seed):
         screened = run_vectorized(draw, quotes, costs, clock, capital=capital, sigma_1m_bps=sigma)
-        null.append(sharpe_ratio(_daily_returns(screened, days).to_numpy(np.float64)))
+        null.append(sharpe_ratio(daily_returns_on(screened, days).to_numpy(np.float64)))
     values = np.array(null, dtype=np.float64)
     values = values[np.isfinite(values)]
     return (1 + int(np.sum(values >= observed))) / (1 + len(values))
