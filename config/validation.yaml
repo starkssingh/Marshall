@@ -1,7 +1,12 @@
 # Validation and robustness procedures (Phases 16 and 17: VAL-003 ... VAL-006, ROB-001 ... ROB-008;
-# ADR 0054, ADR 0055). Every value is fixed before any candidate result exists; changing one needs
-# an ADR. The pass/fail thresholds are not here: they are in config/gates.yaml, and the bootstrap
+# ADR 0054, ADR 0055, ADR 0058). Every value is fixed before any candidate result exists; changing
+# one needs an ADR. The pass/fail thresholds are not here: they are in config/gates.yaml, and the bootstrap
 # convention (n_boot, Politis-White block, at least 5 days) is the gates' own.
+
+pbo:                     # VAL-003 by CSCV over the family's configuration matrix
+  blocks: 16
+  not_applicable_max_effective_trials: 2   # C-25 (1), owner: <= 2 effective trials is no
+                                           # meaningful selection; R2 pbo_max N/A, DSR applies
 
 spa_size_check:          # C-24 (1): does SPA / the Reality Check over-reject on this sample?
   n_sim: 500             # null families simulated with the sample's serial dependence
@@ -23,3 +28,6 @@ noise:                   # ROB-005: noise in the strategy's inputs; fills stay o
   price_levels: [0.25, 0.5, 1.0, 2.0, 5.0]    # multiples of the spread
   feature_levels: [0.1, 0.25, 0.5, 1.0]       # multiples of each feature's causal std
   n_seeds: 20                                 # draws per level (median and 90 % band)
+
+vault_procedure:         # GATE-002: one vault evaluation per validated bundle (ADR 0060)
+  token_ttl_hours: 24    # an unused token expires a day after it is issued

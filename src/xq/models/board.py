@@ -57,6 +57,7 @@ import pandas as pd
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 from scipy.stats import t as student_t
+from sqlalchemy import Engine
 
 from xq.backtest.costs import CostModel
 from xq.backtest.metrics import (
@@ -85,6 +86,7 @@ from xq.models.baselines import (
     rule_exposure,
     signal_bars,
 )
+from xq.robustness.costs_stress import CostScenario, stressed_costs
 from xq.targets.base import market_horizon, target_values
 from xq.targets.kinds import target_kind
 from xq.tracking import registry
@@ -99,7 +101,7 @@ from xq.validation.sharpe import (
     min_track_record_length,
     sharpe_ratio,
 )
-from xq.validation.splitters import WalkForwardConfig, WalkForwardSplitter
+from xq.validation.splitters import Fold, WalkForwardConfig, WalkForwardSplitter
 from xq.validation.walkforward import run_walk_forward
 
 if TYPE_CHECKING:
@@ -185,6 +187,122 @@ class _Strategy:
     positions: pd.Series
 
 
+@dataclass(frozen=True)
+class ScreeningContext:
+    """What a board screens every strategy against: the out-of-sample decisions and days of its
+    walk-forward folds, the quotes, the cost model, the market clock and the sigma-hat of 1-minute
+    returns. `run_baseline_board` and the validation adapter of a board run
+    (`xq.validation.subjects`) build it the same way, so a strategy screened by either gives the
+    same daily returns."""
+
+    dataset_id: str
+    spec: DatasetSpec
+    features: pd.DataFrame
+    folds: list[Fold]
+    oos: pd.DatetimeIndex
+    oos_days: list[date]
+    costs: CostModel
+    clock: MarketClock
+    quotes: pd.DataFrame
+    sigma: pd.Series
+    capital: float
+    periods_per_year: int
+
+    def screen(
+        self,
+        positions: pd.Series,
+        *,
+        quotes: pd.DataFrame | None = None,
+        costs: CostModel | None = None,
+    ) -> BacktestResult:
+        """`positions` on the OOS decisions through the screener (optionally with stressed
+        quotes or costs)."""
+        return run_vectorized(
+            positions,
+            self.quotes if quotes is None else quotes,
+            self.costs if costs is None else costs,
+            self.clock,
+            capital=self.capital,
+            sigma_1m_bps=self.sigma,
+        )
+
+    def daily_returns(self, result: BacktestResult) -> pd.Series:
+        """Daily net returns of a screen on every OOS trading day (0 before the first fill)."""
+        return daily_returns_on(result, self.oos_days)
+
+    def day_folds(self) -> pd.Series:
+        """The walk-forward test fold of each OOS trading day (its first OOS decision's)."""
+        fold_of = np.empty(len(self.features), dtype=object)
+        for fold in self.folds:
+            fold_of[fold.test_idx] = fold.fold_id
+        position = self.features.index.get_indexer(self.oos)
+        frame = pd.DataFrame(
+            {"day": [d.item() for d in trading_days(self.oos)], "fold": fold_of[position]}
+        )
+        first = frame.groupby("day", sort=True)["fold"].first()
+        return first.reindex(self.oos_days).rename("fold")
+
+
+def screening_context(
+    cfg: AppConfig,
+    engine: Engine,
+    dataset_id: str,
+    board: BoardConfig,
+    targets: Sequence[str],
+    *,
+    extra_latencies_ms: Sequence[int] = (),
+) -> ScreeningContext:
+    """The board's screening context on dataset `dataset_id` (see `ScreeningContext`).
+
+    Args:
+        extra_latencies_ms: Also keep the quotes a screen with this much latency added would read
+            (ROB-002's latency stress); the board itself needs none.
+
+    Raises:
+        BoardError: if the dataset lacks a target or yields no fold.
+    """
+    manifest = read_manifest(cfg, dataset_id)
+    spec = DatasetSpec.model_validate(manifest["spec"])
+    features = load_dataset(cfg, dataset_id, "features")
+    target_frame = load_dataset(cfg, dataset_id, "targets")
+    known = set(target_frame["target"].unique())
+    missing = [t for t in targets if t not in known]
+    if missing:
+        raise BoardError(f"dataset {dataset_id} has no targets {missing}")
+
+    decisions = pd.DatetimeIndex(features.index)
+    first = target_values(target_frame, targets[0]).reindex(decisions)
+    folds = WalkForwardSplitter(board.walk_forward).split(decisions, first["label_end"])
+    if not folds:
+        raise BoardError(f"the walk-forward splitter gives no fold on dataset {dataset_id}")
+    oos = decisions[np.unique(np.concatenate([f.test_idx for f in folds]))]
+    oos_days = sorted({d.item() for d in trading_days(oos)})
+
+    costs = CostModel.from_config(cfg, spec.instrument, engine=engine, source_id=spec.source)
+    clock = MarketClock.for_range(
+        cfg.sessions_config(),
+        trading_day(oos[0]) - timedelta(days=1),
+        trading_day(oos[-1]) + timedelta(days=10),
+    )
+    excluded = {date.fromisoformat(e["trading_day"]) for e in manifest["excluded_partitions"]}
+    quotes = _screening_quotes(cfg, spec, oos, excluded, costs, clock, extra_latencies_ms)
+    sigma = sigma_1m_bps(cfg, spec, features).reindex(oos)
+    return ScreeningContext(
+        dataset_id=dataset_id,
+        spec=spec,
+        features=features,
+        folds=folds,
+        oos=oos,
+        oos_days=oos_days,
+        costs=costs,
+        clock=clock,
+        quotes=quotes,
+        sigma=sigma,
+        capital=cfg.backtest_config().capital_usd,
+        periods_per_year=cfg.gate_periods_per_year(),
+    )
+
+
 def run_baseline_board(
     run: RunContext,
     dataset_id: str,
@@ -204,34 +322,11 @@ def run_baseline_board(
     """
     cfg = run.cfg
     conventions = cfg.gates_config().conventions
-    periods = cfg.gate_periods_per_year()
-    manifest = read_manifest(cfg, dataset_id)
-    spec = DatasetSpec.model_validate(manifest["spec"])
-    features = load_dataset(cfg, dataset_id, "features")
-    target_frame = load_dataset(cfg, dataset_id, "targets")
     chosen = list(targets or board.targets)
-    known = set(target_frame["target"].unique())
-    missing = [t for t in chosen if t not in known]
-    if missing:
-        raise BoardError(f"dataset {dataset_id} has no targets {missing}")
-
-    decisions = pd.DatetimeIndex(features.index)
-    first = target_values(target_frame, chosen[0]).reindex(decisions)
-    folds = WalkForwardSplitter(board.walk_forward).split(decisions, first["label_end"])
-    if not folds:
-        raise BoardError(f"the walk-forward splitter gives no fold on dataset {dataset_id}")
-    oos = decisions[np.unique(np.concatenate([f.test_idx for f in folds]))]
-    oos_days = sorted({d.item() for d in trading_days(oos)})
-
-    costs = CostModel.from_config(cfg, spec.instrument, engine=run.engine, source_id=spec.source)
-    clock = MarketClock.for_range(
-        cfg.sessions_config(),
-        trading_day(oos[0]) - timedelta(days=1),
-        trading_day(oos[-1]) + timedelta(days=10),
-    )
-    excluded = {date.fromisoformat(e["trading_day"]) for e in manifest["excluded_partitions"]}
-    quotes = _screening_quotes(cfg, spec, oos, excluded, costs, clock)
-    sigma = _sigma_1m_bps(cfg, spec, features).reindex(oos)
+    context = screening_context(cfg, run.engine, dataset_id, board, chosen)
+    spec, features, folds = context.spec, context.features, context.folds
+    oos, oos_days, periods = context.oos, context.oos_days, context.periods_per_year
+    costs, clock, quotes, sigma = context.costs, context.clock, context.quotes, context.sigma
 
     strategies: list[_Strategy] = []
     forecast_rows: list[dict[str, Any]] = []
@@ -244,13 +339,11 @@ def run_baseline_board(
     strategies.extend(_rule_strategies(cfg, features, board, oos, periods))
 
     family = _family(run)
-    capital = cfg.backtest_config().capital_usd
+    capital = context.capital
     evaluated: list[tuple[_Strategy, BacktestResult, pd.Series]] = []
     for strategy in strategies:
-        result = run_vectorized(
-            strategy.positions, quotes, costs, clock, capital=capital, sigma_1m_bps=sigma
-        )
-        returns = _daily_returns(result, oos_days)
+        result = context.screen(strategy.positions)
+        returns = context.daily_returns(result)
         annual_sharpe = return_metrics(returns, periods)["sharpe"]
         run.record_trial(
             family_id=family,
@@ -451,7 +544,25 @@ def _rule_strategies(
 ) -> list[_Strategy]:
     if not board.rules:
         return []
-    # volatility targeting annualizes signal-bar returns: one bar a day for 1d, more below it
+    bars, bar_periods = rule_signal_bars(cfg, features, board, periods)
+    strategies = []
+    for name, rule in board.strategies().items():
+        kind = "rule_vol" if rule.vol_target else "rule"
+        params = {"rule": rule.rule, **rule.params}
+        positions = rule_positions(bars, rule, board.vol_target, bar_periods, oos)
+        strategies.append(_Strategy(name, kind, None, params, positions))
+    return strategies
+
+
+def rule_signal_bars(
+    cfg: AppConfig, features: pd.DataFrame, board: BoardConfig, periods: int
+) -> tuple[pd.DataFrame, int]:
+    """The board's signal bars in `features`, and the signal bars per year that volatility
+    targeting annualizes with (one bar a day for 1d, more below it).
+
+    Raises:
+        BoardError: if the features have no context bars of the signal timeframe.
+    """
     timeframe = Timeframe(board.signal_timeframe)
     if timeframe is not Timeframe.D1:
         bars_per_day = regular_trading_day(cfg.sessions_config()) / timeframe.duration
@@ -463,13 +574,19 @@ def _rule_strategies(
         raise BoardError(
             f"the dataset has no {board.signal_timeframe} context bars for the rule baselines"
         ) from exc
-    strategies = []
-    for name, rule in board.strategies().items():
-        exposure = rule_exposure(bars, rule, vol_target=board.vol_target, periods_per_year=periods)
-        kind = "rule_vol" if rule.vol_target else "rule"
-        params = {"rule": rule.rule, **rule.params}
-        strategies.append(_Strategy(name, kind, None, params, positions_at(oos, exposure)))
-    return strategies
+    return bars, periods
+
+
+def rule_positions(
+    bars: pd.DataFrame,
+    rule: RuleStrategyConfig,
+    vol_target: VolTargetConfig | None,
+    bar_periods: int,
+    decisions: pd.DatetimeIndex,
+) -> pd.Series:
+    """A rule baseline's target exposure at each decision (its latest available signal bar)."""
+    exposure = rule_exposure(bars, rule, vol_target=vol_target, periods_per_year=bar_periods)
+    return positions_at(decisions, exposure)
 
 
 def _screening_quotes(
@@ -479,8 +596,14 @@ def _screening_quotes(
     excluded: set[date],
     costs: CostModel,
     clock: MarketClock,
+    extra_latencies_ms: Sequence[int] = (),
 ) -> pd.DataFrame:
-    """The usable quotes a screen of `decisions` reads, loaded a month of trading days at a time."""
+    """The usable quotes a screen of `decisions` reads, loaded a month of trading days at a time
+    (with each extra latency too, when given)."""
+    variants = [costs] + [
+        stressed_costs(costs, CostScenario(f"latency_+{ms}ms", extra_latency_ms=ms))
+        for ms in extra_latencies_ms
+    ]
     days = trading_days(decisions)
     months = np.array([d.item().strftime("%Y-%m") for d in days])
     vault = pd.Timestamp(cfg.vault.start)
@@ -489,19 +612,23 @@ def _screening_quotes(
         chunk = decisions[months == month]
         start = trading_day_bounds(trading_day(chunk[0]))[0]
         end = trading_day_bounds(trading_day(chunk[-1]))[1]
-        intended = clock.advance(_ns(chunk), costs.latency.value)
-        intended = intended[intended != NAT_NS]
-        if len(intended):
-            reach = pd.Timestamp(int(intended.max()), tz="UTC") + costs.max_fill_delay
-            end = max(end, reach + pd.Timedelta(1, "ns"))
+        for variant in variants:
+            intended = clock.advance(_ns(chunk), variant.latency.value)
+            intended = intended[intended != NAT_NS]
+            if len(intended):
+                reach = pd.Timestamp(int(intended.max()), tz="UTC") + variant.max_fill_delay
+                end = max(end, reach + pd.Timedelta(1, "ns"))
         ticks = usable_quotes(cfg, spec, start, min(end, vault), excluded)
-        parts.append(ticks.iloc[required_quotes(ticks, chunk, costs, clock)])
+        rows = np.unique(
+            np.concatenate([required_quotes(ticks, chunk, v, clock) for v in variants])
+        )
+        parts.append(ticks.iloc[rows])
     quotes = pd.concat(parts).drop_duplicates(subset=["raw_file_id", "row_num"])
     quotes = quotes.sort_values(["ts_utc", "raw_file_id", "row_num"], kind="stable")
     return quotes.loc[:, ["ts_utc", "bid", "ask"]].reset_index(drop=True)
 
 
-def _sigma_1m_bps(cfg: AppConfig, spec: DatasetSpec, features: pd.DataFrame) -> pd.Series:
+def sigma_1m_bps(cfg: AppConfig, spec: DatasetSpec, features: pd.DataFrame) -> pd.Series:
     """Sigma-hat of 1-minute log returns (bps) at each decision, from the target set's estimator."""
     if spec.target_set is None:
         raise BoardError("the board needs a dataset with a target set")
@@ -524,7 +651,7 @@ def _horizon_label(cfg: AppConfig, spec: DatasetSpec, target: str) -> str:
     return max(labels, key=len)
 
 
-def _daily_returns(result: BacktestResult, days: list[date]) -> pd.Series:
+def daily_returns_on(result: BacktestResult, days: list[date]) -> pd.Series:
     """Daily net returns on every OOS trading day; 0 before the first fill."""
     daily = result.daily["return"] if len(result.daily) else pd.Series(dtype="float64")
     values = daily.reindex(days).fillna(0.0).to_numpy(np.float64)
@@ -670,7 +797,7 @@ def _random_entry_p(
     null = []
     for draw in random_entry_null(positions, board.random_entry_seeds, seed=seed):
         screened = run_vectorized(draw, quotes, costs, clock, capital=capital, sigma_1m_bps=sigma)
-        null.append(sharpe_ratio(_daily_returns(screened, days).to_numpy(np.float64)))
+        null.append(sharpe_ratio(daily_returns_on(screened, days).to_numpy(np.float64)))
     values = np.array(null, dtype=np.float64)
     values = values[np.isfinite(values)]
     return (1 + int(np.sum(values >= observed))) / (1 + len(values))

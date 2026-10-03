@@ -36,11 +36,20 @@ order by AIC), simulates null families with those dynamics (residual rows resamp
 the dependence across strategies is kept, every true mean zero: the least favourable null), runs the
 tests on each and counts rejections at the gate's level. A gate result that uses SPA or the
 Reality Check carries the warning "test over-rejects on this sample" when that rate exceeds
-``warn_ratio`` (1.5) times the level. The warning never changes the outcome: thresholds are fixed.
+``warn_ratio`` (1.5) times the level.
+
+**Size-adjusted p-value** (C-25, ADR 0058). The simulated null families also give each test's
+null distribution of p-values on this sample. The size-adjusted p-value of an observed p is the
+share of simulated null families whose p-value is at most p, ``(1 + #{p_null <= p}) / (1 +
+n_sim)``: the probability, under nulls with this sample's dependence, of a result at least as
+strong. When the size check flags over-rejection, the R2 SPA gate reads the size-adjusted p-value
+instead of the raw one, at the same threshold (``spa_p_max``, 0.10); both are reported. The
+threshold never moves: the p-value is corrected for the test's size on this sample.
 """
 
 from __future__ import annotations
 
+import dataclasses
 import math
 from dataclasses import dataclass
 from typing import Literal
@@ -97,13 +106,20 @@ class FamilyTest:
     def gate_check(self, gates: GatesConfig, size: SizeCheck) -> GateCheck:
         """R2 ``spa_p_max`` on the consistent SPA p-value, with the size check's warning.
 
-        The size check is required: no SPA gate result exists without it (C-24).
+        The size check is required: no SPA gate result exists without it (C-24). When it flags
+        over-rejection, the gate reads the size-adjusted p-value at the same threshold, and the
+        raw one is named in the result (C-25; module docstring).
         """
         criterion = gates.criterion("R2", "spa_p_max")
         if not math.isclose(size.level, criterion.threshold):
             raise ValueError("the size check must run at the gate's level")
         warning = size.warning("spa")
-        return criterion.check(self.spa_p, () if warning is None else (warning,))
+        if warning is None:
+            return criterion.check(self.spa_p)
+        adjusted = size.adjusted_p("spa", self.spa_p)
+        measure = f"{criterion.measure}, size-adjusted on this sample's simulated null"
+        note = f"gated on the size-adjusted p-value; raw SPA p = {self.spa_p:.4g}"
+        return dataclasses.replace(criterion, measure=measure).check(adjusted, (warning, note))
 
 
 @dataclass(frozen=True)
@@ -118,11 +134,26 @@ class SizeCheck:
     warn_ratio: float
     #: The AR order fitted to each strategy's differentials.
     ar_orders: tuple[int, ...]
+    #: Each test's p-value on every simulated null family: the reference distribution of the
+    #: size-adjusted p-value.
+    reality_check_null_p: tuple[float, ...] = ()
+    spa_null_p: tuple[float, ...] = ()
 
     def over_rejects(self, test: Literal["spa", "reality_check"]) -> bool:
         """Whether `test`'s simulated size exceeds ``warn_ratio`` times the level."""
         size = self.spa_size if test == "spa" else self.reality_check_size
         return size > self.warn_ratio * self.level
+
+    def adjusted_p(self, test: Literal["spa", "reality_check"], p_value: float) -> float:
+        """The size-adjusted p-value of an observed `p_value` of `test` (module docstring).
+
+        Raises:
+            ValueError: if the check kept no null p-values.
+        """
+        null = np.asarray(self.spa_null_p if test == "spa" else self.reality_check_null_p)
+        if len(null) == 0:
+            raise ValueError("the size check kept no null p-values")
+        return float((1 + np.sum(null <= p_value)) / (1 + len(null)))
 
     def warning(self, test: Literal["spa", "reality_check"]) -> str | None:
         """The warning a gate result using `test` carries, or None."""
@@ -241,7 +272,8 @@ def size_check(
     residuals -= residuals.mean(axis=0)
     burn = 100 + 10 * max_order
     rng = make_rng(seed)
-    rc = spa = 0
+    rc_null: list[float] = []
+    spa_null: list[float] = []
     for sim in range(settings.n_sim):
         shocks = residuals[rng.integers(0, len(residuals), n + burn)]
         family = _simulate(fits, shocks)[burn:]  # every true mean zero: the null boundary
@@ -251,15 +283,17 @@ def size_check(
             n_boot=settings.n_boot,
             seed=derive_seed(seed, "size_check", sim),
         )
-        rc += result.reality_check_p <= level
-        spa += result.spa_p <= level
+        rc_null.append(result.reality_check_p)
+        spa_null.append(result.spa_p)
     return SizeCheck(
         level=level,
         n_sim=settings.n_sim,
-        reality_check_size=rc / settings.n_sim,
-        spa_size=spa / settings.n_sim,
+        reality_check_size=sum(p <= level for p in rc_null) / settings.n_sim,
+        spa_size=sum(p <= level for p in spa_null) / settings.n_sim,
         warn_ratio=settings.warn_ratio,
         ar_orders=tuple(len(c) for c in fits),
+        reality_check_null_p=tuple(rc_null),
+        spa_null_p=tuple(spa_null),
     )
 
 

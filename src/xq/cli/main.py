@@ -41,8 +41,25 @@ from xq.data.raw_store import ingest, rebuild_mirror, verify_raw_store
 from xq.data.spreads import build_spread_stats
 from xq.datasets.builder import build_dataset, verify_dataset
 from xq.datasets.spec import load_spec
+from xq.datasets.vault import GateToken
 from xq.models.board import load_board_config, run_baseline_board
 from xq.quality.validate import validate_source
+from xq.registry.bundles import (
+    activate,
+    activation_history,
+    append_board_history,
+    bundle_from_board_run,
+    get_bundle,
+    list_bundles,
+    load_bundle,
+    performance_history,
+    register_bundle,
+    rollback,
+)
+from xq.registry.evaluate import evaluate_bundle
+from xq.registry.gates import list_gate_results, promote, retire
+from xq.registry.models import Status, SubjectKind, status_history
+from xq.registry.vault import issue_vault_token, run_vault_evaluation
 from xq.research.eda.horizons import write_admission
 from xq.research.eda.run import run_eda
 from xq.robustness.simulated import SimulationSpec
@@ -850,12 +867,252 @@ def validate_strategy_command(
     typer.echo(f"validation run {outcome.run.run_id}; report: {outcome.report_dir / 'report.md'}")
 
 
-# Command groups for later phases. Each is registered now so the CLI surface is stable; the
-# commands arrive in the sprint named in the help text.
-_PLANNED_GROUPS = {
-    "registry": "Model registry and strategy bundles (Sprint 13: MREG-001..005).",
-    "gate": "Evidence gates and vault evaluation (Sprint 13: GATE-001..003).",
-}
+registry_app = typer.Typer(
+    help="Strategy bundles and their status (MREG-001 ... MREG-005).", no_args_is_help=True
+)
+app.add_typer(registry_app, name="registry")
+ActorOption = Annotated[str, typer.Option("--actor", help="Who makes the change (recorded).")]
+ReasonOption = Annotated[str, typer.Option("--reason", help="Why (recorded).")]
 
-for _name, _help in _PLANNED_GROUPS.items():
-    app.add_typer(typer.Typer(help=_help, no_args_is_help=True), name=_name)
+
+@registry_app.command("register")
+def registry_register(
+    ctx: typer.Context,
+    run_id: Annotated[str, typer.Option("--run", help="Baseline board run the strategy is from.")],
+    strategy: Annotated[str, typer.Option("--strategy", help="The board's rule to bundle.")],
+    actor: ActorOption,
+    name: Annotated[str | None, typer.Option("--name", help="Display name.")] = None,
+) -> None:
+    """Bundle a rule baseline of a board run (content-hashed; idempotent; status draft); its
+    out-of-sample screen becomes the bundle's backtest history (MREG-004)."""
+    with pipeline_run(ctx.obj) as run, cli_errors():
+        content = bundle_from_board_run(run.cfg, run.engine, run_id, strategy)
+        ref = register_bundle(
+            run.engine,
+            content,
+            name=name or strategy,
+            origin_run_id=run_id,
+            origin_strategy=strategy,
+            actor=actor,
+        )
+        days = append_board_history(run.cfg, run.engine, ref.bundle_id)
+    typer.echo(f"bundle {ref.bundle_id} ({ref.name}): {ref.status}")
+    if days:
+        typer.echo(f"backtest history: {days} trading days from run {run_id}")
+
+
+@registry_app.command("list")
+def registry_list(ctx: typer.Context) -> None:
+    """Every bundle with its status."""
+    with pipeline_run(ctx.obj) as run:
+        bundles = list_bundles(run.engine)
+    for ref in bundles:
+        origin = f"{ref.origin_run_id}:{ref.origin_strategy}" if ref.origin_run_id else "-"
+        typer.echo(f"{ref.short_id}\t{ref.status}\t{ref.name}\t{origin}")
+
+
+@registry_app.command("show")
+def registry_show(
+    ctx: typer.Context,
+    bundle_id: Annotated[str, typer.Argument(help="Bundle id or a unique prefix (8+ digits).")],
+) -> None:
+    """A bundle's content (checked against its id), gate results and status history."""
+    with pipeline_run(ctx.obj) as run, cli_errors():
+        content = load_bundle(run.engine, bundle_id)
+        ref = get_bundle(run.engine, bundle_id)
+        results = list_gate_results(run.engine, SubjectKind.BUNDLE, ref.bundle_id)
+        history = status_history(run.engine, SubjectKind.BUNDLE, ref.bundle_id)
+    typer.echo(f"bundle {ref.bundle_id} ({ref.name}): {ref.status}")
+    typer.echo(f"origin: {ref.origin_run_id or '-'} {ref.origin_strategy or ''}".rstrip())
+    typer.echo(json.dumps(content.model_dump(mode="json"), indent=2, sort_keys=True))
+    for result in results:
+        typer.echo(f"gate: {result.describe()}")
+    for change in history:
+        typer.echo(
+            f"status: {change.from_status or '-'} -> {change.to_status} by {change.actor} "
+            f"({change.reason}) at {change.changed_at}"
+        )
+
+
+@registry_app.command("promote")
+def registry_promote(
+    ctx: typer.Context,
+    bundle_id: Annotated[str, typer.Argument(help="Bundle id or a unique prefix (8+ digits).")],
+    to: Annotated[str, typer.Option("--to", help="The next status.")],
+    actor: ActorOption,
+    reason: ReasonOption,
+) -> None:
+    """Promote a bundle one step; needs a passing latest result of the matching gate."""
+    with pipeline_run(ctx.obj) as run, cli_errors():
+        try:
+            target = Status(to)
+        except ValueError as exc:
+            raise ConfigError(f"unknown status {to!r}") from exc
+        ref = get_bundle(run.engine, bundle_id)
+        change = promote(
+            run.engine, SubjectKind.BUNDLE, ref.bundle_id, target, actor=actor, reason=reason
+        )
+    typer.echo(
+        f"bundle {ref.short_id}: {change.from_status} -> {change.to_status} "
+        f"(gate result {change.gate_result_id})"
+    )
+
+
+@registry_app.command("retire")
+def registry_retire(
+    ctx: typer.Context,
+    bundle_id: Annotated[str, typer.Argument(help="Bundle id or a unique prefix (8+ digits).")],
+    actor: ActorOption,
+    reason: ReasonOption,
+) -> None:
+    """Retire a bundle (no gate needed)."""
+    with pipeline_run(ctx.obj) as run, cli_errors():
+        ref = get_bundle(run.engine, bundle_id)
+        change = retire(run.engine, SubjectKind.BUNDLE, ref.bundle_id, actor=actor, reason=reason)
+    typer.echo(f"bundle {ref.short_id}: {change.from_status} -> {change.to_status}")
+
+
+@registry_app.command("history")
+def registry_history(
+    ctx: typer.Context,
+    bundle_id: Annotated[str, typer.Argument(help="Bundle id or a unique prefix (8+ digits).")],
+) -> None:
+    """A bundle's daily performance per source (backtest, vault, paper, live)."""
+    with pipeline_run(ctx.obj) as run, cli_errors():
+        history = performance_history(run.engine, bundle_id)
+    if history.empty:
+        typer.echo("no performance recorded")
+        return
+    for source, rows in history.groupby("source", sort=False):
+        typer.echo(
+            f"{source}: {len(rows)} trading days, {rows['trading_day'].iloc[0]} to "
+            f"{rows['trading_day'].iloc[-1]}, net return {rows['net_return'].sum():.4%}"
+        )
+
+
+EnvOption = Annotated[str, typer.Option("--env", help="Environment: paper or prod.")]
+
+
+@registry_app.command("activate")
+def registry_activate(
+    ctx: typer.Context,
+    bundle_id: Annotated[str, typer.Argument(help="Bundle id or a unique prefix (8+ digits).")],
+    environment: EnvOption,
+    actor: ActorOption,
+    reason: ReasonOption,
+) -> None:
+    """Point an environment at a bundle its status allows (paper: paper or beyond)."""
+    with pipeline_run(ctx.obj) as run, cli_errors():
+        change = activate(run.engine, environment, bundle_id, actor=actor, reason=reason)
+    previous = change.previous_bundle_id[:12] if change.previous_bundle_id else "none"
+    typer.echo(f"{environment}: {change.bundle_id} active (was {previous})")
+
+
+@registry_app.command("rollback")
+def registry_rollback(
+    ctx: typer.Context, environment: EnvOption, actor: ActorOption, reason: ReasonOption
+) -> None:
+    """Restore the bundle active in an environment before the current one (the same hash)."""
+    with pipeline_run(ctx.obj) as run, cli_errors():
+        change = rollback(run.engine, environment, actor=actor, reason=reason)
+    typer.echo(f"{environment}: rolled back to {change.bundle_id}")
+
+
+@registry_app.command("active")
+def registry_active(ctx: typer.Context, environment: EnvOption) -> None:
+    """The active bundle of an environment and the history of its pointer."""
+    with pipeline_run(ctx.obj) as run, cli_errors():
+        history = activation_history(run.engine, environment)
+    if not history:
+        typer.echo(f"{environment}: no active bundle")
+        return
+    typer.echo(f"{environment}: {history[-1].bundle_id} active")
+    for change in history:
+        typer.echo(
+            f"  {change.activated_at} {change.action} {change.bundle_id[:12]} by {change.actor} "
+            f"({change.reason})"
+        )
+
+
+gate_app = typer.Typer(
+    help="Release gates: evaluation, vault procedure, review (GATE-001 ... GATE-003).",
+    no_args_is_help=True,
+)
+app.add_typer(gate_app, name="gate")
+
+
+@gate_app.command("evaluate")
+def gate_evaluate(
+    ctx: typer.Context,
+    bundle_id: Annotated[str, typer.Argument(help="Bundle id or a unique prefix (8+ digits).")],
+    validation: Annotated[
+        str | None,
+        typer.Option("--validation", help="Read this validation run instead of running one."),
+    ] = None,
+    exploratory: Annotated[
+        bool,
+        typer.Option(
+            "--exploratory", help="Allow a dirty git tree for a new validation (not confirmatory)."
+        ),
+    ] = False,
+) -> None:
+    """Compile a bundle's evidence against the gates, record its R1 and R2 results and write the
+    gate report (gate.md, gate.json, review.md). Exit 0 whatever the outcome; it never promotes."""
+    with pipeline_run(ctx.obj) as run, cli_errors():
+        outcome = evaluate_bundle(
+            run.cfg, run.engine, bundle_id, validation_run_id=validation, exploratory=exploratory
+        )
+    for line in outcome.summary_lines():
+        typer.echo(line)
+    typer.echo(f"report: {outcome.report_dir / 'gate.md'}")
+
+
+@gate_app.command("vault-token")
+def gate_vault_token(
+    ctx: typer.Context,
+    bundle_id: Annotated[str, typer.Argument(help="Bundle id or a unique prefix (8+ digits).")],
+    issued_by: Annotated[str, typer.Option("--issued-by", help="Who issues it (recorded).")],
+) -> None:
+    """Issue a validated bundle's one vault token (GATE-002). The secret is shown once; a second
+    token for the same bundle is refused."""
+    with pipeline_run(ctx.obj) as run, cli_errors():
+        token = issue_vault_token(run.cfg, run.engine, bundle_id, issued_by=issued_by)
+    typer.echo("vault token (shown once; it opens the vault for one run):")
+    typer.echo(f"{token.token_id}.{token.secret}")
+
+
+@gate_app.command("vault-evaluate")
+def gate_vault_evaluate(
+    ctx: typer.Context,
+    bundle_id: Annotated[str, typer.Argument(help="Bundle id or a unique prefix (8+ digits).")],
+    token: Annotated[str, typer.Option("--token", help="The bundle's vault token.")],
+    quality_run: Annotated[
+        str, typer.Option("--quality-run", help="Quality run grading the vault days.")
+    ],
+    last_day: Annotated[
+        datetime | None,
+        typer.Option(
+            "--last-day",
+            formats=["%Y-%m-%d"],
+            help="Last trading day of the vault window (default: the last complete one).",
+        ),
+    ] = None,
+) -> None:
+    """Run the bundle's one vault evaluation and record its R3 result (confirmatory: a clean git
+    tree is required). Exit 0 whatever the outcome."""
+    with pipeline_run(ctx.obj) as run, cli_errors():
+        outcome = run_vault_evaluation(
+            run.cfg,
+            run.engine,
+            bundle_id,
+            GateToken.parse(token),
+            quality_run_id=quality_run,
+            last_day=None if last_day is None else last_day.date(),
+        )
+    typer.echo(
+        f"vault evaluation {outcome.run_id}: {outcome.days} trading days, net Sharpe "
+        f"{outcome.net_sharpe:.3f}, walk-forward quantile {outcome.interval_quantile:.3f}, "
+        f"{outcome.breaches} risk-limit breach(es)"
+    )
+    typer.echo(outcome.result.describe())
+    typer.echo(f"report: {outcome.report_dir / 'vault.md'}")

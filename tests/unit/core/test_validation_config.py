@@ -16,6 +16,14 @@ def test_the_repository_settings_load() -> None:
     assert settings.spa_size_check.warn_ratio == 1.5  # the owner's 1.5x nominal
     assert settings.perturbation.max_joint_points == 243  # 3^5: five parameters in full
     assert 0.2 in settings.perturbation.levels
+    assert settings.pbo.blocks == 16
+    assert settings.pbo.not_applicable_max_effective_trials == 2  # the owner's rule (C-25)
+    assert settings.vault_procedure.token_ttl_hours == 24  # GATE-002: an unused token expires
+
+
+def test_pbo_blocks_must_be_even() -> None:
+    with pytest.raises(ConfigError, match="even"):
+        load_config("research", {"validation.pbo.blocks": 15}, config_dir=REPO_CONFIG)
 
 
 def test_the_gate_perturbation_must_be_an_evaluated_level() -> None:

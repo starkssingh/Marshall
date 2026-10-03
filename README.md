@@ -11,18 +11,19 @@ follow are in [`CLAUDE.md`](CLAUDE.md), and decisions are recorded in [`docs/adr
 
 ## Status
 
-Sprints 1 to 6, 9, 11, 12 A and 12 B are merged. In review: the primary research feed is now
-Dukascopy's XAUUSD bid/ask ticks (UTC, from 2003), with its adapter and a downloader,
-`xq fetch dukascopy`, that the owner runs (ADR 0057; see "Real data" below). The project is
-data-only for now, with no execution venue. Sprints 11 and 12 A ran ahead of Sprints 7-10 while
-real data is pending (ADR 0048, ADR 0051). Sprint 2 (clean ticks, bars and data quality) is
-implemented and tested on synthetic data but **not validated**: its quality report must first run
-on at least one year of real ticks, followed by the human review (DQ-008); the owner's decisions
-on its open questions are in ADR 0013. Sprint 3 (datasets, leakage harness, experiment
-registry, forward-return targets) and Sprint 4 (walk-forward, cost model and screener, Sharpe
-inference, DSR, forecast comparison, the evidence gates in `config/gates.yaml`, and the baseline
-board) are implemented and tested on synthetic data only. Sprint 5 is build-only because no real
-data exists: the
+Sprints 1 to 6, 9, 11, 12 A and 12 B and the Dukascopy data session are merged: the primary research
+feed is Dukascopy's XAUUSD bid/ask ticks (UTC, from 2003), with its adapter and a downloader,
+`xq fetch dukascopy`, that the owner runs (ADR 0057; see "Real data" below). In review: Sprint 13,
+the model registry and the release gates (ADR 0060), with the owner's Sprint 12 B review decisions
+(ADR 0058) and `xq validate-strategy` for baseline board runs (ADR 0059). The project is data-only
+for now, with no execution venue. Sprints 11 and 12 A ran ahead of Sprints 7-10 while real data is
+pending (ADR 0048, ADR 0051). Sprint 2 (clean ticks, bars and data quality) is implemented and
+tested on synthetic data but **not validated**: its quality report must first run on at least one
+year of real ticks, followed by the human review (DQ-008); the owner's decisions on its open
+questions are in ADR 0013. Sprint 3 (datasets, leakage harness, experiment registry, forward-return
+targets) and Sprint 4 (walk-forward, cost model and screener, Sharpe inference, DSR, forecast
+comparison, the evidence gates in `config/gates.yaml`, and the baseline board) are implemented and
+tested on synthetic data only. Sprint 5 is build-only because no real data exists: the
 exploratory-research report (distributions, dependence, seasonality, trend and reversion, cost to
 volatility and horizon admission, all on the discovery window) and experiment conclusions are
 implemented and tested on synthetic data and simulated processes; no EDA report has been generated
@@ -58,6 +59,12 @@ adds:
 
 It is proven end to end on recorded simulated strategies (`xq robustness simulate`): a genuine
 trend edge passes R1 and R2, and a single-point optimum on noise fails R2. Synthetic data only.
+Sprint 13 adds the model registry and the release gates: content-hashed strategy bundles whose
+status moves only on a recorded, passing gate result (enforced by the code and the database),
+an active bundle per environment with rollback, a performance history, `xq gate evaluate` (R1
+and R2 from a validation, the plan's ten gate items and a human-review template), and the
+one-time vault evaluation (one token per validated bundle, ever; R3 recorded). It is tested end
+to end on synthetic ticks against a test vault start; the vault has never been opened.
 See
 [`CHANGELOG.md`](CHANGELOG.md) for
 completed backlog tasks and [`docs/STATUS.md`](docs/STATUS.md) for the current sprint, open
@@ -96,6 +103,13 @@ uv run xq exp audit                           # experiments still without a conc
 uv run xq exp reproduce <run-id>              # rebuild the dataset, rerun, compare the metrics
 uv run xq robustness simulate --truth genuine --hypothesis <H>  # known-truth run (synthetic)
 uv run xq validate-strategy <run-id>          # significance + robustness report vs the gates
+uv run xq validate-strategy <board-run> --strategy <name>  # one strategy of a baseline board
+uv run xq registry register --run <board-run> --strategy <rule> --actor <you>  # hashed bundle
+uv run xq gate evaluate <bundle>              # R1/R2 from a validation: gate report and review
+uv run xq registry promote <bundle> --to candidate --actor <you> --reason <review>
+uv run xq gate vault-token <bundle> --issued-by <you>  # validated bundles only, once ever
+uv run xq gate vault-evaluate <bundle> --token <token> --quality-run <id>  # the vault run (R3)
+uv run xq registry activate <bundle> --env paper --actor <you> --reason <why>  # or rollback
 uv run xq verify-raw                          # re-hash every raw file against the manifest
 uv run xq config show                         # resolved configuration, secrets masked
 ```

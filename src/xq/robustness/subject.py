@@ -28,7 +28,7 @@ from xq.robustness.costs_stress import CostStressResult
 from xq.robustness.noise import NoiseKind, NoisyEvaluate
 from xq.robustness.perturb import Evaluate, Parameter
 from xq.robustness.slicing import DeclaredSlices
-from xq.tracking.trials import effective_trials
+from xq.tracking.trials import cluster_trials
 from xq.validation.sharpe import sharpe_ratio
 
 #: Columns of `StrategySubject.trades`, one row per closed trade.
@@ -71,19 +71,18 @@ def family_trials(
     periods_per_year: int,
 ) -> TrialSummary:
     """The trials of a family counted the way the registry counts them (EXP-004): every
-    configuration is a raw trial, the effective count clusters their daily returns by
-    correlation, and the variance is that of their annualized Sharpe ratios."""
+    configuration is a raw trial, the effective count clusters their daily returns by absolute
+    correlation, and the variance is that of their annualized Sharpe ratios across clusters
+    (`xq.tracking.trials`)."""
     starts = pd.DatetimeIndex([trading_day_bounds(d)[0] for d in family.index])
-    series = {
-        str(c): pd.Series(family[c].to_numpy(np.float64), index=starts) for c in family.columns
-    }
+    series = [pd.Series(family[c].to_numpy(np.float64), index=starts) for c in family.columns]
     root = np.sqrt(periods_per_year)
-    sharpes = np.array([sharpe_ratio(s.to_numpy()) * root for s in series.values()])
-    variance = float(np.var(sharpes, ddof=1)) if len(sharpes) > 1 else 0.0
+    sharpes: list[float | None] = [float(sharpe_ratio(s.to_numpy()) * root) for s in series]
+    clusters = cluster_trials(series, clustering)
     return TrialSummary(
         n_raw=len(series),
-        n_effective=float(effective_trials(series, clustering)),
-        sharpe_variance=variance,
+        n_effective=float(clusters.n_clusters),
+        sharpe_variance=clusters.sharpe_variance(sharpes) or 0.0,
         gated=gated,
     )
 
@@ -111,7 +110,9 @@ class StrategySubject:
     #: Walk-forward test fold of each evaluated day.
     folds: pd.Series
     trials: TrialSummary
-    #: Tunable parameters at their chosen values; empty when the strategy has none.
+    #: The parameters the neighbourhood perturbs, at their chosen values: the tuned parameters,
+    #: or every numeric constant of a parameter-free strategy (`parameter_kind`); empty when there
+    #: is none.
     parameters: tuple[Parameter, ...]
     #: Daily net returns at a parameter point (None without parameters).
     evaluate: Evaluate | None
@@ -130,6 +131,18 @@ class StrategySubject:
     #: The slices the tested hypothesis declared (ROB-006); None when there is no hypothesis.
     slices: DeclaredSlices | None = None
     sessions: SessionsConfig | None = None
+    #: ``tuned``: `parameters` were chosen from the family's grid. ``constants``: the strategy
+    #: has no tuned parameter and `parameters` are its configuration's numeric constants (C-25).
+    parameter_kind: Literal["tuned", "constants"] = "tuned"
+    #: Constants of a parameter-free strategy held because they are zero (no relative scale).
+    held_constants: tuple[str, ...] = ()
+    #: The source the tested hypothesis gives for parameters fixed a priori
+    #: (``parameters_fixed_a_priori: true`` with a ``source``): the neighbourhood gate is then not
+    #: applicable, and every other gate still is (C-25, ADR 0058).
+    parameters_fixed_a_priori: str | None = None
+    #: Why the adapter cannot perturb the strategy's parameters (the neighbourhood is then not
+    #: evaluated, with this reason, unless the parameters are declared fixed a priori).
+    neighbourhood_unavailable: str | None = None
 
     def __post_init__(self) -> None:
         if self.name not in self.family.columns:
@@ -147,6 +160,14 @@ class StrategySubject:
             raise ValueError("the baselines must cover the strategy's days")
         if self.parameters and self.evaluate is None:
             raise ValueError("a strategy with parameters needs an evaluate function")
+        if self.parameters_fixed_a_priori is not None:
+            if not self.parameters_fixed_a_priori.strip():
+                raise ValueError("parameters fixed a priori need a source")
+            if self.parameter_kind == "tuned" and self.parameters:
+                raise ValueError(
+                    "parameters chosen from a grid are not fixed a priori: the neighbourhood "
+                    "gate applies to them"
+                )
 
     @property
     def daily_pnl(self) -> pd.Series:

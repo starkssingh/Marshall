@@ -20,13 +20,21 @@ the ones the evidence gates cover against ``config/gates.yaml``:
 **The robustness score** is the share of these seven robustness gates the strategy passes, among
 those that could be evaluated. The **verdict** is:
 
-- ``pass`` when all seven are evaluated and passed;
+- ``pass`` when every applicable one of the seven is evaluated and passed;
 - ``fail`` when any fails;
-- ``incomplete`` when none fails but one could not be evaluated. For example, a strategy without
-  tunable parameters has no neighbourhood; the reason is stated.
+- ``incomplete`` when none fails but one could not be evaluated, with the reason: a strategy with
+  no tuned parameter and no numeric constant has no neighbourhood; one without closed trades has
+  nothing to resample.
 
-A gate is never passed by default. Thresholds are read, never set, here. The statistical gates
-(DSR, PBO, SPA, the R1 tests) are the significance report's (`xq.validation.report`).
+A gate is never passed by default. **Parameter-free strategies** (C-25, ADR 0058): a strategy
+with no tuned parameter has its neighbourhood formed by every numeric constant of its
+configuration (`xq.robustness.perturb.config_constants`). Only when the tested hypothesis declares
+``parameters_fixed_a_priori: true`` with a ``source`` is the neighbourhood gate **not
+applicable**: listed with the source, reported (when there are constants) but not gated, and left
+out of the verdict and the score. Every other gate still applies.
+
+Thresholds are read, never set, here. The statistical gates (DSR, PBO, SPA, the R1 tests) are the
+significance report's (`xq.validation.report`).
 
 Every measure is also returned as a `RobustnessResult`, the plan's ``robustness_results`` row:
 the test, its parameters, its metrics, and whether it passed (None when it is reported, not
@@ -116,6 +124,11 @@ class RobustnessReport:
     checks: tuple[GateCheck, ...]
     #: Gate key -> why it could not be evaluated.
     not_evaluated: dict[str, str] = field(default_factory=dict)
+    #: Gate key -> why it does not apply (an owner's rule; module docstring).
+    not_applicable: dict[str, str] = field(default_factory=dict)
+    #: What the perturbed parameters are (``tuned`` or ``constants``) and the constants held.
+    parameter_kind: str = "tuned"
+    held_constants: tuple[str, ...] = ()
 
     @property
     def score(self) -> float:
@@ -153,12 +166,17 @@ class RobustnessReport:
                     {
                         "levels": list(hood.levels),
                         "parameters": {p.name: p.nominal for p in hood.parameters},
+                        "parameter_kind": self.parameter_kind,
+                        "held_constants": list(self.held_constants),
                         "design": hood.neighbourhood_design(level),
+                        "gated": "parameter_neighbourhood.profitable_share_min"
+                        not in self.not_applicable,
                     },
                     {
-                        "nominal_sharpe": hood.nominal_sharpe,
-                        "profitable_share": hood.profitable_share(level),
-                        "median_to_nominal": hood.median_to_nominal(level),
+                        "nominal_sharpe": _num(hood.nominal_sharpe),
+                        "profitable_share": _num(hood.profitable_share(level)),
+                        # NaN when the nominal Sharpe ratio is not positive: JSON null
+                        "median_to_nominal": _num(hood.median_to_nominal(level)),
                     },
                     passed("parameter_neighbourhood.profitable_share_min"),
                 )
@@ -280,6 +298,7 @@ class RobustnessReport:
         ]
         lines.extend(c.describe() for c in self.checks)
         lines.extend(f"R2 {key}: not evaluated: {why}" for key, why in self.not_evaluated.items())
+        lines.extend(f"R2 {key}: not applicable: {why}" for key, why in self.not_applicable.items())
         return lines
 
     def markdown(self) -> str:
@@ -293,6 +312,16 @@ class RobustnessReport:
         if self.perturbation is not None:
             hood = self.perturbation
             out += ["### ROB-001 Parameter perturbation", ""]
+            if self.parameter_kind == "constants":
+                held = ", ".join(self.held_constants) or "none"
+                out += [
+                    "The strategy has no tuned parameter: every numeric constant of its "
+                    f"configuration is perturbed (held at zero: {held}).",
+                    "",
+                ]
+            why = self.not_applicable.get("parameter_neighbourhood.profitable_share_min")
+            if why is not None:
+                out += [f"Reported, not gated: {why}.", ""]
             design = hood.neighbourhood_design(self.neighbourhood_level)
             out += [f"Gate neighbourhood (±{self.neighbourhood_level:.0%}): {design}.", ""]
             out += [markdown_table(hood.summary().reset_index()), ""]
@@ -355,7 +384,9 @@ def robustness_report(
     periods = subject.periods_per_year
     checks: dict[str, GateCheck] = {}
     not_evaluated: dict[str, str] = {}
+    not_applicable: dict[str, str] = {}
 
+    hood_key = "parameter_neighbourhood.profitable_share_min"
     perturbation = None
     if subject.parameters and subject.evaluate is not None:
         perturbation = perturb(
@@ -367,10 +398,15 @@ def robustness_report(
             levels=settings.perturbation.levels,
             heatmaps=len(subject.parameters) >= 2,
         )
-        checks["parameter_neighbourhood.profitable_share_min"] = perturbation.gate_check(gates)
+    if subject.parameters_fixed_a_priori is not None:
+        not_applicable[hood_key] = (
+            f"parameters fixed a priori (source: {subject.parameters_fixed_a_priori})"
+        )
+    elif perturbation is not None:
+        checks[hood_key] = perturbation.gate_check(gates)
     else:
-        not_evaluated["parameter_neighbourhood.profitable_share_min"] = (
-            "the strategy has no tunable parameters"
+        not_evaluated[hood_key] = subject.neighbourhood_unavailable or (
+            "the strategy has no tunable parameters and no numeric constant to perturb"
         )
 
     stress = subject.cost_stress(gates)
@@ -480,6 +516,9 @@ def robustness_report(
         neighbourhood_level=r2.parameter_neighbourhood.perturbation,
         checks=tuple(checks[key] for key in ROBUSTNESS_GATES if key in checks),
         not_evaluated=not_evaluated,
+        not_applicable=not_applicable,
+        parameter_kind=subject.parameter_kind,
+        held_constants=subject.held_constants,
     )
 
 

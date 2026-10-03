@@ -63,7 +63,7 @@ from xq.datasets.base_features import (
     feature_set,
 )
 from xq.datasets.spec import DatasetSpec, code_versions, dataset_id, dump_spec
-from xq.datasets.vault import check_window, vault_start
+from xq.datasets.vault import GateToken, check_window, vault_start
 from xq.quality.gate import GateDecision, gate_partitions
 from xq.targets.base import (
     Lookahead,
@@ -499,14 +499,17 @@ def usable_quotes(
     excluded: Collection[date],
     *,
     catalog: Catalog | None = None,
+    vault_token: GateToken | None = None,
 ) -> pd.DataFrame:
     """The clean ticks of a dataset's source in ``[start, end)`` that targets and screens use.
 
     Ticks carrying a flag the bars exclude, and ticks of `excluded` trading days, are dropped. The
-    catalog enforces the vault. Columns: ``ts_utc``, ``bid``, ``ask``, ``raw_file_id``,
-    ``row_num``, in the catalog's order.
+    catalog enforces the vault: only the one-time vault evaluation passes a gate token (GATE-002).
+    Columns: ``ts_utc``, ``bid``, ``ask``, ``raw_file_id``, ``row_num``, in the catalog's order.
     """
-    ticks = (catalog or Catalog(cfg)).load_ticks(spec.source, spec.instrument, start, end)
+    ticks = (catalog or Catalog(cfg)).load_ticks(
+        spec.source, spec.instrument, start, end, vault_token=vault_token
+    )
     usable = (ticks["flags"].to_numpy() & exclude_mask(cfg.bars_config())) == 0
     if excluded and len(ticks):
         days = trading_days(pd.DatetimeIndex(ticks["ts_utc"]))

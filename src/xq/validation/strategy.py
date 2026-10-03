@@ -5,11 +5,15 @@ known-truth simulated strategies it is proven on.
 **Validating a run.** `validate_run` works as follows.
 
 1. The recorded run must have finished. Its kind must have a **subject adapter** that rebuilds
-   the strategy and its family from the run's recorded configuration:
-   ``simulated_strategy`` (below) today. Other kinds are refused by name until they get one.
+   the strategy and its family from the run's recorded configuration: ``simulated_strategy``
+   (below) and ``baseline_board`` (`xq.validation.subjects`, one strategy of the board at a
+   time). Other kinds are refused by name until they get one.
 2. The family's trials are read from the registry as the gates count them (EXP-004): the family
    is the hypothesis's, and the count is effective or raw per ``conventions.trial_count``. The
-   slices are read from the locked hypothesis version the run tested (ROB-006).
+   slices, and any declaration that the strategy's parameters were fixed a priori (C-25), are
+   read from the locked hypothesis version the run tested (ROB-006). A run that chose its
+   strategy's parameters from a grid is refused under a hypothesis declaring them fixed a
+   priori: the declaration would be false.
 3. A new run of kind ``validation`` under the same hypothesis holds everything. It computes
    `validate_strategy` with the configured risk profile and writes ``report.md`` and
    ``report.json`` under ``<reports_dir>/validation/<run_id>/<validation run id>/`` as artifacts.
@@ -38,7 +42,6 @@ import pandas as pd
 from sqlalchemy import Engine
 
 from xq.core.config import AppConfig
-from xq.core.errors import XQError
 from xq.core.seeds import derive_seed
 from xq.core.time import trading_day_bounds
 from xq.risk.engine import RiskEngine
@@ -46,21 +49,19 @@ from xq.robustness.simulated import SimulationSpec, simulated_family_returns, si
 from xq.robustness.slicing import run_slices
 from xq.robustness.subject import StrategySubject, TrialSummary
 from xq.tracking import registry
+from xq.tracking.hypotheses import fixed_parameters_source
 from xq.tracking.registry import RunRef, RunStatus
 from xq.tracking.runs import experiment_run
 from xq.tracking.trials import trial_count
 from xq.validation.report import StrategyValidation, validate_strategy
 from xq.validation.sharpe import sharpe_ratio
+from xq.validation.subjects import BOARD_KIND, StrategyValidationError, board_subject
 
 SIMULATED_KIND = "simulated_strategy"
 VALIDATION_KIND = "validation"
 REPORT_DIR = "validation"
 #: Run kinds `validate_run` can rebuild a strategy from.
-VALIDATABLE_KINDS = (SIMULATED_KIND,)
-
-
-class StrategyValidationError(XQError):
-    """A run cannot be validated (unfinished, or a kind without a subject adapter)."""
+VALIDATABLE_KINDS = (SIMULATED_KIND, BOARD_KIND)
 
 
 @dataclass(frozen=True)
@@ -124,8 +125,16 @@ def subject_for_run(
         sharpe_variance=float(stats.sharpe_variance or 0.0),
         gated=conventions.trial_count,
     )
+    experiment = registry.get_experiment(engine, run.experiment_id)
+    fixed = fixed_parameters_source(engine, experiment.hypothesis_id, experiment.hypothesis_version)
     if run.kind == SIMULATED_KIND:
         spec = SimulationSpec.model_validate(run.config["run"]["simulation"])
+        if fixed is not None:
+            raise StrategyValidationError(
+                f"hypothesis {experiment.hypothesis_id} declares its parameters fixed a priori, "
+                f"but run {run.run_id} chose them from a grid of {stats.n_trials} "
+                "configurations: the neighbourhood gate applies to them"
+            )
         subject = simulated_subject(
             spec,
             capital=cfg.backtest_config().capital_usd,
@@ -138,6 +147,17 @@ def subject_for_run(
             raise StrategyValidationError(
                 f"run {run.run_id} selected {subject.name!r}, not {strategy!r}"
             )
+        return subject, family_id
+    if run.kind == BOARD_KIND:
+        subject = board_subject(
+            cfg,
+            engine,
+            run,
+            strategy,
+            trials=trials,
+            slices=run_slices(engine, run.run_id),
+            parameters_fixed_a_priori=fixed,
+        )
         return subject, family_id
     raise StrategyValidationError(
         f"runs of kind {run.kind!r} have no subject adapter yet; validatable kinds: "

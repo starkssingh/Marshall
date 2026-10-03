@@ -800,9 +800,121 @@ IDs from `docs/specs/development-plan.md`.
   empty and dead endpoints, the lock) and against a local HTTP server through the real transport
   and the CLI, then `xq ingest`. No new dependency (`urllib`, `lzma`). README: how to download,
   the fallback and the pipeline commands.
+- `xq validate-strategy` for baseline board runs (ADR 0059, closes C-25 (7)): the board's subject
+  adapter (`xq.validation.subjects.board_subject`) rebuilds the board's screening context from the
+  run (`xq.models.board.screening_context`, now shared with `run_baseline_board`, with
+  `rule_signal_bars` and `rule_positions`), rebuilds one strategy (`--strategy`, required for a
+  board) and refuses it unless its daily returns equal the ones the run recorded; artifacts are
+  checked against their recorded SHA-256. The family is the board, R1's baselines its other
+  strategies; a rule's numeric constants are its neighbourhood (C-25 (4)), a forecast-sign
+  strategy's is not evaluated (its model is not refitted). Cost stress, delays and price noise
+  re-screen the positions; the context keeps the quotes ROB-002's added latencies read. Also
+  `prediction_file_name`, `StrategySubject.neighbourhood_unavailable`, and a fix: ROB-001's
+  median-to-nominal ratio, NaN when the nominal Sharpe ratio is not positive, is stored as null
+  instead of breaking the report's JSON. Tested end to end on synthetic ticks.
+- MREG-001: the model registry's models, model versions and statuses (`xq.registry.models`,
+  migration 0011: `models`, `model_versions`, `status_history`). A version records its artifact's
+  SHA-256, dataset, feature-set version, target, training window, hyperparameters, metrics
+  snapshot, git sha and run, starts as draft and is immutable. SQLite triggers refuse content
+  edits, deletions and history rewrites, and until MREG-002 every status change but retiring; the
+  migration refuses a database without the triggers. ADR 0060.
+- MREG-002: gate records and enforced transitions (`xq.registry.gates`, migration 0012:
+  `gate_results`, append-only). `record_gate_result` computes whether a result passed: every
+  criterion of the gate must be a check, not evaluated or not applicable (owner's rules only), and
+  any missing one fails it. `promote` moves one step (candidate R1, validated R2, vault_passed and
+  paper R3, live_eligible R4) on the latest result of the gate; `live` is refused (GATE-004);
+  `retire` needs no gate. The status trigger checks the same steps and gates; a test confirms the
+  database and the service agree on every status pair. ADR 0060.
+- MREG-003: content-hashed strategy bundles (`xq.registry.bundles`, migration 0013:
+  `strategy_bundles`). The id is the SHA-256 of the canonical content (model versions,
+  feature-set version, strategy configuration, risk profile, cost-model version), so the same
+  inputs give the same id; registration is idempotent; the content is immutable in the database
+  and `load_bundle` refuses a bundle whose stored content no longer hashes to its id.
+  `bundle_from_board_run` bundles a rule baseline of a board run (forecast-sign strategies wait
+  for ML-009). Bundles are promoted through the same gates as model versions. CLI:
+  `xq registry register --run --strategy`, `list`, `show` (content checked against its id, gate
+  results, history), `promote --to`, `retire`, each recording `--actor`. ADR 0060.
+- MREG-005: the active bundle of each environment (`xq.registry.bundles`, migration 0014:
+  `active_bundles`, append-only). `activate` needs a status that allows the environment (paper:
+  paper or beyond; prod: live), checked by the service and an insert trigger; `rollback` restores
+  the exact previous bundle id and walks back on repeat; `load_active_bundle` refuses a bundle
+  whose status no longer allows the environment; `may_switch` is the runtime's hot-reload rule
+  (only when flat or at the next bar). CLI: `xq registry activate --env`, `rollback --env`,
+  `active --env`. ADR 0060.
+- MREG-004: performance history per bundle (`xq.registry.bundles`, migration 0015:
+  `bundle_performance`, append-only). `append_performance` appends daily rows per source
+  (backtest, vault, paper, live) in order and never rewrites a day; `xq registry register` appends
+  the origin board strategy's verified out-of-sample returns as the backtest history;
+  `xq registry history` summarizes it. ADR 0060.
+- GATE-001: `xq gate evaluate <bundle>` (`xq.registry.evaluate`), wired to `xq validate-strategy`:
+  it runs a new validation of the bundle's origin strategy, or reads one named with
+  `--validation` (refused unless it validates exactly that run and strategy). The report's
+  SHA-256 is checked and every check is rebuilt against `config/gates.yaml` (a validation judged
+  under other thresholds is refused). R1 and R2 gate results are recorded on the bundle; the
+  report (`reports/gates/<bundle>/<time>/gate.md`, `gate.json`) lists the plan's ten release-gate
+  items, the dataset's quality evidence and the origin's reproduction status. It never promotes.
+  Tested end to end on synthetic ticks. ADR 0060.
+- GATE-002: the one-time vault evaluation (`xq.registry.vault`). `xq gate vault-token` issues a
+  validated bundle's only token (a second issuance for the same bundle is refused; the secret is
+  shown once, its hash stored with issuer and expiry, `vault_procedure.token_ttl_hours`).
+  `xq gate vault-evaluate` runs a confirmatory `vault_evaluation`: the token's bundle, a window of
+  complete trading days and a quality run grading every open day without FAIL are checked before
+  the vault is read; the rule is evaluated by the board's own code on catalog bars read with the
+  token (features in memory, no vault dataset), every read logged; R3 is recorded (net Sharpe,
+  walk-forward bootstrap quantile, risk-limit breaches on the screening tier, access logged) and
+  the vault days appended to the bundle's history. `usable_quotes` takes a vault token; the
+  board's `sigma_1m_bps` and `daily_returns_on` are public. Tested end to end on synthetic ticks
+  spanning a test vault start. ADR 0060.
+- GATE-003: the human review template and sign-off (`docs/specs/gate-review.md`): the subject,
+  a checklist of the ten release-gate items, the reviewer's questions (too-good results, the trial
+  count, not-applicable and not-evaluated criteria, warnings, placeholder costs, pre-registration,
+  the vault), the decision and the sign-off of the reviewer and the owner. `xq gate evaluate`
+  writes it filled in (`review.md`) next to each gate report. No LLM makes or signs the decision.
+  ADR 0060.
 
 ### Changed
 
+- C-25 (1) (owner's decision, ADR 0058), VAL-003: PBO does not apply to a family without a
+  meaningful selection. When the family's effective trial count is at most 2
+  (`pbo.not_applicable_max_effective_trials` in `config/validation.yaml`, beside the CSCV block
+  count moved there from code), PBO is reported as "not applicable: no meaningful selection" and
+  R2's `pbo_max` is not applicable; the deflated Sharpe ratio still applies. Reports gain a "not
+  applicable" category, for owner rules only: it is listed with its reason (summary, Markdown,
+  JSON) and does not enter the verdict, while a criterion that could not be computed still makes
+  it `incomplete`. Tested: the simulated genuine edge chosen among near-identical configurations
+  (1 effective trial, CSCV PBO 0.52) is no longer failed by PBO and passes its significance
+  criteria; the overfit family of 50 dispersed configurations still fails PBO.
+- C-25 (2) (owner's decision, ADR 0058), EXP-004: trial clustering uses the absolute
+  correlation (|ρ| ≥ 0.7, at least 60 common days; the frozen parameters are unchanged), so a rule
+  and its mirror image are one cluster. The Sharpe variance that feeds the deflated Sharpe ratio is
+  now taken across clusters: each cluster contributes the mean Sharpe ratio of its members trading
+  in its anchor's direction (a mirror is left out, never negated, since a negated net return would
+  count costs as income). `cluster_trials` is shared by `trial_count` and the subject's
+  `family_trials`. Tested: a family of rules with their mirrors (net of the same costs) has the
+  same effective N and Sharpe variance as the rules alone, in the clustering and through the
+  registry. On the simulated genuine family with mirrors the DSR no longer collapses (0.007–0.31
+  before, now equal to the rules alone). The `test_trials.py` fixture's variance changed with the
+  definition (its near-duplicates count once).
+- C-25 (3) (owner's decision, ADR 0058), VAL-004: when the per-sample size check flags
+  over-rejection, the R2 SPA gate reads a size-adjusted p-value, `(1 + #{p_null <= p}) / (1 +
+  n_sim)` over the null families the size check simulates with the sample's dependence, at the
+  unchanged threshold (0.10). The size check keeps those null p-values; `SizeCheck.adjusted_p`
+  computes it for SPA and the Reality Check. Both p-values are reported in the Markdown and in the
+  `stat_tests` rows (`adjusted_p`, and `gate_reads` for SPA). Tested: the arithmetic, a raw pass
+  that the sample's null does not support fails, and the gate reads the adjusted p-value only when
+  flagged. Characterized on 600 dependent null samples (AR(1) φ = 0.4, 8 strategies, 400 periods):
+  SPA rejects 16.8 % raw and 9.0 % size-adjusted at 10 %, the Reality Check 15.3 % and 10.0 %.
+- C-25 (4) (owner's decision, ADR 0058), ROB-001 / ROB-008 / EXP-002: a parameter-free
+  strategy's neighbourhood gate is not applicable only when its hypothesis declares
+  `parameters_fixed_a_priori: true` with a `source` (refused at registration without a source, or
+  a source without the flag; `fixed_parameters_source` reads it from the locked text). Otherwise
+  every numeric constant of its configuration is perturbed (`config_constants`, `with_constants`;
+  zeros held). `StrategySubject` gains `parameter_kind`, `held_constants` and
+  `parameters_fixed_a_priori`; tuned parameters cannot be declared fixed a priori, and
+  `xq validate-strategy` refuses a simulated run under such a hypothesis. With the declaration the
+  perturbation is still reported, not gated, and every other gate applies. Tested: the genuine
+  trend edge as a parameter-free strategy has its constants perturbed and passes; declared fixed a
+  priori it passes on the six other gates, and fails when it loses; the registration rules.
 - C-24 (1) (owner's decision, ADR 0055), VAL-004: SPA and the Reality Check always take their
   block length from the gates' bootstrap convention (`family_tests(..., bootstrap=...)`, no block
   argument). The size simulation was re-run under it: with AR(1) φ = 0.4, 400 periods and 8

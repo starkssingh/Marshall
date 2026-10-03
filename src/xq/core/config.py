@@ -912,16 +912,43 @@ class NoiseConfig(FrozenModel):
     n_seeds: int = Field(ge=1)
 
 
+class PboConfig(FrozenModel):
+    """Probability of backtest overfitting by CSCV (VAL-003; C-25, ADR 0058)."""
+
+    #: Contiguous blocks of the configuration matrix (even).
+    blocks: int = Field(ge=2)
+    #: A family with at most this many effective trials offers no meaningful selection: PBO is
+    #: reported "not applicable" and R2's ``pbo_max`` is not applicable (the DSR still applies).
+    not_applicable_max_effective_trials: float = Field(ge=1)
+
+    @field_validator("blocks")
+    @classmethod
+    def _even(cls, value: int) -> int:
+        if value % 2:
+            raise ValueError("pbo.blocks must be even")
+        return value
+
+
+class VaultProcedureConfig(FrozenModel):
+    """The one-time vault evaluation (GATE-002, ADR 0060)."""
+
+    #: A vault token expires this many hours after it is issued.
+    token_ttl_hours: float = Field(gt=0, le=168)
+
+
 class ValidationConfig(FrozenModel):
-    """Validation and robustness procedures (``config/validation.yaml``, Phases 16 and 17).
+    """Validation and robustness procedures (``config/validation.yaml``, Phases 16 and 17), and
+    the vault procedure of the release gate (Phase 25).
 
     Pass/fail thresholds are not here: they are in ``config/gates.yaml``.
     """
 
+    pbo: PboConfig
     spa_size_check: SpaSizeCheckConfig
     perturbation: PerturbationConfig
     monte_carlo: MonteCarloConfig
     noise: NoiseConfig
+    vault_procedure: VaultProcedureConfig
 
 
 class SpreadCostConfig(FrozenModel):

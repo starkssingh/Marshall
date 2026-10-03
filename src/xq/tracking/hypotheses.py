@@ -18,6 +18,13 @@ configuration, so its budget may be zero (ADR 0042).
 Declared ``slices`` must come from the slice vocabulary (`xq.tracking.slices`): an unknown name
 is refused here, at registration, before the text is locked (C-24, ADR 0055).
 
+A strategy whose parameters were fixed before any data was seen (a published rule, a market
+convention) may say so: ``parameters_fixed_a_priori: true`` with a ``source`` naming where they
+come from. The declaration is locked with the text, and it is the only way the R2 neighbourhood
+gate becomes not applicable (C-25, ADR 0058); without it, every numeric constant of a
+parameter-free strategy is perturbed. A flag without a source, or a source without the flag, is
+refused.
+
 The family ids the platform records forecasting-model trials under (``linear_forecasts``,
 ``volatility_models``; ``xq.tracking.registry.RESERVED_FAMILIES``) are reserved: a hypothesis
 registered in one would mix its trials with model evaluations (ADR 0046, ADR 0047).
@@ -51,6 +58,7 @@ from xq.tracking.registry import (
     add_hypothesis_version,
     check_family_not_reserved,
     get_hypothesis,
+    hypothesis_text,
     text_hash,
 )
 from xq.tracking.slices import canonical_slice
@@ -96,6 +104,10 @@ class HypothesisDoc(BaseModel):
     trial_budget: int = Field(ge=0)
     planned_tests: list[str] = Field(min_length=1)
     slices: list[str] = []
+    #: The strategy's parameters were fixed before any data was seen (module docstring).
+    parameters_fixed_a_priori: bool = False
+    #: Where parameters fixed a priori come from; required with the flag, refused without it.
+    source: str | None = None
 
     @field_validator("family")
     @classmethod
@@ -112,6 +124,18 @@ class HypothesisDoc(BaseModel):
         for name in value:
             canonical_slice(name)  # raises SliceError (a ValueError) for an unknown name
         return value
+
+    @model_validator(mode="after")
+    def _a_priori_source(self) -> HypothesisDoc:
+        has_source = self.source is not None and bool(self.source.strip())
+        if self.parameters_fixed_a_priori and not has_source:
+            raise ValueError("parameters_fixed_a_priori: true needs a source")
+        if self.source is not None and not self.parameters_fixed_a_priori:
+            raise ValueError(
+                "source names where parameters fixed a priori come from; set "
+                "parameters_fixed_a_priori: true or remove it"
+            )
+        return self
 
     @model_validator(mode="after")
     def _budget(self) -> HypothesisDoc:
@@ -180,3 +204,21 @@ def is_registered(engine: Engine, path: Path) -> bool:
     except RegistryError:
         return False
     return latest.yaml_hash == text_hash(text)
+
+
+def fixed_parameters_source(engine: Engine, hypothesis_id: str, version: int) -> str | None:
+    """The source of parameters fixed a priori that a registered version declares, or None.
+
+    Read from the locked text, as registered (module docstring).
+
+    Raises:
+        RegistryError: if the version is not registered.
+        ConfigError: if the locked text declares the flag without a source.
+    """
+    data: Any = yaml.safe_load(hypothesis_text(engine, hypothesis_id, version))
+    if not isinstance(data, dict) or not data.get("parameters_fixed_a_priori"):
+        return None
+    source = data.get("source")
+    if not isinstance(source, str) or not source.strip():
+        raise ConfigError(f"{hypothesis_id} v{version} fixes parameters a priori without a source")
+    return source.strip()

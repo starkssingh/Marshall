@@ -20,7 +20,7 @@ from helpers.strategies import (
     strategy_returns,
     trend_positions,
 )
-from xq.robustness.perturb import Parameter, perturb
+from xq.robustness.perturb import Parameter, config_constants, perturb, with_constants
 
 CFG = repo_config()
 GATES = CFG.gates_config()
@@ -277,3 +277,36 @@ def test_a_large_grid_is_sampled_deterministically() -> None:
     )
     assert len(five.neighbourhood(HOOD.perturbation)) == 3**5 - 1  # five parameters: in full
     assert five.neighbourhood_design(HOOD.perturbation).startswith("full grid: 242 points")
+
+
+def test_every_numeric_constant_of_a_configuration_is_a_parameter() -> None:
+    """C-25 (4): a parameter-free strategy's numeric constants, by dotted path; zeros are held,
+    booleans and text are not numbers."""
+    config = {
+        "rule": "ma_crossover",
+        "params": {"fast": 20, "slow": 50, "exit": 0.0},
+        "vol_target": {"annual_vol": 0.1, "lookback": 20, "enabled": True},
+        "offset": -3,
+    }
+    parameters, held = config_constants(config)
+    by_name = {p.name: p for p in parameters}
+    assert list(by_name) == [
+        "offset",
+        "params.fast",
+        "params.slow",
+        "vol_target.annual_vol",
+        "vol_target.lookback",
+    ]
+    assert held == ("params.exit",)
+    assert by_name["params.fast"].integer
+    assert by_name["params.fast"].minimum == 1.0
+    assert by_name["offset"].integer
+    assert by_name["offset"].minimum is None
+    assert not by_name["vol_target.annual_vol"].integer
+    changed = with_constants(config, {"params.fast": 24.0, "vol_target.annual_vol": 0.12})
+    assert changed["params"] == {"fast": 24, "slow": 50, "exit": 0.0}
+    assert isinstance(changed["params"]["fast"], int)
+    assert changed["vol_target"]["annual_vol"] == 0.12
+    assert config["params"]["fast"] == 20  # the original is left as it was
+    with pytest.raises(KeyError, match="not a constant"):
+        with_constants(config, {"params.missing": 1.0})
