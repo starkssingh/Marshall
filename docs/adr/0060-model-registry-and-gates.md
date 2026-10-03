@@ -143,3 +143,37 @@ only; the first registered subjects are strategy bundles.
    them per source.
 4. The board records daily returns only, so a board strategy's `backtest` rows have no trade
    counts.
+
+## GATE-001 — `xq gate evaluate <bundle>`
+
+1. **Wired to `xq validate-strategy`.** The evaluator runs a new validation of the bundle's origin
+   strategy (a run of kind `validation`; confirmatory on a clean tree), or reads an existing one
+   named with `--validation`. An existing one must be a finished validation of exactly the
+   bundle's origin run and strategy; anything else is refused.
+2. **The validation's report is evidence, so it is checked.** `report.json` must match the SHA-256
+   the registry recorded. Every check is rebuilt against `config/gates.yaml`: a validation judged
+   under other thresholds or comparisons is refused ("validate again"), never reinterpreted, and a
+   recorded outcome that disagrees with its own value is refused.
+3. **R1 and R2 gate results** are recorded from it on the bundle, with the validation run, the
+   report paths and the evaluator's identity. Whether each passed is computed by MREG-002: an
+   incomplete verdict (a criterion not evaluated) never passes. R3 is recorded by the vault
+   evaluation, and R4 needs paper trading.
+4. **The report** (`reports/gates/<bundle>/<time>/gate.md` and `gate.json`) lists the plan's ten
+   release-gate items (Phase 25) with their status (pass, fail, not evaluated, not applicable,
+   pending) and detail; the dataset's quality evidence (its quality runs, excluded and WARN
+   partitions, for item 1); the reproduction status of the origin run (EXP-006), reported, not
+   gated; and the evidence paths.
+5. **The evaluator never promotes.** Promotion is a separate, recorded decision (`xq registry
+   promote`) that reads the latest gate results.
+6. **Layout.** Phase 25 names commands, not modules. The evaluator is `xq.registry.evaluate` and
+   the vault procedure `xq.registry.vault`, beside the plan's `registry/models.py`, `bundles.py`
+   and `gates.py`: they read and write the registry and nothing else does. This ADR records that
+   addition to the plan's layout.
+
+**Known truth** (`tests/integration/registry/test_gate_evaluate.py`, synthetic ticks, a
+confirmatory board run): a rule bundle is registered with its backtest history; the evaluation
+runs a confirmatory validation and records R1 and R2, each passing exactly when the validation's
+verdict is `pass`; the report has the ten items (data validation pass, vault and paper pending);
+the bundle stays draft, and an ungated promotion is refused; a validation of another strategy,
+and an altered report, are refused; reading an existing validation adds results without
+rerunning it. On three weeks of synthetic ticks both gates fail, as they should on such a sample.

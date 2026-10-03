@@ -846,6 +846,14 @@ IDs from `docs/specs/development-plan.md`.
   (backtest, vault, paper, live) in order and never rewrites a day; `xq registry register` appends
   the origin board strategy's verified out-of-sample returns as the backtest history;
   `xq registry history` summarizes it. ADR 0060.
+- GATE-001: `xq gate evaluate <bundle>` (`xq.registry.evaluate`), wired to `xq validate-strategy`:
+  it runs a new validation of the bundle's origin strategy, or reads one named with
+  `--validation` (refused unless it validates exactly that run and strategy). The report's
+  SHA-256 is checked and every check is rebuilt against `config/gates.yaml` (a validation judged
+  under other thresholds is refused). R1 and R2 gate results are recorded on the bundle; the
+  report (`reports/gates/<bundle>/<time>/gate.md`, `gate.json`) lists the plan's ten release-gate
+  items, the dataset's quality evidence and the origin's reproduction status. It never promotes.
+  Tested end to end on synthetic ticks. ADR 0060.
 
 ### Changed
 

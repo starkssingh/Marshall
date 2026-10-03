@@ -55,6 +55,7 @@ from xq.registry.bundles import (
     register_bundle,
     rollback,
 )
+from xq.registry.evaluate import evaluate_bundle
 from xq.registry.gates import list_gate_results, promote, retire
 from xq.registry.models import Status, SubjectKind, status_history
 from xq.research.eda.horizons import write_admission
@@ -1031,11 +1032,34 @@ def registry_active(ctx: typer.Context, environment: EnvOption) -> None:
         )
 
 
-# Command groups for later phases. Each is registered now so the CLI surface is stable; the
-# commands arrive in the sprint named in the help text.
-_PLANNED_GROUPS = {
-    "gate": "Evidence gates and vault evaluation (Sprint 13: GATE-001..003).",
-}
+gate_app = typer.Typer(
+    help="Release gates: evaluation, vault procedure, review (GATE-001 ... GATE-003).",
+    no_args_is_help=True,
+)
+app.add_typer(gate_app, name="gate")
 
-for _name, _help in _PLANNED_GROUPS.items():
-    app.add_typer(typer.Typer(help=_help, no_args_is_help=True), name=_name)
+
+@gate_app.command("evaluate")
+def gate_evaluate(
+    ctx: typer.Context,
+    bundle_id: Annotated[str, typer.Argument(help="Bundle id or a unique prefix (8+ digits).")],
+    validation: Annotated[
+        str | None,
+        typer.Option("--validation", help="Read this validation run instead of running one."),
+    ] = None,
+    exploratory: Annotated[
+        bool,
+        typer.Option(
+            "--exploratory", help="Allow a dirty git tree for a new validation (not confirmatory)."
+        ),
+    ] = False,
+) -> None:
+    """Compile a bundle's evidence against the gates, record its R1 and R2 results and write the
+    gate report (gate.md, gate.json, review.md). Exit 0 whatever the outcome; it never promotes."""
+    with pipeline_run(ctx.obj) as run, cli_errors():
+        outcome = evaluate_bundle(
+            run.cfg, run.engine, bundle_id, validation_run_id=validation, exploratory=exploratory
+        )
+    for line in outcome.summary_lines():
+        typer.echo(line)
+    typer.echo(f"report: {outcome.report_dir / 'gate.md'}")
