@@ -906,6 +906,20 @@ IDs from `docs/specs/development-plan.md`.
   hand-built paths (both sides, a steady rise, a stray quote in the daily break left off the
   path, no label without fills or sigma-hat); in the leakage suite. ADR 0063.
 
+- TGT-005: triple-barrier labels (`xq.targets.barrier`, kind `triple_barrier`, target set
+  `barriers.v1`): take-profit and stop at `tp_sigmas` and `sl_sigmas` times the interim sigma-hat
+  over the horizon (1.0 and 1.0, provisional), on the exit side of the quote (long: bid against
+  the entry ask; short: ask against the entry bid), the vertical barrier at the forward return's
+  exit fill. Three targets per horizon and side: the label (+1 / -1 / 0, `tgt_tb_<ref>_<h>`),
+  market minutes to the hit (`_t`) and the ambiguity flag (`_amb`); `label_end` is the hit quote.
+  `resolution: tick` reads every quote (the repository's set); a bar length reads bars on the UTC
+  grid, and a bar touching both barriers resolves to the stop and is flagged. A barrier touched
+  before the intended exit labels the window without the exit fill (the leakage harness caught a
+  first version that needed it). `LabelWindows` carries each fill's timeliness. Tested: known hit
+  times on hand-built paths and against a brute-force search on random paths, the vertical
+  barrier, the short side, same-bar hits (stop and flagged in bars, exact in ticks), a weekend gap
+  through the stop; tick and bar resolutions in the leakage suite. ADR 0063.
+
 ### Changed
 
 - ARCH-004 (owner's decision, ADR 0062): third-party loggers named in `logging.third_party`

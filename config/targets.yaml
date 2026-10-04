@@ -42,3 +42,20 @@ excursions:
       execution_latency_ms: 1000   # as fwd_returns.v1
       max_fill_delay_s: 300
       sigma_span_bars: 96
+
+barriers:
+  v1:
+    kind: triple_barrier      # TGT-005: triple-barrier labels (+1 / -1 / 0) with time to hit
+    # Take-profit and stop in units of the interim sigma-hat over the horizon, marked on the exit
+    # side of the quote; the vertical barrier is the forward return's exit fill. PROVISIONAL
+    # multiples, fixed before any result (ADR 0063); every quote is a path point (`tick`), so
+    # same-bar ambiguity cannot arise here (a bar resolution resolves it pessimistically).
+    horizons: [15m, 1h, 4h, 1d]
+    price_refs: [long, short]
+    params:
+      execution_latency_ms: 1000   # as fwd_returns.v1
+      max_fill_delay_s: 300
+      sigma_span_bars: 96
+      tp_sigmas: 1.0
+      sl_sigmas: 1.0
+      resolution: tick

@@ -72,6 +72,38 @@ def test_target_uses_only_its_label_window_and_sigma_at_t(
     assert report.points, "no finite target values to test"
 
 
+# A bar-resolved triple barrier (pessimistic same-bar handling, TGT-005) is not in the repository
+# configuration, which reads every tick; it must pass the same bounds check.
+BAR_BARRIER = CFG.target_set("barriers", "v1").model_copy(
+    update={"params": {**CFG.target_set("barriers", "v1").params, "resolution": "15min"}}
+)
+BAR_SPECS = [
+    (f"barriers@15min:{spec.name}", BAR_BARRIER, spec)
+    for spec in target_kind(BAR_BARRIER.kind).expand(BAR_BARRIER, TRADING_DAY)
+]
+
+
+@pytest.mark.parametrize(("label", "definition", "spec"), BAR_SPECS, ids=[s[0] for s in BAR_SPECS])
+def test_bar_resolved_barriers_use_only_their_label_window(
+    label: str,
+    definition: TargetSetConfig,
+    spec: TargetSpec,
+    week_ticks: pd.DataFrame,
+    bar_inputs: dict[str, pd.DataFrame],
+) -> None:
+    kind = target_kind(definition.kind)
+    sigma = kind.sigma(close_of(bar_inputs), definition, Timeframe.M15.duration).dropna()
+    report = check_target_bounds(
+        lambda quotes, s: kind.compute(spec, quotes, s, CLOCK),
+        quotes_of(week_ticks),
+        sigma,
+        n_points=15,
+        seed=6,
+    )
+    assert report.passed, report.summary()
+    assert report.points
+
+
 FORWARD = [s for s in SPECS if s[1].kind == "forward_return"]
 
 

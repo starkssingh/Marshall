@@ -134,6 +134,10 @@ class LabelWindows:
         entry, exit: Rows of the entry and exit fill quotes (meaningful where `ok`).
         ok: Labelled: decided while the market is open, both fills found within the delay.
         fill_delay_s: The later fill's delay after its intended time (NaN without a label).
+        entry_ok, exit_ok: Each fill found within the delay (`entry_ok` also needs the decision
+            to be taken while the market is open).
+        entry_delay_s: The entry fill's delay (NaN without a timely entry).
+        intended_exit: The intended exit time (UTC nanoseconds; `NAT_NS` beyond the clock).
     """
 
     index: pd.DatetimeIndex
@@ -142,6 +146,10 @@ class LabelWindows:
     exit: npt.NDArray[np.int64]
     ok: npt.NDArray[np.bool_]
     fill_delay_s: npt.NDArray[np.float64]
+    entry_ok: npt.NDArray[np.bool_]
+    exit_ok: npt.NDArray[np.bool_]
+    entry_delay_s: npt.NDArray[np.float64]
+    intended_exit: npt.NDArray[np.int64]
 
     def frame(
         self,
@@ -151,11 +159,14 @@ class LabelWindows:
         *,
         end: npt.NDArray[np.int64] | None = None,
         ok: npt.NDArray[np.bool_] | None = None,
+        fill_delay_s: npt.NDArray[np.float64] | None = None,
     ) -> pd.DataFrame:
         """The `VALUE_COLUMNS` frame: ``label_start`` at the entry fill, ``label_end`` at the
-        quote row `end` (default the exit fill), both NaT and `value` NaN outside `ok`."""
+        quote row `end` (default the exit fill), both NaT and `value` NaN outside `ok`;
+        `fill_delay_s` defaults to the later fill's delay."""
         ok = self.ok if ok is None else ok
         end = self.exit if end is None else end
+        delay = self.fill_delay_s if fill_delay_s is None else fill_delay_s
         stamps = np.full(len(self.index), NAT_NS, dtype=np.int64)  # NaT where no label
         ends = stamps.copy()
         stamps[ok] = self.ts[self.entry[ok]]
@@ -169,7 +180,7 @@ class LabelWindows:
                 "label_end": pd.to_datetime(ends, unit="ns", utc=True),
                 "crosses_close": crosses,
                 "scale": scale,
-                "fill_delay_s": np.where(ok, self.fill_delay_s, np.nan),
+                "fill_delay_s": np.where(ok, delay, np.nan),
             },
             index=self.index,
         )
@@ -185,12 +196,15 @@ def label_windows(
     latency = pd.Timedelta(milliseconds=int(spec.params["execution_latency_ms"])).value
     delay = pd.Timedelta(seconds=float(spec.params["max_fill_delay_s"])).value
     entry, entry_ok, entry_late = first_fill(ts, clock.advance(t, latency), delay, clock)
-    exit_, exit_ok, exit_late = first_fill(
-        ts, clock.advance(t, spec.horizon.value + latency), delay, clock
-    )
-    ok = entry_ok & exit_ok & clock.is_open(t)  # no label for decisions while closed
+    intended_exit = clock.advance(t, spec.horizon.value + latency)
+    exit_, exit_ok, exit_late = first_fill(ts, intended_exit, delay, clock)
+    entry_ok = entry_ok & clock.is_open(t)  # no label for decisions while closed
+    ok = entry_ok & exit_ok
     fill_delay = np.where(ok, np.maximum(entry_late, exit_late) / 1e9, np.nan)
-    return LabelWindows(index, ts, entry, exit_, ok, fill_delay)
+    entry_delay = np.where(entry_ok, entry_late / 1e9, np.nan)
+    return LabelWindows(
+        index, ts, entry, exit_, ok, fill_delay, entry_ok, exit_ok, entry_delay, intended_exit
+    )
 
 
 def horizon_scale(sigma: pd.Series, horizon: pd.Timedelta) -> npt.NDArray[np.float64]:
