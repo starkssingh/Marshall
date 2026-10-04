@@ -935,6 +935,18 @@ IDs from `docs/specs/development-plan.md`.
   labels including a triple-Wednesday night; derived labels in the leakage suite, and the weights
   never read a quote after `weight_end`. ADR 0063.
 
+- WF-004: the retraining schedule and stitching. `WalkForwardConfig.schedule` is `monthly` (the
+  research default, used when no `test_len` is given: a test window per calendar month from the
+  start of the trading day dated the 1st, 17:00 New York the evening before, so DST and the
+  trading-day roll are followed) or `fixed` (`test_len` and `step`, as before; existing configs
+  are unchanged). `WalkForwardSplitter.test_windows` gives the windows; `contiguous` says whether
+  they abut. `stitch_oos` joins the folds' predictions into one out-of-sample series and refuses a
+  decision time predicted twice, a fold predicting outside its window, and (on a contiguous
+  schedule) a gap; `walk_forward` stitches through it. Tested: monthly windows in winter and
+  summer, the stitched series of monthly, fixed and rolling runs has no overlaps or gaps, a fixed
+  step longer than the window leaves its declared gaps, the refusals; WF-006's property test now
+  draws monthly schedules too and checks that contiguous windows abut. ADR 0063.
+
 ### Changed
 
 - ARCH-004 (owner's decision, ADR 0062): third-party loggers named in `logging.third_party`

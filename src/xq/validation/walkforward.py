@@ -8,6 +8,12 @@
    first on ties). With one candidate or no validation rows there is nothing to select;
 3. the selected candidate, fitted on the training rows, predicts the test rows.
 
+The folds' test predictions are **stitched** into one out-of-sample series (`stitch_oos`,
+WF-004): a decision time predicted twice (overlapping windows) is refused, and on a contiguous
+retraining schedule (monthly, or a fixed step equal to the test length) so is a sample left
+unpredicted between the first and the last test window (a gap). Fold-level results stay next to
+the stitched series.
+
 Each fold gets its own seed, derived from the run seed and the fold id, so results do not depend on
 the order or the process in which folds run: ``n_jobs > 1`` runs folds in separate processes
 (``spawn``) and gives the same predictions as a serial run. A fold's output can be cached under a
@@ -188,9 +194,56 @@ def walk_forward(
             _write_cache(cache_dir, key, output)
 
     done = [o for o in outputs if o is not None]
-    frames = [frame for frame, _ in done]
-    predictions = pd.concat(frames) if frames else _empty_predictions()
+    windows = [(f.test_start, f.test_end) for f, o in zip(folds, outputs, strict=True) if o]
+    predictions = stitch_oos(
+        [frame for frame, _ in done], windows, index, contiguous=splitter.contiguous
+    )
     return WalkForwardOutput(predictions, [result for _, result in done])
+
+
+class StitchError(ValueError):
+    """Fold predictions that do not stitch into one out-of-sample series (overlap or gap)."""
+
+
+def stitch_oos(
+    frames: Sequence[pd.DataFrame],
+    windows: Sequence[tuple[pd.Timestamp, pd.Timestamp]],
+    times: pd.DatetimeIndex,
+    *,
+    contiguous: bool,
+) -> pd.DataFrame:
+    """One out-of-sample series from the folds' test predictions, in time order (WF-004).
+
+    Args:
+        frames: Each fold's predictions, indexed by decision time.
+        windows: Each fold's test window ``[test_start, test_end)``, in the same order.
+        times: Every sample's decision time.
+        contiguous: The schedule's windows abut, so every sample from the first window's start
+            to the last window's end must be predicted.
+
+    Raises:
+        StitchError: if a decision time is predicted twice, a fold predicts outside its window,
+            or (when `contiguous`) a sample in the stitched span has no prediction.
+    """
+    if not frames:
+        return _empty_predictions()
+    for frame, (start, end) in zip(frames, windows, strict=True):
+        index = pd.DatetimeIndex(frame.index)
+        if len(index) and (index.min() < start or index.max() >= end):
+            raise StitchError(f"a fold predicts outside its test window [{start}, {end})")
+    stitched = pd.concat(frames).sort_index(kind="stable")
+    repeated = stitched.index[stitched.index.duplicated()]
+    if len(repeated):
+        raise StitchError(f"test windows overlap: {repeated[0]} is predicted twice")
+    if contiguous:
+        span = times[(times >= windows[0][0]) & (times < windows[-1][1])]
+        missing = span.difference(pd.DatetimeIndex(stitched.index))
+        if len(missing):
+            raise StitchError(
+                f"the stitched series has a gap: {len(missing)} samples from {missing[0]} have "
+                "no out-of-sample prediction"
+            )
+    return stitched
 
 
 def run_walk_forward(
@@ -404,9 +457,11 @@ def _empty_predictions() -> pd.DataFrame:
 __all__ = [
     "PREDICTION_COLUMNS",
     "FoldResult",
+    "StitchError",
     "WalkForwardOutput",
     "WalkForwardResult",
     "forecast_metrics",
     "run_walk_forward",
+    "stitch_oos",
     "walk_forward",
 ]
