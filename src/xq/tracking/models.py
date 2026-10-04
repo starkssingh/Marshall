@@ -606,6 +606,8 @@ class GateResultRecord(Base):
     gates_hash: Mapped[str] = mapped_column(String(16))
     run_id: Mapped[str | None] = mapped_column(String(26))
     created_at: Mapped[pd.Timestamp]
+    #: ``screening`` or ``event``: the tier the evidence came from (migration 0016, ADR 0062).
+    evidence_tier: Mapped[str] = mapped_column(String(16), server_default="screening")
 
 
 class StrategyBundleRecord(Base):

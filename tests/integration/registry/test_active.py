@@ -25,7 +25,7 @@ from xq.registry.bundles import (
     register_bundle,
     rollback,
 )
-from xq.registry.gates import promote, record_gate_result, retire
+from xq.registry.gates import EvidenceTier, promote, record_gate_result, retire
 from xq.registry.models import RegistryStateError, Status, SubjectKind
 from xq.tracking.db import create_db_engine, upgrade_to_head
 
@@ -81,6 +81,8 @@ def bundle_at(engine: Engine, lookback: int, status: Status) -> str:
             evaluator="test (synthetic gate results)",
             evidence_paths=[],
             run_id=None,
+            # paper needs R3 recomputed on the event tier (C-27 (3), ADR 0062)
+            evidence_tier=EvidenceTier.EVENT if step is Status.PAPER else EvidenceTier.SCREENING,
         )
         promote(engine, SubjectKind.BUNDLE, ref.bundle_id, step, actor="test", reason="gates")
     return ref.bundle_id

@@ -23,13 +23,20 @@ of its gate, so a later failure withdraws an earlier pass.
 | candidate | R1 research candidate |
 | validated | R2 validated |
 | vault_passed | R3 vault pass |
-| paper | R3 (the gate that moves a candidate to paper trading) |
+| paper | R3 (the gate that moves a candidate to paper trading), on the event tier |
 | live_eligible | R4 paper pass |
+
+**Evidence tier** (C-27 (3), ADR 0062). Every result records where its evidence came from:
+``screening`` (the vectorized screener; R3's risk-limit breaches read from daily losses against
+the risk profile, as the vault evaluation does) or ``event`` (the event backtester with the real
+risk engine). A promotion to ``paper`` needs the latest R3 result to have passed **and** to be on
+the event tier, so R3 is recomputed on the event tier after the vault; ``vault_passed`` accepts
+either tier.
 
 ``live`` needs the GATE-004 human review, which is not built: it is refused. Retiring needs no
 gate. Every change is appended to the status history with the gate result that allowed it. The
 database's triggers enforce the same steps and gates (migration 0012), so a direct edit of a
-status fails too (ADR 0060).
+status fails too (ADR 0060); migration 0016 adds the event-tier rule to them.
 """
 
 from __future__ import annotations
@@ -37,6 +44,7 @@ from __future__ import annotations
 import math
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
+from enum import StrEnum
 from typing import Any
 
 import pandas as pd
@@ -69,6 +77,8 @@ GATE_FOR: Mapping[Status, str] = {
     Status.PAPER: "R3",
     Status.LIVE_ELIGIBLE: "R4",
 }
+#: Promotions whose gate result must come from the event tier (C-27 (3), ADR 0062).
+EVENT_TIER_FOR: frozenset[Status] = frozenset({Status.PAPER})
 #: Criteria that may be not applicable, by the owner's rules only (C-25, ADR 0058).
 NOT_APPLICABLE: Mapping[str, frozenset[str]] = {
     "R2": frozenset({"pbo_max", "parameter_neighbourhood.profitable_share_min"}),
@@ -78,6 +88,13 @@ SUBJECTS: Mapping[SubjectKind, tuple[Any, str]] = {
     SubjectKind.MODEL_VERSION: (ModelVersionRecord, "model_version_id"),
     SubjectKind.BUNDLE: (StrategyBundleRecord, "bundle_id"),
 }
+
+
+class EvidenceTier(StrEnum):
+    """Where a gate result's evidence came from (module docstring)."""
+
+    SCREENING = "screening"
+    EVENT = "event"
 
 
 @dataclass(frozen=True)
@@ -96,12 +113,15 @@ class GateResultRef:
     gates_hash: str
     run_id: str | None
     created_at: pd.Timestamp
+    evidence_tier: EvidenceTier = EvidenceTier.SCREENING
 
     def describe(self) -> str:
-        """One line: gate, outcome, and what failed or was not evaluated."""
+        """One line: gate, outcome, tier, and what failed or was not evaluated."""
         outcome = "PASS" if self.passed else "FAIL"
         failed = [k for k, v in self.values["checks"].items() if not v["passed"]]
-        parts = [f"{self.gate} {outcome} (result {self.gate_result_id})"]
+        parts = [
+            f"{self.gate} {outcome} on the {self.evidence_tier} tier (result {self.gate_result_id})"
+        ]
         if failed:
             parts.append(f"failed: {', '.join(failed)}")
         if self.values["not_evaluated"]:
@@ -126,8 +146,12 @@ def record_gate_result(
     evaluator: str,
     evidence_paths: Sequence[str],
     run_id: str | None,
+    evidence_tier: EvidenceTier = EvidenceTier.SCREENING,
 ) -> GateResultRef:
     """Record one evaluation of `gate` on a subject; whether it passed is computed here.
+
+    `evidence_tier` says where the evidence came from (module docstring); only an ``event``
+    result of R3 can promote to ``paper``.
 
     Raises:
         RegistryStateError: for an unknown subject.
@@ -185,6 +209,7 @@ def record_gate_result(
             gates_hash=gates_hash(gates),
             run_id=run_id,
             created_at=utc_now(),
+            evidence_tier=EvidenceTier(evidence_tier).value,
         )
         session.add(record)
         session.commit()
@@ -238,8 +263,9 @@ def promote(
     """Move a subject one step up the promotion order (module docstring).
 
     Raises:
-        RegistryStateError: for an unknown subject, a step out of order, ``live`` (GATE-004), or
-            no passing latest result of the matching gate.
+        RegistryStateError: for an unknown subject, a step out of order, ``live`` (GATE-004),
+            no passing latest result of the matching gate, or (for ``paper``) a latest R3 result
+            that is not on the event tier.
     """
     if to is Status.LIVE:
         raise RegistryStateError(
@@ -260,6 +286,11 @@ def promote(
         raise RegistryStateError(
             f"promotion of {kind} {subject_id} to {to} needs a passing {gate} gate result; "
             f"latest: {latest}"
+        )
+    if to in EVENT_TIER_FOR and result.evidence_tier is not EvidenceTier.EVENT:
+        raise RegistryStateError(
+            f"promotion of {kind} {subject_id} to {to} needs {gate} recomputed on the event tier "
+            f"with the real risk engine (ADR 0062); latest: {result.describe()}"
         )
     return _change(engine, kind, subject_id, status, to, result.gate_result_id, actor, reason)
 
@@ -340,4 +371,5 @@ def _result(r: GateResultRecord) -> GateResultRef:
         gates_hash=r.gates_hash,
         run_id=r.run_id,
         created_at=r.created_at,
+        evidence_tier=EvidenceTier(r.evidence_tier),
     )

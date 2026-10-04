@@ -889,6 +889,16 @@ IDs from `docs/specs/development-plan.md`.
 
 ### Changed
 
+- C-27 (3) (owner's decision, ADR 0062), MREG-002 / GATE-002: every gate result records its
+  evidence tier, `screening` (the default; the vault evaluation's R3) or `event` (the event
+  backtester with the real risk engine) (`EvidenceTier`, `record_gate_result(evidence_tier=)`,
+  `gate_results.evidence_tier`, migration 0016). Promotion to `paper` needs the latest R3 result
+  to have passed on the event tier, in the service (`promote`) and in both status triggers
+  (migration 0016 replaces them); `vault_passed` accepts either tier. The event-tier R3
+  evaluation itself is not built yet, so no subject can reach `paper`. Tested: a screening R3
+  reaches `vault_passed` and is refused for `paper` (service and database); a failing event-tier
+  R3, and a later screening R3, are refused too; a passing event-tier R3 promotes; the database
+  agrees with the service on every status pair and tier.
 - C-26 (6) (owner's decision, ADR 0062): `experiments/configs/ds_base.yaml` starts on
   2015-01-01 (`2015-01-01T22:00:00Z`, the start of trading day 2015-01-02; 2015-01-01 is closed),
   fixed before any result; the data is downloaded from 2014-01-01. The discovery-window default
