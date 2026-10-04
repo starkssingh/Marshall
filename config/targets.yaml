@@ -29,3 +29,16 @@ realized_vol:
       sigma_span_bars: 96          # interim sigma-hat, as fwd_returns.v1 (VOL-006 replaces it)
       sample_minutes: 5            # grid of market time from the intended entry
       vol_normalized: true         # also emit <name>_vol = realized / (sigma-hat * sqrt(horizon))
+
+excursions:
+  v1:
+    kind: excursion           # TGT-004: maximum favourable / adverse excursion in sigma units
+    # Every market-hours quote after the entry fill up to the exit fill, marked on the exit side
+    # (long: bid against the entry ask; short: ask against the entry bid), divided by the interim
+    # sigma-hat over the horizon (ADR 0063).
+    horizons: [15m, 1h, 4h, 1d]
+    price_refs: [long, short]
+    params:
+      execution_latency_ms: 1000   # as fwd_returns.v1
+      max_fill_delay_s: 300
+      sigma_span_bars: 96

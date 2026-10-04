@@ -898,6 +898,14 @@ IDs from `docs/specs/development-plan.md`.
   realized volatility computed separately on synthetic paths, with a quote gap and across the
   daily close; in the leakage suite. ADR 0063.
 
+- TGT-004: maximum favourable and adverse excursion in sigma units (`xq.targets.excursion`,
+  kind `excursion`, target set `excursions.v1`): every market-hours quote after the entry fill up
+  to the exit fill, marked on the exit side (long: bid against the entry ask; short: ask against
+  the entry bid); `tgt_mfe_<ref>_<h>` is the best close-out return and `tgt_mae_<ref>_<h>` the
+  worst as a positive loss, both divided by the interim sigma-hat over the horizon. Tested on
+  hand-built paths (both sides, a steady rise, a stray quote in the daily break left off the
+  path, no label without fills or sigma-hat); in the leakage suite. ADR 0063.
+
 ### Changed
 
 - ARCH-004 (owner's decision, ADR 0062): third-party loggers named in `logging.third_party`
