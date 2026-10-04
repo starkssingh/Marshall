@@ -11,11 +11,12 @@ follow are in [`CLAUDE.md`](CLAUDE.md), and decisions are recorded in [`docs/adr
 
 ## Status
 
-Sprints 1 to 6, 9, 11, 12 A and 12 B and the Dukascopy data session are merged: the primary research
-feed is Dukascopy's XAUUSD bid/ask ticks (UTC, from 2003), with its adapter and a downloader,
-`xq fetch dukascopy`, that the owner runs (ADR 0057; see "Real data" below). In review: Sprint 13,
-the model registry and the release gates (ADR 0060), with the owner's Sprint 12 B review decisions
-(ADR 0058) and `xq validate-strategy` for baseline board runs (ADR 0059). The project is data-only
+Sprints 1 to 6, 9, 11, 12 A, 12 B and 13, the Dukascopy data session and the C-15 session are
+merged: the primary research feed is Dukascopy's XAUUSD bid/ask ticks (UTC, from 2003), downloaded
+by the owner as dukascopy-node CSVs (ADR 0057, ADR 0062; see "Real data" below). In review: the
+owner's decisions on C-26, C-27 and C-28 (ADR 0062: the CSV route, `ds_base` from 2015-01-01,
+promotion to paper only on an event-tier R3, quieter third-party logs) and Sprint 7 part 1
+(ADR 0063, below). The project is data-only
 for now, with no execution venue. Sprints 11 and 12 A ran ahead of Sprints 7-10 while real data is
 pending (ADR 0048, ADR 0051). Sprint 2 (clean ticks, bars and data quality) is implemented and
 tested on synthetic data but **not validated**: its quality report must first run on at least one
@@ -71,6 +72,12 @@ pre-vault history after its own warm-up, with the fold-aligned view (the same re
 walk-forward test days) kept in `returns.parquet` for paired comparisons, validation and the
 registry, and descriptive year and session slices. H-0001 is still unregistered: its windows
 are set from the real data's depth at registration. Synthetic data only.
+Sprint 7 part 1 (ADR 0063) adds the remaining targets — future realized volatility, MFE and MAE
+in sigma units, triple-barrier labels (exact hit times on ticks; a bar touching both barriers is a
+flagged stop), sign, big-move and trade/no-trade labels, label concurrency and average-uniqueness
+weights — each passing the leakage harness, plus the monthly retraining schedule with a stitched
+out-of-sample series checked for overlaps and gaps, and the walk-forward report with its decay
+regression (`xq exp wf-report`). Synthetic data only; the features of Sprint 7 come next.
 See
 [`CHANGELOG.md`](CHANGELOG.md) for
 completed backlog tasks and [`docs/STATUS.md`](docs/STATUS.md) for the current sprint, open
@@ -108,6 +115,7 @@ uv run xq research eda --dataset <ds-id> --hypothesis <H>  # EDA report on the d
 uv run xq exp close <experiment-id> --conclusion <yaml>    # close with a verdict (research log)
 uv run xq exp audit                           # experiments still without a conclusion
 uv run xq exp reproduce <run-id>              # rebuild the dataset, rerun, compare the metrics
+uv run xq exp wf-report <run-id> --strategy <name>  # walk-forward report: folds, decay (WF-005)
 uv run xq robustness simulate --truth genuine --hypothesis <H>  # known-truth run (synthetic)
 uv run xq validate-strategy <run-id>          # significance + robustness report vs the gates
 uv run xq validate-strategy <board-run> --strategy <name>  # one board strategy, e.g. tsmom_252@1d

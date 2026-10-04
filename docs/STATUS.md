@@ -5,9 +5,10 @@ sprint and whenever a decision or carry-over item changes; anything decided in c
 recorded in an ADR and here in the same session. If a memory of an earlier conversation conflicts
 with the repository, the repository wins.
 
-- **Last updated:** 2026-10-04, during the session on branch `claude/bold-heisenberg-c0p3bj`
-  (branched from `main` after the C-15 session was merged in PR #18): the owner's decisions on
-  C-26, C-27 and C-28 (ADR 0062), then Sprint 7, build-only, part 1.
+- **Last updated:** 2026-10-04, at the end of the session on branch
+  `claude/bold-heisenberg-c0p3bj` (branched from `main` after the C-15 session was merged in
+  PR #18): the owner's decisions on C-26, C-27 and C-28 (ADR 0062), then Sprint 7, build-only,
+  part 1 (ADR 0063), in review.
 - **Merged to `main`:** Sprints 1–6, 9, 11, 12 A, 12 B and 13, the Dukascopy data session and the
   C-15 session, with the revised H-0001 draft and the Sprint 5 and Sprint 6 review fixes (PRs #2,
   #3, #6, #7, #8, #9, #10, #11, #12, #13, #14, #15, #16, #17, #18).
@@ -17,71 +18,40 @@ with the repository, the repository wins.
 
 ## Current sprint
 
-- **This session:** C-15, the revised H-0001 in the board runner (ADR 0061) — **complete, in
-  review, synthetic data only**, one commit. H-0001 is **not registered**.
-  - Rules run on `signal_timeframes: [1d, 1h]`, named `<name>@<timeframe>`: 24 rule strategies
-    plus 12 forecast-sign strategies = 36, H-0001's trial budget (a test pins it on the
-    repository's board).
-  - Each rule's warm-up is computed from its parameters (`rule_warmup`). The rule is screened over
-    every decision of the dataset and evaluated from the first decision after its warm-up bar to
-    the dataset's end (`full_history`); its board statistics, DSR, trial and random-entry null
-    use that period. A position before the evaluation starts, or a dataset too short for a
-    warm-up, stops the board. Donchian now enters only once its exit channel is known too.
-  - Forecast-sign strategies stay on the test folds. The fold-aligned view (the same returns on
-    the out-of-sample days, not a trial) stays `returns.parquet`; `returns_evaluation.parquet`
-    holds the evaluation-period returns. The report adds the timeframe, warm-up, evaluation start,
-    days and period, the fold-aligned Sharpe ratio, annual return and net P&L (descriptive), and
-    year and session slices (descriptive, from the hypothesis's declared slices).
-  - Downstream: `xq validate-strategy`, the registry's backtest history and the vault interval
-    judge rules on the fold-aligned record (C-28 asks the owner to confirm); `cost_stress` takes
-    `days`; a bundle's signal timeframe is its rule's; the vault loads by it; reproductions still
-    reproduce.
-  - Tested on synthetic ticks with 1h and 4h signal bars. **Nothing has run on real data.**
-  - Remaining in C-15: the owner registers H-0001 with windows from the real data. The readings
-    for review are C-28.
-- **Previous sprint:** 13 — the Sprint 12 B review decisions (C-25), the baseline-board subject
-  adapter, the model registry and the release gates — **complete, merged in PR #17, synthetic
-  data only**. One commit each:
-  - the owner's C-25 decisions (ADR 0058): (1) PBO not applicable without a meaningful selection
-    (`e0e48bc`); (2) trial clustering on absolute correlation, with the Sharpe variance across
-    clusters (`d27e16e`); (3) SPA gated on a size-adjusted p-value when the size check flags
-    over-rejection (`92d5e20`); (4) parameter-free strategies perturb every numeric constant
-    unless their hypothesis declares `parameters_fixed_a_priori: true` with a `source`
-    (`d38cfb5`);
-  - `xq validate-strategy` for baseline board runs (ADR 0059, closes C-25 (7)) (`574ca95`);
-  - MREG-001 models and versions (`3a302ec`), MREG-002 gate records and enforced transitions
-    (`7576958`), MREG-003 content-hashed bundles (`2ae61e5`), MREG-005 the active bundle and
-    rollback (`16a5418`), MREG-004 performance history (`bad8414`), GATE-001 `xq gate evaluate`
-    (`a0fc13c`), GATE-002 the one-time vault evaluation (`fde12d9`), GATE-003 the human review
-    template (`44d3a0c`) (ADR 0060);
-  - this STATUS and the README.
-  - Proven on synthetic data: a promotion without a passing gate record fails in the service
-    and in the database (every status pair checked); rollback restores the exact previous bundle
-    hash; a second vault access for the same bundle is refused; a board rule bundle is
-    registered, gated (it fails R1 and R2 on three weeks of synthetic ticks) and its vault
-    procedure runs end to end against a test vault start. **Nothing has run on real data, no
-    bundle has been gated on real data, and the vault has never been opened.**
-  - Characterized for C-25 (3): on 600 dependent null samples SPA rejects 16.8 % raw and 9.0 %
-    size-adjusted at 10 % (Reality Check 15.3 % and 10.0 %).
-  - The new open points are C-27.
-- **Earlier session:** the Dukascopy primary feed (owner's decision, ADR 0057), between sprints —
-  **complete, merged in PR #16, synthetic fixtures only**. One commit each:
-  1. DATA-013, the Dukascopy tick adapter (`dukascopy_ticks`): native hourly `.bi5` files and
-     dukascopy-node CSVs, UTC, prices = points / 1000; synthetic fixtures across both 2024 US DST
-     changes with their weekend gaps (`89a5b67`);
-  2. `xq fetch dukascopy`, the owner's downloader: resumable, SHA-256 manifest, one polite request
-     at a time, never overwrites, empty market hours recorded only once confirmed (`ca8f1ec`);
-  3. `dukascopy` is the default source: `data.primary_source`, `--source` optional in the pipeline
-     commands, `ds_base.yaml` (`9dd2f17`);
-  4. a guard: CSV timestamps in Unix seconds are refused, not read as 1970 (`edec7e5`);
-  5. this STATUS, ADR 0057 and the README.
-  - Tested: file hours never move with DST, gaps land at the calendar's UTC hours on both sides
-    of each change, a misdeclared `NY+7` clock fails every calendar check, a clean week of hourly
-    files passes every quality check through `xq validate`, and the downloader resumes, verifies
-    and refuses to overwrite. **Nothing has run on real data**, and neither the `.bi5` endpoint
-    nor dukascopy-node could be reached from the sandbox.
-  - The previous sprint, 12 B (ROB-004, ROB-005, ROB-008, `xq validate-strategy`, ADR 0055,
-    ADR 0056), was merged in PR #15. Its review (C-25) was implemented in Sprint 13.
+- **This session:** the owner's decisions on C-26, C-27 and C-28 (ADR 0062), then Sprint 7,
+  build-only, part 1 (ADR 0063) — **complete, in review on branch
+  `claude/bold-heisenberg-c0p3bj`, synthetic data only**. One commit each:
+  - ADR 0062 and this STATUS (`144168c`): C-28 confirmed as built; C-26 and C-27 decided;
+  - C-26: the dukascopy-node CSV route with the corrected flags `-r 3 -re -fr` and the owner's
+    monthly loop in [`docs/runbooks/real-data.md`](runbooks/real-data.md) (`fcfa9e1`, the loop
+    checked against a stub `npx` only); `ds_base` from 2015-01-01 (`d8da183`);
+  - C-27 (3): promotion to `paper` needs R3 recomputed on the event tier, in `promote` and in the
+    database (migration 0016, `0704849`);
+  - ARCH-004: matplotlib, PIL and fontTools held at WARNING (`55bf8d1`);
+  - TGT-003 future realized volatility (`b39a174`), TGT-004 MFE and MAE in sigma units
+    (`d2fefbf`), TGT-005 triple-barrier labels (`fb322f4`), TGT-006 derived labels and uniqueness
+    weights (`8ebccac`), a dataset built with each new target set (`0e477d6`);
+  - WF-004 the monthly retraining schedule and stitching (`76b52a0`), WF-005 the walk-forward
+    report with its decay regression and `xq exp wf-report` (`6528380`);
+  - this STATUS, ADR 0063 and the README.
+  - Proven on synthetic data: every new target passes the leakage harness (the bar-resolved
+    barrier and the uniqueness weights too; the harness caught a first barrier version whose
+    early labels needed the later exit fill); barrier labels recover known hit times, also
+    against a brute-force search on random paths; a bar touching both barriers is a flagged stop
+    while ticks resolve it exactly; the uniqueness weights match the hand example
+    (0.75, 0.625, 0.75); the stitched out-of-sample series has no overlaps or gaps; the
+    walk-forward report finds a planted decay and runs end to end on a synthetic board run.
+    **Nothing has run on real data**, and no target set but `fwd_returns.v1` is named by a
+    dataset spec.
+  - Sprint 7 part 2 (FEAT-001 … FEAT-006, FEAT-008) is next. The readings for review are C-30.
+- **Previous session:** C-15, the revised H-0001 in the board runner (ADR 0061) — **complete,
+  merged in PR #18, synthetic data only**. Rules on `signal_timeframes: [1d, 1h]`, 36 strategies
+  (H-0001's budget); each rule evaluated over its full history after its warm-up, the
+  fold-aligned view kept; descriptive year and session slices. Its readings were confirmed in
+  C-28. H-0001 is **not registered**.
+- **Earlier:** Sprint 13 (the registry and the release gates, ADR 0060, PR #17) and the Dukascopy
+  primary feed (ADR 0057, PR #16), both synthetic only; their open points were decided in C-27
+  and C-26.
 - **Owner's next step (C-8):** download and ingest on your Mac, from the repository root, with
   the dukascopy-node CSV route (ADR 0062): the monthly loop from 2014-01 in
   [`docs/runbooks/real-data.md`](runbooks/real-data.md) (`-r 3 -re -fr`, one CSV per month,
@@ -129,7 +99,7 @@ with the repository, the repository wins.
   - **Validation and robustness library** (Sprint 9): PBO, SPA, Reality Check and Romano–Wolf,
     Holm and Benjamini–Hochberg, parameter perturbation, cost stress, block bootstrap, slicing and
     execution delay.
-  - **Added this sprint:**
+  - **Added in Sprint 12 B:**
     - ROB-004, Monte Carlo equity replayed through the real risk engine;
     - ROB-005, noise injection;
     - ROB-008, the robustness report and score over seven R2 robustness gates;
@@ -144,7 +114,8 @@ with the repository, the repository wins.
     - the model registry (`xq.registry`): model versions and content-hashed strategy bundles
       with statuses draft → candidate → validated → vault_passed → paper → live_eligible
       (`live` needs GATE-004), promoted only on a passing latest gate result (R1, R2, R3, R3,
-      R4), enforced by the service and SQLite triggers (migrations 0011–0015); an append-only
+      R4; `paper` only on an event-tier R3), enforced by the service and SQLite triggers (migrations
+      0011–0016); an append-only
       performance history and an active-bundle pointer per environment with rollback;
       `xq registry register|list|show|promote|retire|history|activate|rollback|active`;
     - `xq gate evaluate <bundle>`: R1 and R2 from a validation of the bundle's origin strategy,
@@ -152,21 +123,34 @@ with the repository, the repository wins.
       `docs/specs/gate-review.md`);
     - `xq gate vault-token` and `xq gate vault-evaluate`: one vault token per validated bundle,
       ever; the one confirmatory vault evaluation of a rule bundle, checked before the first
-      read, every read logged, R3 recorded.
+      read, every read logged, R3 recorded (on the screening tier: it reaches `vault_passed`;
+      `paper` needs an event-tier R3, ADR 0062, migration 0016).
+  - **Added this session** (ADR 0063):
+    - target kinds `realized_vol` (TGT-003), `excursion` (TGT-004), `triple_barrier` (TGT-005)
+      and `derived_label` (TGT-006), with target sets `realized_vol.v1`, `excursions.v1`,
+      `barriers.v1` and `derived.v1` in `config/targets.yaml`; `label_uniqueness` and
+      `uniqueness_weights` (TGT-006) for in-fold sample weights;
+    - the monthly retraining schedule (the research default when no `test_len` is given) and
+      `stitch_oos` (WF-004);
+    - the walk-forward report and `xq exp wf-report <run> --strategy <name>` (WF-005).
   - `xq exp reproduce <run_id>` rebuilds a baseline-board run's dataset, reruns it and reports
     REPRODUCED, NOT_REPRODUCED or RERUN_DIFFERENT_CODE.
   - Validation and robustness settings are in `config/validation.yaml`; the thresholds stay in
     `config/gates.yaml`.
-- **Next:** the owner's review of this session (C-28) and of Sprint 13 (C-27). The owner
-  downloads and ingests Dukascopy data (above); the next session runs `xq validate` on it (C-8)
-  and prepares DQ-008. The owner also reviews the Dukascopy session's open points (C-26).
+- **Next:** the owner's review of this session (C-30). Sprint 7 part 2 (FEAT-001 … FEAT-006,
+  FEAT-008), build-only on synthetic data, unless the owner orders otherwise. The owner downloads
+  and ingests Dukascopy data with the CSV route (above); the C-8 session on the owner's Mac runs
+  `xq validate` on it and prepares DQ-008.
   - After the quality review: H-0001 is registered with windows from the real data, alongside
-    H-0000 (C-15, C-16); only then may the board run on real data.
+    H-0000 (C-15, C-16); only then may the board run on real data. Whether rules may warm up on
+    the 2014 data before `ds_base`'s start is C-29.
   - With real data, after the quality review (C-8): the research halves of Sprint 5 (C-16) and
-    Sprint 6 (C-18), then Sprints 7, 8 and 10.
+    Sprint 6 (C-18), then the research parts of Sprints 7, 8 and 10.
   - Sprint 14 (paper trading) needs a venue and its data/broker API (an owner decision), and a
-    bundle that passed R3; otherwise, by the plan's decision point, Sprints 14–16 validate
-    infrastructure only (C-27 (1)).
+    bundle that passed R3 on the event tier (C-32); otherwise, by the plan's decision point,
+    Sprints 14–16 validate infrastructure only, in a separate labelled environment such as
+    `paper_infra`, never evidence (C-27 (1), approved).
+  - GATE-004 records the SHA-256 of the signed GATE-003 review (C-31).
   - The real regime filter waits for REG-007 (Sprint 8).
 - **Not allowed yet:**
   - running H-0001 (or any board) on real data before the owner has approved and registered it;
@@ -188,8 +172,8 @@ with the repository, the repository wins.
     vault evaluation, before a candidate exists and the owner allows it (the vault is opened once
     per bundle, ever);
   - running anything on real Dukascopy data beyond the data pipeline and `xq validate` before the
-    DQ-008 review (the owner's instruction for this session: synthetic fixtures only here, and
-    the next session runs `xq validate`);
+    DQ-008 review (materializing the new target sets, or `xq exp wf-report` on a real run,
+    included);
   - committing market data (it stays under the git-ignored `data/`);
   - treating Dukascopy's spreads as execution costs (no venue; costs stay placeholders,
     ADR 0057);
@@ -230,10 +214,13 @@ with the repository, the repository wins.
 | C-23 | PAPER-001 requirement: the paper and live runtimes refuse to start without a kill-switch source (a file, an environment variable or the database flag); the backtester may run without one | Sprint 12 A review (ADR 0053) | Claude, when PAPER-001 is built | open |
 | C-24 | Owner review of Sprint 9's open points (ADR 0054). (1) SPA and the Reality Check over-reject under strong serial dependence in short samples (AR(1) φ = 0.4, 400 periods: 15 % and 20 % at a 10 % level); test such families on non-overlapping periods. (2) The ±20 % neighbourhood gate reads the joint neighbourhood (3^k − 1 points), stricter than one parameter at a time. (3) Cost stress runs the plan's grid one dimension at a time plus the gate's joint scenario (no full factorial); a financing credit is divided by the multiplier. (4) Robustness drawdowns start from the capital; BT-003's `drawdown_metrics` does not (known issue, fix proposed as a separate task). (5) Volatility terciles are cut on the whole sliced period (descriptive only); slice names are checked when loaded, not at registration; the template's `volatility regime` became `volatility tercile`. (6) The execution delay shifts entries and exits alike. (7) `xq exp reproduce`: a reproduction adds no trials, the DSR is shown but not judged, provenance differences are reported rather than refused, and only `baseline_board` runs have a reproducer. (8) `xq validate-strategy` is not built: no Sprint 9 task covers it; proposed with ROB-008 and GATE-001 | Sprint 9 | Owner, then Claude | decided (ADR 0055): (1) SPA/Reality Check on the gates' bootstrap convention, size re-run (still above 1.5x nominal: 18.5 % SPA, 15.4 % Reality Check at 10 %), so a per-sample size check puts "test over-rejects on this sample" on the gate result; (2) BT-003 drawdowns start from the capital; (3) the neighbourhood gate on the full ±20 % grid (seeded sample of 243 points above 3^5), a one-at-a-time table in the report, a ridge optimum fails; (4) slice names validated at registration, volatility terciles labelled "descriptive, cut ex post"; (5) a reproduction is REPRODUCED only with the same git sha, config hash and lock hash and metrics within tolerance, otherwise RERUN_DIFFERENT_CODE; approved as they stand: one-dimension cost stress plus the combined scenario, financing credit divided by the multiplier, equal entry and exit delay, reproductions add no trials, DSR shown not judged. Implemented: (1) `468b2f0`, (2) `6ca4562`, (3) `acb47b1`, (4) `b22a50d`, (5) `cf12d15`; Claude's readings are carried into C-25 |
 | C-25 | Owner review of Sprint 12 B's open points (ADR 0055, ADR 0056). (1) The SPA/RC over-rejection warning is decided per sample by a size check (AR sieve null families, 500 by default), not attached to every result: on iid-like samples the tests are near nominal; its Monte Carlo error is about 1.5 points at 500 families. (2) A reproduction with the same code but a metric out of tolerance is a third status, NOT_REPRODUCED (not "different code"); never counted as reproduced. (3) PBO judges the choice among configurations: a genuine edge in a homogeneous family (near-identical configurations) has PBO near 0.5 and fails R2's `pbo_max`; mirror-image configurations break the DSR's benchmark instead; gates unchanged. (4) A gate that cannot be evaluated makes a verdict `incomplete`, never `pass`: a strategy without tunable parameters has no neighbourhood and never reaches R2 `pass`. (5) A validation run records no trials (it selects nothing; a variant picked from its diagnostics needs a new run). (6) The Monte Carlo keeps R-multiples as observed (a loss beyond the stop keeps its size) and calls a path ruined at half the capital (provisional). (7) `xq validate-strategy` has a subject adapter only for simulated runs; the baseline-board adapter (rebuilding the board's screening context) is the next build task. (8) Volatility-tercile slices bucket the sigma-hat warm-up days as `no_sigma_hat` | Sprint 12 B | Owner, then Claude | decided (ADR 0058): (1) PBO not applicable, and R2 `pbo_max` N/A, when the family has at most 2 effective trials (DSR still applies); (2) trial clustering on absolute correlation (\|ρ\| ≥ 0.7, ≥ 60 common days), mirror images one cluster; (3) SPA/Reality Check gated on a size-adjusted p-value from the sample's simulated null when the size check flags over-rejection (threshold 0.10 unchanged), both p-values reported; (4) the neighbourhood gate N/A only when the hypothesis declares `parameters_fixed_a_priori: true` with a `source`, otherwise every numeric constant of the strategy's config is perturbed; approved as they stand: NOT_REPRODUCED, no trials for validation runs, ruin at 50 % (provisional) with gap losses at observed size; (7) the baseline-board adapter is the next build task. Implemented: (1) `e0e48bc`, (2) `d27e16e`, (3) `92d5e20`, (4) `d38cfb5`; (7) `574ca95` (ADR 0059) |
-| C-26 | Owner review of the Dukascopy session's open points (ADR 0057). (1) The `.bi5` endpoint has been reported to time out since 7 July 2026 (dukascopy-node issue #254) and could not be tested: if it is still down, keep the dukascopy-node CSV route, or have Claude add Dukascopy's JSON API to `xq fetch` (hourly JSON files, same guarantees). (2) Files are stored as the vendor's bytes, one per hour, named after the UTC hour; empty hours get no file. (3) Canonical tick sizes stay NaN (volume units undocumented); volumes are kept in the raw mirror. (4) Download pace: one request at a time, 0.5 s apart, 4 attempts with backoff, empty market hours asked twice and recorded only once a later hour has ticks, 24 in a row stop the run. (5) The calendar is unchanged until `xq validate` on real data shows Dukascopy's hours (Dukascopy's hours pages were blocked here); the table in ADR 0057 lists the checks. (6) `ds_base.yaml` keeps its ~4-year window (start 2021-09-26) although Dukascopy goes back to 2003: a longer window is the owner's decision, before results. (7) `--source` now defaults to `data.primary_source` in the pipeline commands | Dukascopy session | Owner, then Claude | decided (ADR 0062): (1) the dukascopy-node CSV route is the working route (the `.bi5` endpoint answered HTTP 503 on 2026-10-04; March 2024 ran end to end), corrected command `-r 3 -re -fr`, the owner's monthly loop in `docs/runbooks/real-data.md`, no JSON API; (2), (3), (4), (5), (7) approved; (6) `ds_base.yaml` from 2015-01-01 (download from 2014-01-01), fixed before any result. Implemented: see the C-26 commits of this session |
-| C-27 | Owner review of Sprint 13's open points (ADR 0060). (1) Under the registry's rules a bundle reaches paper only through R1, R2 and R3; the plan's decision point (no bundle passes R2) wants a baseline bundle on the paper infrastructure, which would need a separate, labelled environment (for example `paper_infra`, never evidence) — not built. (2) A failed vault evaluation spends the bundle's one vault access; any exception needs an ADR. (3) R3's risk-limit breaches are read on the screening tier (daily losses against the risk profile's limits), not from the risk engine's refusals, until a candidate runs on the event tier. (4) Enforcement is in the code and SQLite triggers; an administrator with write access to the database file can bypass them (every gate result names its evaluator, evidence and policy hash); the migrations refuse a database without the triggers until PAPER-004 writes PostgreSQL's. (5) Promotion to `paper` reads the same R3 result as `vault_passed`. (6) A signed GATE-003 review is a document, not a database record; whether it must be recorded is GATE-004's question. (7) Only rule bundles can be bundled and vault-evaluated (models wait for ML-009); a forecast-sign board strategy's neighbourhood is not evaluated | Sprint 13 | Owner, then Claude | decided (ADR 0062): (1), (2), (4), (5), (7) approved; (3) approved with a new requirement — promotion to `paper` needs R3 recomputed on the event tier with the real risk engine (enforced in the transition rule and the database); (6) GATE-004 records the SHA-256 of the signed GATE-003 review. Implemented: (3) see the C-27 commit of this session; (1) and (6) when Sprint 14 and GATE-004 are built |
+| C-26 | Owner review of the Dukascopy session's open points (ADR 0057). (1) The `.bi5` endpoint has been reported to time out since 7 July 2026 (dukascopy-node issue #254) and could not be tested: if it is still down, keep the dukascopy-node CSV route, or have Claude add Dukascopy's JSON API to `xq fetch` (hourly JSON files, same guarantees). (2) Files are stored as the vendor's bytes, one per hour, named after the UTC hour; empty hours get no file. (3) Canonical tick sizes stay NaN (volume units undocumented); volumes are kept in the raw mirror. (4) Download pace: one request at a time, 0.5 s apart, 4 attempts with backoff, empty market hours asked twice and recorded only once a later hour has ticks, 24 in a row stop the run. (5) The calendar is unchanged until `xq validate` on real data shows Dukascopy's hours (Dukascopy's hours pages were blocked here); the table in ADR 0057 lists the checks. (6) `ds_base.yaml` keeps its ~4-year window (start 2021-09-26) although Dukascopy goes back to 2003: a longer window is the owner's decision, before results. (7) `--source` now defaults to `data.primary_source` in the pipeline commands | Dukascopy session | Owner, then Claude | decided (ADR 0062): (1) the dukascopy-node CSV route is the working route (the `.bi5` endpoint answered HTTP 503 on 2026-10-04; March 2024 ran end to end), corrected command `-r 3 -re -fr`, the owner's monthly loop in `docs/runbooks/real-data.md`, no JSON API; (2), (3), (4), (5), (7) approved; (6) `ds_base.yaml` from 2015-01-01 (download from 2014-01-01), fixed before any result. Implemented: `fcfa9e1` (README, runbook), `d8da183` (`ds_base` start) |
+| C-27 | Owner review of Sprint 13's open points (ADR 0060). (1) Under the registry's rules a bundle reaches paper only through R1, R2 and R3; the plan's decision point (no bundle passes R2) wants a baseline bundle on the paper infrastructure, which would need a separate, labelled environment (for example `paper_infra`, never evidence) — not built. (2) A failed vault evaluation spends the bundle's one vault access; any exception needs an ADR. (3) R3's risk-limit breaches are read on the screening tier (daily losses against the risk profile's limits), not from the risk engine's refusals, until a candidate runs on the event tier. (4) Enforcement is in the code and SQLite triggers; an administrator with write access to the database file can bypass them (every gate result names its evaluator, evidence and policy hash); the migrations refuse a database without the triggers until PAPER-004 writes PostgreSQL's. (5) Promotion to `paper` reads the same R3 result as `vault_passed`. (6) A signed GATE-003 review is a document, not a database record; whether it must be recorded is GATE-004's question. (7) Only rule bundles can be bundled and vault-evaluated (models wait for ML-009); a forecast-sign board strategy's neighbourhood is not evaluated | Sprint 13 | Owner, then Claude | decided (ADR 0062): (1), (2), (4), (5), (7) approved; (3) approved with a new requirement — promotion to `paper` needs R3 recomputed on the event tier with the real risk engine (enforced in the transition rule and the database); (6) GATE-004 records the SHA-256 of the signed GATE-003 review. Implemented: (3) `0704849` (the rule; the evaluator is C-32); (1) with Sprint 14 if needed; (6) is C-31 |
 | C-28 | Owner review of the C-15 session's readings (ADR 0061). (1) The H-0001 board test (Sharpe p-value, DSR, random-entry null, slices) uses each rule's full history after its warm-up, while `xq validate-strategy` (R1, R2), the registry's `backtest` history (MREG-004) and the vault's walk-forward interval (R3) keep judging a rule on its fold-aligned record (identical days for every strategy and every later candidate; conservative). Confirm, or move validation and the registry to the full history for rules. (2) The first evaluation day counts from the first evaluation decision (the rule is flat before it). (3) Donchian now enters only once its exit channel is known (only `exit > max(entry, atr_window)` changes; no board has one) | C-15 session | Owner | decided (ADR 0062): all three readings confirmed as built; no code change |
 | C-29 | Whether the board's rule warm-ups may read signal bars before the dataset's start. With `ds_base` from 2015-01-01 the owner downloads from 2014-01-01 for warm-up, but under ADR 0061 a rule warms up on the dataset's own signal bars: the 2014 data serves the dataset's 10-day `warmup`, sigma-hat and the quality report, not the rules (`tsmom_252@1d` is first evaluated about a year after the start). Using the 2014 bars needs a change to the board runner and its ADR | ADR 0062 (C-26 (6)) | Owner | open |
+| C-30 | Owner review of Sprint 7 part 1's readings (ADR 0063). (1) TGT-003's realized volatility includes the overnight return when its window crosses a close (VOL-002's realized measures leave it out). (2) The barrier multiples are 1.0 and 1.0 sigma-hats over the horizon, provisional, per target set; other payoffs get other set versions. (3) The trade/no-trade label mirrors the placeholder cost model without its session multipliers (rollover ×3, US releases ×2), so it understates slippage in those windows; "expected net P&L" is read as the trade's realized return net of costs at their placeholder values. (4) Uniqueness weights are computed in-fold on purged training labels (ML-002), not stored in `targets.parquet`; over labels reaching a later window, purging must use `weight_end`. (5) `xq exp wf-report` reads a recorded run's stored returns and folds, records no run and no trial, and its decay p-value is descriptive (R2 is judged only by `xq validate-strategy`) | Sprint 7 part 1 | Owner | open |
+| C-31 | GATE-004 requirement (owner's decision C-27 (6), ADR 0062): the live-readiness record stores the SHA-256 of the signed GATE-003 review document, so the reviewed text is identified | ADR 0062 | Claude, when GATE-004 is built | open |
+| C-32 | The event-tier R3 evaluation (owner's requirement C-27 (3), ADR 0062): R3 recomputed with the event backtester and the real risk engine, recorded with `evidence_tier: event`. The transition rule is enforced (migration 0016); the evaluator is not built, so no subject can reach `paper` | ADR 0062 | Claude, when a candidate runs on the event tier | open |
 
 ## Open owner decisions
 
@@ -327,6 +314,8 @@ placeholders until a venue exists. Claude's choices within it were reviewed in C
 | Event windows | US release −5/+30 min; rollover 16:45–18:15 New York (ADR 0026) | `config/sessions.yaml` | EDA |
 | Trial clustering | \|ρ\| 0.7 (absolute correlation, C-25), 60 common trading days; frozen with the gates (ADR 0032); Sharpe variance across clusters (ADR 0058) | `config/base.yaml` `experiments` | fixed before results |
 | Sigma-hat | interim EWMA, span 96 base bars | `fwd_returns.v1` | a VOL-006 selection on real data, approved by the owner and recorded in an ADR (C-18) |
+| Sprint 7 targets (TGT-003 … TGT-006) | the forward returns' windows (latency 1 s, fill delay 300 s, sigma-hat span 96); realized volatility on a 5-minute market-time grid of the mid; barriers at 1.0 / 1.0 sigma-hats over the horizon, every tick a path point; big move above 1.0 sigma-hat; trade/no-trade costs mirroring the placeholder cost model without session multipliers | `config/targets.yaml`, ADR 0063 | fixed before results; changes need a new set version and an ADR |
+| Retraining schedule | monthly (from the start of the trading day dated the 1st) when no `test_len` is given; the board keeps its fixed 91-day folds | `xq.validation.splitters`, ADR 0063 | fixed before results |
 | Baseline board | fixed parameters (rules on 1d and 1h signal bars, lookbacks in bars of the signal timeframe, MA 20/50 and 50/200, 10 % vol target, 1,000 random-entry seeds); rules evaluated over the full pre-vault history after their warm-up, forecast-sign strategies on the folds; folds: expanding, ≥ 3 years training, 91-day tests, 1-day embargo | `experiments/configs/baselines/board.yaml`, ADR 0033, ADR 0034, ADR 0035, ADR 0061 | fixed before results; changes need an ADR |
 | Random-walk forecast baseline | persistence of the latest completed bar return of the horizon's timeframe (`zero_return` covers the price random walk) | ADR 0033 | owner review of Sprint 4 |
 | EDA parameters | bootstrap 1,000 resamples, block ≥ 5 trading days of bars and ≤ n/10; Hill tails 5 %; ≥ 20 lags (one trading day); Bonferroni family-wise 0.05 with cluster-robust Student-t intervals; LBMA windows −5/+30 min; VR q = 2, 4, 16, 92 on 15m; runs on 1h | `config/eda.yaml`, ADR 0038 | fixed before results; changes need an ADR |
@@ -354,6 +343,13 @@ placeholders until a venue exists. Claude's choices within it were reviewed in C
   four years of real ticks are unmeasured. Board runs recorded before C-15 carry the old
   `signal_timeframe` key and are refused by the new board configuration (only synthetic test runs
   exist).
+- Sprint 7 part 1 is tested on synthetic data only (ADR 0063). No dataset spec names the new
+  target sets yet. Their speed on four years of real ticks is unmeasured: the barrier kind loops
+  over decisions in Python, and the realized-volatility grid holds up to 276 points per decision
+  for 1d. The trade/no-trade label omits the cost model's session multipliers (C-30 (3)).
+  Uniqueness weights are a library function: nothing applies them in-fold until ML-002.
+- `WalkForwardConfig` now dumps a `schedule` field, so board and walk-forward trial configs
+  recorded before this session hash differently from new ones (only synthetic test runs exist).
 - `config/horizons.yaml` does not exist, and nothing reads it yet: the target sets still emit all
   four default horizons until the admission list exists (ADR 0037).
 - EDA speed on real minute data is unmeasured: the bootstrap draws 1,000 resamples of about 700k
@@ -382,7 +378,7 @@ placeholders until a venue exists. Claude's choices within it were reviewed in C
 - Vault gate tokens are issued only by GATE-002, one per validated bundle (ADR 0060).
   `xq validate --include-vault` keeps its explicit confirmation flag: grading vault days is a
   pipeline stage, and the vault evaluation refuses days a quality run has not graded.
-- The registry's triggers are SQLite's: migrations 0011–0015 refuse another database until
+- The registry's triggers are SQLite's: migrations 0011–0016 refuse another database until
   PostgreSQL's versions exist (PAPER-004). An administrator with write access to the database
   file can bypass them; every gate result names its evaluator, evidence and policy hash.
 - Only rule bundles from a board run can be bundled and vault-evaluated; bundles of forecast
@@ -459,15 +455,15 @@ placeholders until a venue exists. Claude's choices within it were reviewed in C
 | 4 Exploratory research | EDA-001 … EDA-006 (EDA-007 in Sprint 8) | yes | yes (synthetic data, simulated processes) | no (no report on real data yet, C-16) |
 | 5 Statistical time series | STAT-001, STAT-002, STAT-003, STAT-006, STAT-008 framework (STAT-004, STAT-005 in Sprint 8; STAT-007 gated) | yes | yes (simulated processes, recovery registry) | no (no verdict report on real data, C-18) |
 | 6 Volatility research | VOL-001 … VOL-006 | yes | yes (simulated processes, recovery registry) | no (no volatility board on real data; nothing promoted, C-18) |
-| 9 Targets | TGT-001, TGT-002 (TGT-003 … TGT-006 later) | yes | yes | no |
+| 9 Targets | TGT-001 … TGT-006 | yes | yes (hand-computed cases, known barrier hit times, the uniqueness hand example, leakage harness) | no |
 | 10 Baselines | BASE-001, BASE-002, BASE-003, BASE-005, BASE-006 (BASE-004 later) | yes | yes | no |
-| 12 Walk-forward | WF-001, WF-002, WF-003, WF-006 (WF-004, WF-005 later) | yes | yes | no |
+| 12 Walk-forward | WF-001 … WF-006 | yes | yes (monthly schedule, stitched series without overlaps or gaps, planted decay found, report on a synthetic board run) | no |
 | 13 Backtesting | BT-001 … BT-010 | yes | yes (hand-computed trades, simulated quotes, reconciliation of the tiers) | no |
 | 14 Risk engine | RISK-001 … RISK-006 | yes | yes (hand-computed cases, exact thresholds, property tests, architectural test, synthetic runs) | no |
 | 15 Signal engine | SIGNAL-001 … SIGNAL-005 (the regime filter a pass-through until REG-007) | yes | yes (golden EV, filter cases, forecast-to-fill with a synthetic stub forecaster) | no |
 | 16 Robustness research | ROB-001 … ROB-008 (report and score; Monte Carlo through the real risk engine; noise injection) | yes | yes (simulated strategies with known truth: overfit vs genuine edges, planted edges, coverage, a ridge, reckless risk profiles; recovery registry) | no |
 | 17 Statistical validation | VAL-001 … VAL-007; `xq validate-strategy` (R1 best-baseline test, R2 decay test, per-sample SPA size check) | yes | yes (published examples, independent implementations; simulated noise, graded and overfit families; a recorded genuine edge passes R1 and R2, a recorded overfit strategy fails R2) | no |
 | 18 Experiment tracking | EXP-001 … EXP-006 (reproduction status, ADR 0055); reserved trial families (ADR 0047); `backtests` (migration 0009), `stat_tests` and `robustness_results` (migration 0010) | yes | yes (a fixture board run reproduces; other code is RERUN_DIFFERENT_CODE) | not applicable until real research runs |
-| 19 Model registry | MREG-001 … MREG-005 (migrations 0011–0015, ADR 0060) | yes | yes (every status pair against the database's trigger, rollback to the exact hash, tamper refusal, CLI, a board rule bundle registered and gated end to end) | not applicable until a candidate exists |
+| 19 Model registry | MREG-001 … MREG-005 (migrations 0011–0016, ADR 0060, ADR 0062) | yes | yes (every status pair against the database's trigger, rollback to the exact hash, tamper refusal, CLI, a board rule bundle registered and gated end to end) | not applicable until a candidate exists |
 | 25 Release gate | GATE-001 … GATE-003 (GATE-004 later) | yes | yes (gate evaluation and the one-time vault procedure end to end on synthetic ticks with a test vault start; second vault access refused) | no (the vault has never been opened) |
 | All other phases | not started | no | no | no |
