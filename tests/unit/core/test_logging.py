@@ -9,7 +9,7 @@ from typing import Any
 import pytest
 import structlog
 
-from xq.core.config import AppConfig, config_hash
+from xq.core.config import AppConfig, config_hash, load_config
 from xq.core.logging import bound_context, configure_logging, get_logger, shutdown_logging
 
 
@@ -96,3 +96,23 @@ def test_reconfiguring_does_not_duplicate_handlers(tmp_path: Path) -> None:
     assert len(lines) == 1
     assert lines[0]["run_id"] == "second"
     assert bound_context()["run_id"] == "second"
+
+
+def test_third_party_loggers_are_held_at_warning(tmp_path: Path) -> None:
+    """ADR 0062: at DEBUG, matplotlib's findfont lines and PIL's debug lines are dropped, their
+    warnings kept, and the project's own debug lines kept."""
+    configure_logging(_config(tmp_path, level="DEBUG"), run_id="r", git_sha="g")
+    logging.getLogger("matplotlib.font_manager").debug("findfont: Matching sans-serif")
+    logging.getLogger("PIL.PngImagePlugin").debug("STREAM b'IHDR'")
+    logging.getLogger("matplotlib.font_manager").warning("findfont: Font family not found")
+    get_logger("xq.test").debug("ours")
+    events = [line["event"] for line in _lines(tmp_path / "logs" / "xq.jsonl")]
+    assert events == ["findfont: Font family not found", "ours"]
+    assert logging.getLogger("matplotlib").level == logging.WARNING
+
+
+def test_the_repository_config_quiets_matplotlib_and_pil() -> None:
+    cfg = load_config("dev", config_dir=Path(__file__).resolve().parents[3] / "config")
+    assert cfg.logging.level == "DEBUG"
+    assert {"matplotlib", "PIL"} <= set(cfg.logging.third_party)
+    assert cfg.logging.third_party_level == "WARNING"

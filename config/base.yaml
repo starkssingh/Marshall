@@ -21,6 +21,10 @@ logging:
   console: true
   console_format: json
   file: logs/xq.jsonl
+  # Libraries held at WARNING whatever the level, so CLI output is not flooded with their debug
+  # lines (matplotlib's findfont, PIL's plugin imports) (ADR 0062).
+  third_party: [matplotlib, PIL, fontTools]
+  third_party_level: WARNING
 
 vault:
   # Untouchable holdout: the most recent 12 months at project start (2026-09-26) plus all later

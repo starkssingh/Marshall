@@ -156,6 +156,10 @@ class LoggingConfig(FrozenModel):
     console: bool = True
     console_format: Literal["json", "console"] = "json"
     file: Path | None = Path("logs/xq.jsonl")
+    #: Third-party loggers (and their children) held at `third_party_level`, whatever `level` is,
+    #: so CLI output is not flooded with library debug lines such as matplotlib's ``findfont``.
+    third_party: list[str] = ["matplotlib", "PIL", "fontTools"]
+    third_party_level: Literal["DEBUG", "INFO", "WARNING", "ERROR"] = "WARNING"
 
 
 class VaultConfig(FrozenModel):

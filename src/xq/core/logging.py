@@ -3,7 +3,9 @@
 `configure_logging` routes structlog and standard-library loggers (SQLAlchemy, Alembic, ...) through
 the same processors, so every line — ours or a library's — is a JSON object carrying ``run_id``,
 ``git_sha`` and ``config_hash``. Logs go to stderr (keeping stdout clean for command output) and,
-if configured, to a JSON-lines file.
+if configured, to a JSON-lines file. Third-party libraries named in ``logging.third_party``
+(matplotlib, PIL, ...) log at ``logging.third_party_level`` (WARNING), not at the root level
+(ADR 0062).
 """
 
 from __future__ import annotations
@@ -52,6 +54,8 @@ def configure_logging(cfg: AppConfig, *, run_id: str, git_sha: str) -> None:
     shutdown_logging()
     root = logging.getLogger()
     root.setLevel(cfg.logging.level)
+    for name in cfg.logging.third_party:
+        logging.getLogger(name).setLevel(cfg.logging.third_party_level)
 
     if cfg.logging.console:
         console = logging.StreamHandler(sys.stderr)

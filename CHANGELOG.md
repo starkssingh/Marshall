@@ -889,6 +889,10 @@ IDs from `docs/specs/development-plan.md`.
 
 ### Changed
 
+- ARCH-004 (owner's decision, ADR 0062): third-party loggers named in `logging.third_party`
+  (`matplotlib`, `PIL`, `fontTools`) are held at `logging.third_party_level` (WARNING) whatever
+  the root level, so CLI output is not flooded with matplotlib's `findfont` debug lines. Tested at
+  DEBUG: library debug lines dropped, their warnings and the project's debug lines kept.
 - C-27 (3) (owner's decision, ADR 0062), MREG-002 / GATE-002: every gate result records its
   evidence tier, `screening` (the default; the vault evaluation's R3) or `event` (the event
   backtester with the real risk engine) (`EvidenceTier`, `record_gate_result(evidence_tier=)`,
