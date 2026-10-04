@@ -947,6 +947,18 @@ IDs from `docs/specs/development-plan.md`.
   step longer than the window leaves its declared gaps, the refusals; WF-006's property test now
   draws monthly schedules too and checks that contiguous windows abut. ADR 0063.
 
+- WF-005: the walk-forward report (`xq.validation.walkforward_report`, `xq exp wf-report <run>
+  --strategy <name>`): per fold its training cutoff, test window, days, mean daily net return,
+  Sharpe ratio, net return, share of positive days and the fold's recorded metrics; the fold
+  Sharpe distribution (with the folds whose Sharpe ratio is undefined counted apart); and the
+  decay regression of fold mean returns on time (`decay_trend`, the test behind R2's
+  `decay_trend`; descriptive here, at least four folds). `board_report` reads a baseline board
+  run's fold-aligned returns and recorded folds (a forecast-sign strategy carries its own
+  evaluation's fold metrics); the report is written to `reports/walkforward/<run>/` and records
+  no run and no trial. Tested: per-fold figures against BT-003's metrics, a planted decay found
+  (p < 0.01) and a stable edge not flagged, too few folds reported as such, day assignment, and
+  end to end on a synthetic board run through the CLI. ADR 0063.
+
 ### Changed
 
 - ARCH-004 (owner's decision, ADR 0062): third-party loggers named in `logging.third_party`
