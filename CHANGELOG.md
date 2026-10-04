@@ -887,6 +887,17 @@ IDs from `docs/specs/development-plan.md`.
   hypothesis's declared slices (descriptive; a slice that cannot be computed is reported). H-0001
   stays unregistered. Synthetic data only. ADR 0061.
 
+- TGT-003: future realized volatility (`xq.targets.volatility`, kind `realized_vol`, target set
+  `realized_vol.v1`): over the forward return's window (entry and exit fills after the latency,
+  market time), the mid sampled every 5 market minutes from the intended entry (the last
+  market-hours quote at or before each point, the exit fill last); value `sqrt(sum of squared log
+  mid returns)`, and `<name>_vol` divided by the interim sigma-hat over the horizon. Windows across
+  a close include the overnight return. `xq.targets.returns` exposes the shared execution
+  machinery (`ExecutionParams`, `label_windows`, `first_fill`, `market_rows`, `horizon_scale`,
+  `interim_sigma_rate`) without changing forward returns (code version 5). Tested: equal to the
+  realized volatility computed separately on synthetic paths, with a quote gap and across the
+  daily close; in the leakage suite. ADR 0063.
+
 ### Changed
 
 - ARCH-004 (owner's decision, ADR 0062): third-party loggers named in `logging.third_party`

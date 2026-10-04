@@ -15,3 +15,17 @@ fwd_returns:
       max_fill_delay_s: 300        # no quote within 5 minutes of the intended fill time: no label
       sigma_span_bars: 96          # EWMA span of the interim sigma-hat (VOL-006 replaces it)
       vol_normalized: true         # also emit <name>_vol = return / (sigma-hat * sqrt(horizon))
+
+realized_vol:
+  v1:
+    kind: realized_vol        # TGT-003: realized volatility of the mid over each label window
+    # The forward returns' windows (entry and exit fills after the latency, market time), sampled
+    # every 5 market minutes; a window crossing a close includes the overnight return (ADR 0063).
+    horizons: [15m, 1h, 4h, 1d]
+    price_refs: [mid]
+    params:
+      execution_latency_ms: 1000   # as fwd_returns.v1
+      max_fill_delay_s: 300
+      sigma_span_bars: 96          # interim sigma-hat, as fwd_returns.v1 (VOL-006 replaces it)
+      sample_minutes: 5            # grid of market time from the intended entry
+      vol_normalized: true         # also emit <name>_vol = realized / (sigma-hat * sqrt(horizon))

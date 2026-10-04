@@ -11,8 +11,11 @@ from types import MappingProxyType
 from xq.core.errors import ConfigError
 from xq.targets.base import TargetKind
 from xq.targets.returns import FORWARD_RETURN
+from xq.targets.volatility import REALIZED_VOL
 
-TARGET_KINDS: Mapping[str, TargetKind] = MappingProxyType({FORWARD_RETURN.name: FORWARD_RETURN})
+TARGET_KINDS: Mapping[str, TargetKind] = MappingProxyType(
+    {kind.name: kind for kind in (FORWARD_RETURN, REALIZED_VOL)}
+)
 
 
 def target_kind(name: str) -> TargetKind:
