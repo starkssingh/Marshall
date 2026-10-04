@@ -19,6 +19,7 @@ from xq.data.calendar import MarketClock, regular_trading_day
 from xq.datasets.leakage import FeatureFn, Inputs, check_target_bounds
 from xq.targets.base import TargetSpec
 from xq.targets.kinds import target_kind
+from xq.targets.weights import label_uniqueness
 
 AssertCausal = Callable[[FeatureFn, Inputs], None]
 CFG = load_config("research", config_dir=REPO / "config")
@@ -163,3 +164,39 @@ def test_sigma_hat_is_causal(
         )
 
     assert_causal(fn, bar_inputs)
+
+
+WEIGHTED = [
+    s for s in SPECS if s[2].name in ("fwd_ret_long_1h", "tgt_tb_long_1h", "tgt_tb_short_4h")
+]
+
+
+@pytest.mark.parametrize(("label", "definition", "spec"), WEIGHTED, ids=[s[0] for s in WEIGHTED])
+def test_uniqueness_weights_use_no_quote_after_weight_end(
+    label: str,
+    definition: TargetSetConfig,
+    spec: TargetSpec,
+    week_ticks: pd.DataFrame,
+    bar_inputs: dict[str, pd.DataFrame],
+) -> None:
+    """TGT-006: a label's uniqueness depends on the labels overlapping it, which may start
+    earlier (known before t), but never on a quote after ``weight_end``; and ``weight_end`` is
+    never before ``label_end``."""
+    kind = target_kind(definition.kind)
+    sigma = kind.sigma(close_of(bar_inputs), definition, Timeframe.M15.duration).dropna()
+    quotes = quotes_of(week_ticks)
+
+    def weights(q: pd.DataFrame) -> pd.DataFrame:
+        out = kind.compute(spec, q, sigma, CLOCK)
+        labelled = out.loc[out["value"].notna()]
+        return label_uniqueness(labelled["label_start"], labelled["label_end"], clock=CLOCK)
+
+    full = weights(quotes)
+    assert len(full) > 20
+    assert (full["concurrency"] > 1).any()  # overlapping labels: the weights are not trivial
+    ends = kind.compute(spec, quotes, sigma, CLOCK)["label_end"].reindex(full.index)
+    assert (full["weight_end"] >= ends).all()
+    rng = np.random.default_rng(3)
+    for t in rng.choice(full.index, size=12, replace=False):
+        cut = weights(quotes[quotes["ts_utc"] <= full.loc[t, "weight_end"]])
+        assert cut.loc[t, "uniqueness"] == pytest.approx(full.loc[t, "uniqueness"]), t

@@ -14,9 +14,13 @@ from xq.targets.base import TargetKind
 from xq.targets.excursion import EXCURSION
 from xq.targets.returns import FORWARD_RETURN
 from xq.targets.volatility import REALIZED_VOL
+from xq.targets.weights import DERIVED_LABEL
 
 TARGET_KINDS: Mapping[str, TargetKind] = MappingProxyType(
-    {kind.name: kind for kind in (FORWARD_RETURN, REALIZED_VOL, EXCURSION, TRIPLE_BARRIER)}
+    {
+        kind.name: kind
+        for kind in (FORWARD_RETURN, REALIZED_VOL, EXCURSION, TRIPLE_BARRIER, DERIVED_LABEL)
+    }
 )
 
 

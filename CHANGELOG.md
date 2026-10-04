@@ -920,6 +920,21 @@ IDs from `docs/specs/development-plan.md`.
   barrier, the short side, same-bar hits (stop and flagged in bars, exact in ticks), a weekend gap
   through the stop; tick and bar resolutions in the leakage suite. ADR 0063.
 
+- TGT-006: derived labels, label concurrency and average-uniqueness weights
+  (`xq.targets.weights`). Kind `derived_label` (target set `derived.v1`), on the forward returns'
+  windows: `tgt_sign_<h>` (sign of the mid return), `tgt_big_<h>` (|mid return| above
+  `big_move_sigmas` sigma-hats over the horizon) and `tgt_trade_<ref>_<h>` (1 when the side's
+  execution-aware return beats the rest of the round trip's costs: commission, slippage with its
+  sigma term, financing per close held over with three nights on Wednesday, mirroring the
+  placeholder cost model without its session multipliers; a test checks they agree).
+  `label_uniqueness` gives each label's time-averaged concurrency and average uniqueness (in
+  market time with a clock) and `weight_end`, the latest end among the labels overlapping it;
+  `uniqueness_weights` scales uniqueness to a mean of 1 within the labels passed (a training set).
+  Tested: weights match a hand example (A [0,4), B [2,6), C [5,7): 0.75, 0.625, 0.75), identical
+  and disjoint labels, the daily break in market time, hand-computed sign, big-move and trade
+  labels including a triple-Wednesday night; derived labels in the leakage suite, and the weights
+  never read a quote after `weight_end`. ADR 0063.
+
 ### Changed
 
 - ARCH-004 (owner's decision, ADR 0062): third-party loggers named in `logging.third_party`
