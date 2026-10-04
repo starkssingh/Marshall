@@ -77,6 +77,7 @@ from xq.tracking.reproduce import (
 from xq.tracking.runs import experiment_run
 from xq.tracking.trials import trial_count
 from xq.validation.strategy import record_simulated_run, validate_run
+from xq.validation.walkforward_report import board_report, write_report
 
 EXIT_USAGE_ERROR = 2
 #: `xq exp reproduce`: the rerun used other code, config or environment (never reproduced).
@@ -627,6 +628,40 @@ def exp_reproduce(
         raise typer.Exit(1)
     if result.status is ReproductionStatus.RERUN_DIFFERENT_CODE:
         raise typer.Exit(EXIT_DIFFERENT_CODE)
+
+
+@exp_app.command("wf-report")
+def exp_wf_report(
+    ctx: typer.Context,
+    run_id: Annotated[str, typer.Argument(help="Id of a finished baseline board run.")],
+    strategy: Annotated[str, typer.Option("--strategy", help="Board strategy to report.")],
+) -> None:
+    """Walk-forward report of one board strategy: per-fold metrics, the fold Sharpe
+    distribution and the decay regression (WF-005). Reads the run's stored returns and folds;
+    records no run and no trial."""
+    with pipeline_run(ctx.obj) as run:
+        try:
+            report = board_report(
+                run.engine,
+                run_id,
+                strategy,
+                periods_per_year=run.cfg.backtest_config().periods_per_year,
+            )
+        except KeyError as exc:
+            typer.echo(f"error: {exc.args[0]}", err=True)
+            raise typer.Exit(2) from exc
+        directory = run.cfg.paths.resolve(run.cfg.paths.reports_dir) / "walkforward" / run_id
+        md, js = write_report(report, directory)
+    d = report.distribution
+    typer.echo(f"{strategy}: {int(d['n_folds'])} folds, median fold Sharpe {d['median']:.2f}")
+    if report.decay is not None:
+        typer.echo(
+            f"decay: one-sided p = {report.decay.p_value:.4f} ({report.decay.n_folds} folds)"
+        )
+    else:
+        typer.echo(f"decay: not computed ({report.decay_note})")
+    typer.echo(f"report: {md}")
+    typer.echo(f"json: {js}")
 
 
 baselines_app = typer.Typer(

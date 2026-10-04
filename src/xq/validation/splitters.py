@@ -4,9 +4,19 @@ Samples are decision times (sorted, tz-aware) with the ``label_end`` of their ta
 instant whose data the label depends on. A sample without a label (``label_end`` missing) is never
 used for training or validation; it may still be predicted in a test window.
 
-**Walk-forward** (`WalkForwardSplitter`): test windows ``[test_start, test_start + test_len)``
-follow each other every `step` (never overlapping), starting ``min_train + val_len`` after the
-first sample. Each fold's validation window is the `val_len` before its test window and its
+**Walk-forward** (`WalkForwardSplitter`): test windows follow each other from ``min_train +
+val_len`` after the first sample, on the **retraining schedule** (WF-004): the model is refitted at
+the start of each test window and predicts until the next.
+
+- ``monthly`` (the plan's research default, used when no `test_len` is given): a window per
+  calendar month, from the start of the trading day dated the 1st (17:00 New York the evening
+  before, so it follows the trading-day roll and DST) to the next month's;
+- ``fixed``: windows ``[test_start, test_start + test_len)`` every `step` (default `test_len`;
+  never overlapping).
+
+Windows abut unless a fixed `step` exceeds `test_len` (`WalkForwardConfig.contiguous`), so the
+stitched out-of-sample series has neither overlaps nor gaps (`stitch_oos` in the runner checks it).
+Each fold's validation window is the `val_len` before its test window and its
 training window everything before that (``expanding``) or the `min_train` before that
 (``rolling``). Purging by ``label_end`` keeps only training labels that end before
 ``validation start - embargo`` and validation labels that end before ``test start - embargo``, so
@@ -26,9 +36,9 @@ Shuffled splits do not exist here: financial samples are serially dependent (CLA
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import timedelta
+from datetime import date, timedelta
 from itertools import combinations
-from typing import Literal
+from typing import Any, Literal
 
 import numpy as np
 import numpy.typing as npt
@@ -36,6 +46,7 @@ import pandas as pd
 from pydantic import BaseModel, ConfigDict, model_validator
 
 from xq.core.errors import NaiveTimestampError
+from xq.core.time import trading_day, trading_day_bounds
 from xq.datasets.spec import Duration
 
 IntArray = npt.NDArray[np.int64]
@@ -74,21 +85,41 @@ class WalkForwardConfig(BaseModel):
     mode: Literal["expanding", "rolling"] = "expanding"
     min_train: Duration
     val_len: Duration = timedelta(0)
-    test_len: Duration
+    #: The retraining schedule (module docstring): ``monthly`` unless a `test_len` is given.
+    schedule: Literal["fixed", "monthly"] = "monthly"
+    test_len: Duration | None = None
     step: Duration | None = None
     embargo: Duration = timedelta(0)
     purge_by: Literal["label_end"] = "label_end"
 
+    @model_validator(mode="before")
+    @classmethod
+    def _default_schedule(cls, data: Any) -> Any:
+        if isinstance(data, dict) and "schedule" not in data:
+            data = {**data, "schedule": "fixed" if data.get("test_len") else "monthly"}
+        return data
+
     @model_validator(mode="after")
     def _check(self) -> WalkForwardConfig:
         zero = pd.Timedelta(0)
-        if pd.Timedelta(self.min_train) <= zero or pd.Timedelta(self.test_len) <= zero:
-            raise ValueError("min_train and test_len must be positive")
+        if pd.Timedelta(self.min_train) <= zero:
+            raise ValueError("min_train must be positive")
         if pd.Timedelta(self.val_len) < zero or pd.Timedelta(self.embargo) < zero:
             raise ValueError("val_len and embargo must not be negative")
+        if self.schedule == "monthly":
+            if self.test_len is not None or self.step is not None:
+                raise ValueError("a monthly schedule takes no test_len or step: the month is both")
+            return self
+        if self.test_len is None or pd.Timedelta(self.test_len) <= zero:
+            raise ValueError("a fixed schedule needs a positive test_len")
         if self.step is not None and pd.Timedelta(self.step) < pd.Timedelta(self.test_len):
             raise ValueError("step must be at least test_len: test windows may not overlap")
         return self
+
+    @property
+    def contiguous(self) -> bool:
+        """Whether consecutive test windows abut (no sample between them goes unpredicted)."""
+        return self.schedule == "monthly" or self.step is None or self.step == self.test_len
 
 
 class WalkForwardSplitter:
@@ -98,9 +129,31 @@ class WalkForwardSplitter:
         self.config = config
         self.min_train = pd.Timedelta(config.min_train).value
         self.val_len = pd.Timedelta(config.val_len).value
-        self.test_len = pd.Timedelta(config.test_len).value
-        self.step = pd.Timedelta(config.step or config.test_len).value
         self.embargo = pd.Timedelta(config.embargo).value
+
+    def test_windows(self, first: int, last: int) -> list[tuple[int, int]]:
+        """The test windows ``[start, end)`` (UTC nanoseconds) of samples from `first` to `last`.
+
+        Windows start ``min_train + val_len`` after `first` (the first month boundary at or after
+        it on a monthly schedule) and continue while they start at or before `last`.
+        """
+        start = first + self.min_train + self.val_len
+        windows = []
+        if self.config.schedule == "monthly":
+            boundary = month_start(start, after=True)
+            while boundary <= last:
+                following = month_start(boundary + 1, after=True)
+                windows.append((boundary, following))
+                boundary = following
+            return windows
+        if self.config.test_len is None:  # refused by WalkForwardConfig for a fixed schedule
+            raise ValueError("a fixed schedule needs a test_len")
+        test_len = pd.Timedelta(self.config.test_len).value
+        step = pd.Timedelta(self.config.step or self.config.test_len).value
+        while start <= last:
+            windows.append((start, start + test_len))
+            start += step
+        return windows
 
     def split(self, times: pd.DatetimeIndex, label_end: pd.Series | pd.DatetimeIndex) -> list[Fold]:
         """All folds with at least one training and one test sample, in time order.
@@ -114,9 +167,7 @@ class WalkForwardSplitter:
             return []
         labelled = e != _NAT
         folds: list[Fold] = []
-        test_start = int(t[0]) + self.min_train + self.val_len
-        while test_start <= t[-1]:
-            test_end = test_start + self.test_len
+        for test_start, test_end in self.test_windows(int(t[0]), int(t[-1])):
             val_start = test_start - self.val_len
             train_start = (
                 int(t[0]) if self.config.mode == "expanding" else val_start - self.min_train
@@ -141,8 +192,20 @@ class WalkForwardSplitter:
                         test_end=_ts(test_end),
                     )
                 )
-            test_start += self.step
         return folds
+
+
+def month_start(instant: int, *, after: bool) -> int:
+    """The start of the trading day dated the 1st of a month (UTC nanoseconds): the latest at or
+    before `instant`, or with `after` the earliest at or after it."""
+    ts = pd.Timestamp(instant, tz="UTC")
+    day = trading_day(ts)
+    first = date(day.year, day.month, 1)
+    boundary = int(trading_day_bounds(first)[0].value)
+    if after and boundary < instant:
+        following = date(day.year + day.month // 12, day.month % 12 + 1, 1)
+        boundary = int(trading_day_bounds(following)[0].value)
+    return boundary
 
 
 class PurgedKFold:

@@ -5,11 +5,14 @@ windows never overlap; purging removes exactly the labels that would reach the n
 more. Purged k-fold and CPCV: no training label interval meets a test group's span plus embargo.
 """
 
+from itertools import pairwise
+
 import numpy as np
 import pandas as pd
 from hypothesis import given, settings
 from hypothesis import strategies as st
 
+from xq.core.time import trading_day, trading_day_bounds
 from xq.validation.splitters import (
     CombinatorialPurgedCV,
     PurgedKFold,
@@ -40,14 +43,19 @@ def minutes(draw: st.DrawFn, low: int, high: int) -> str:
 
 @st.composite
 def walk_forward_configs(draw: st.DrawFn) -> WalkForwardConfig:
+    """Fixed schedules with random test lengths and steps, and monthly schedules (WF-004)."""
+    common = {
+        "mode": draw(st.sampled_from(["expanding", "rolling"])),
+        "min_train": minutes(draw, 60, 10 * 24 * 60),
+        "val_len": minutes(draw, 0, 3 * 24 * 60),
+        "embargo": minutes(draw, 0, 24 * 60),
+    }
+    if draw(st.booleans()):
+        return WalkForwardConfig.model_validate(common)  # monthly: the research default
     test_len = draw(st.integers(60, 5 * 24 * 60))
-    return WalkForwardConfig(
-        mode=draw(st.sampled_from(["expanding", "rolling"])),
-        min_train=minutes(draw, 60, 10 * 24 * 60),  # type: ignore[arg-type]
-        val_len=minutes(draw, 0, 3 * 24 * 60),  # type: ignore[arg-type]
-        test_len=f"{test_len}min",  # type: ignore[arg-type]
-        step=f"{test_len + draw(st.integers(0, 2 * 24 * 60))}min",  # type: ignore[arg-type]
-        embargo=minutes(draw, 0, 24 * 60),  # type: ignore[arg-type]
+    step = test_len + draw(st.sampled_from([0, draw(st.integers(0, 2 * 24 * 60))]))
+    return WalkForwardConfig.model_validate(
+        {**common, "test_len": f"{test_len}min", "step": f"{step}min"}
     )
 
 
@@ -96,6 +104,16 @@ def test_walk_forward_folds_never_leak(
         previous_end = end
         tested.extend(fold.test_idx.tolist())
     assert len(tested) == len(set(tested))  # every sample is predicted at most once
+    # WF-004: the schedule's windows abut when it is contiguous (monthly, or step = test_len),
+    # and monthly windows start at the start of the trading day dated the 1st
+    windows = WalkForwardSplitter(config).test_windows(int(t[0]), int(t[-1]))
+    for (_, end), (start, _) in pairwise(windows):
+        assert start == end if config.contiguous else start > end
+    if config.schedule == "monthly":
+        for start, _ in windows:
+            stamp = pd.Timestamp(start, tz="UTC")
+            assert trading_day(stamp).day == 1
+            assert trading_day_bounds(trading_day(stamp))[0] == stamp
 
 
 @settings(max_examples=200, deadline=None)

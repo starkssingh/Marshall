@@ -887,8 +887,100 @@ IDs from `docs/specs/development-plan.md`.
   hypothesis's declared slices (descriptive; a slice that cannot be computed is reported). H-0001
   stays unregistered. Synthetic data only. ADR 0061.
 
+- TGT-003: future realized volatility (`xq.targets.volatility`, kind `realized_vol`, target set
+  `realized_vol.v1`): over the forward return's window (entry and exit fills after the latency,
+  market time), the mid sampled every 5 market minutes from the intended entry (the last
+  market-hours quote at or before each point, the exit fill last); value `sqrt(sum of squared log
+  mid returns)`, and `<name>_vol` divided by the interim sigma-hat over the horizon. Windows across
+  a close include the overnight return. `xq.targets.returns` exposes the shared execution
+  machinery (`ExecutionParams`, `label_windows`, `first_fill`, `market_rows`, `horizon_scale`,
+  `interim_sigma_rate`) without changing forward returns (code version 5). Tested: equal to the
+  realized volatility computed separately on synthetic paths, with a quote gap and across the
+  daily close; in the leakage suite. ADR 0063.
+
+- TGT-004: maximum favourable and adverse excursion in sigma units (`xq.targets.excursion`,
+  kind `excursion`, target set `excursions.v1`): every market-hours quote after the entry fill up
+  to the exit fill, marked on the exit side (long: bid against the entry ask; short: ask against
+  the entry bid); `tgt_mfe_<ref>_<h>` is the best close-out return and `tgt_mae_<ref>_<h>` the
+  worst as a positive loss, both divided by the interim sigma-hat over the horizon. Tested on
+  hand-built paths (both sides, a steady rise, a stray quote in the daily break left off the
+  path, no label without fills or sigma-hat); in the leakage suite. ADR 0063.
+
+- TGT-005: triple-barrier labels (`xq.targets.barrier`, kind `triple_barrier`, target set
+  `barriers.v1`): take-profit and stop at `tp_sigmas` and `sl_sigmas` times the interim sigma-hat
+  over the horizon (1.0 and 1.0, provisional), on the exit side of the quote (long: bid against
+  the entry ask; short: ask against the entry bid), the vertical barrier at the forward return's
+  exit fill. Three targets per horizon and side: the label (+1 / -1 / 0, `tgt_tb_<ref>_<h>`),
+  market minutes to the hit (`_t`) and the ambiguity flag (`_amb`); `label_end` is the hit quote.
+  `resolution: tick` reads every quote (the repository's set); a bar length reads bars on the UTC
+  grid, and a bar touching both barriers resolves to the stop and is flagged. A barrier touched
+  before the intended exit labels the window without the exit fill (the leakage harness caught a
+  first version that needed it). `LabelWindows` carries each fill's timeliness. Tested: known hit
+  times on hand-built paths and against a brute-force search on random paths, the vertical
+  barrier, the short side, same-bar hits (stop and flagged in bars, exact in ticks), a weekend gap
+  through the stop; tick and bar resolutions in the leakage suite. ADR 0063.
+
+- TGT-006: derived labels, label concurrency and average-uniqueness weights
+  (`xq.targets.weights`). Kind `derived_label` (target set `derived.v1`), on the forward returns'
+  windows: `tgt_sign_<h>` (sign of the mid return), `tgt_big_<h>` (|mid return| above
+  `big_move_sigmas` sigma-hats over the horizon) and `tgt_trade_<ref>_<h>` (1 when the side's
+  execution-aware return beats the rest of the round trip's costs: commission, slippage with its
+  sigma term, financing per close held over with three nights on Wednesday, mirroring the
+  placeholder cost model without its session multipliers; a test checks they agree).
+  `label_uniqueness` gives each label's time-averaged concurrency and average uniqueness (in
+  market time with a clock) and `weight_end`, the latest end among the labels overlapping it;
+  `uniqueness_weights` scales uniqueness to a mean of 1 within the labels passed (a training set).
+  Tested: weights match a hand example (A [0,4), B [2,6), C [5,7): 0.75, 0.625, 0.75), identical
+  and disjoint labels, the daily break in market time, hand-computed sign, big-move and trade
+  labels including a triple-Wednesday night; derived labels in the leakage suite, and the weights
+  never read a quote after `weight_end`. ADR 0063.
+
+- WF-004: the retraining schedule and stitching. `WalkForwardConfig.schedule` is `monthly` (the
+  research default, used when no `test_len` is given: a test window per calendar month from the
+  start of the trading day dated the 1st, 17:00 New York the evening before, so DST and the
+  trading-day roll are followed) or `fixed` (`test_len` and `step`, as before; existing configs
+  are unchanged). `WalkForwardSplitter.test_windows` gives the windows; `contiguous` says whether
+  they abut. `stitch_oos` joins the folds' predictions into one out-of-sample series and refuses a
+  decision time predicted twice, a fold predicting outside its window, and (on a contiguous
+  schedule) a gap; `walk_forward` stitches through it. Tested: monthly windows in winter and
+  summer, the stitched series of monthly, fixed and rolling runs has no overlaps or gaps, a fixed
+  step longer than the window leaves its declared gaps, the refusals; WF-006's property test now
+  draws monthly schedules too and checks that contiguous windows abut. ADR 0063.
+
+- WF-005: the walk-forward report (`xq.validation.walkforward_report`, `xq exp wf-report <run>
+  --strategy <name>`): per fold its training cutoff, test window, days, mean daily net return,
+  Sharpe ratio, net return, share of positive days and the fold's recorded metrics; the fold
+  Sharpe distribution (with the folds whose Sharpe ratio is undefined counted apart); and the
+  decay regression of fold mean returns on time (`decay_trend`, the test behind R2's
+  `decay_trend`; descriptive here, at least four folds). `board_report` reads a baseline board
+  run's fold-aligned returns and recorded folds (a forecast-sign strategy carries its own
+  evaluation's fold metrics); the report is written to `reports/walkforward/<run>/` and records
+  no run and no trial. Tested: per-fold figures against BT-003's metrics, a planted decay found
+  (p < 0.01) and a stable edge not flagged, too few folds reported as such, day assignment, and
+  end to end on a synthetic board run through the CLI. ADR 0063.
+
 ### Changed
 
+- ARCH-004 (owner's decision, ADR 0062): third-party loggers named in `logging.third_party`
+  (`matplotlib`, `PIL`, `fontTools`) are held at `logging.third_party_level` (WARNING) whatever
+  the root level, so CLI output is not flooded with matplotlib's `findfont` debug lines. Tested at
+  DEBUG: library debug lines dropped, their warnings and the project's debug lines kept.
+- C-27 (3) (owner's decision, ADR 0062), MREG-002 / GATE-002: every gate result records its
+  evidence tier, `screening` (the default; the vault evaluation's R3) or `event` (the event
+  backtester with the real risk engine) (`EvidenceTier`, `record_gate_result(evidence_tier=)`,
+  `gate_results.evidence_tier`, migration 0016). Promotion to `paper` needs the latest R3 result
+  to have passed on the event tier, in the service (`promote`) and in both status triggers
+  (migration 0016 replaces them); `vault_passed` accepts either tier. The event-tier R3
+  evaluation itself is not built yet, so no subject can reach `paper`. Tested: a screening R3
+  reaches `vault_passed` and is refused for `paper` (service and database); a failing event-tier
+  R3, and a later screening R3, are refused too; a passing event-tier R3 promotes; the database
+  agrees with the service on every status pair and tier.
+- C-26 (6) (owner's decision, ADR 0062): `experiments/configs/ds_base.yaml` starts on
+  2015-01-01 (`2015-01-01T22:00:00Z`, the start of trading day 2015-01-02; 2015-01-01 is closed),
+  fixed before any result; the data is downloaded from 2014-01-01. The discovery-window default
+  (fraction 0.5) now resolves to the start of trading day 2020-05-15. The H-0001 draft names the
+  window and stays unregistered. The README and `docs/runbooks/real-data.md` document the working
+  dukascopy-node CSV route (`-r 3 -re -fr`, the owner's monthly loop) (C-26 (1)).
 - C-15 (ADR 0061): the board configuration's `signal_timeframe` is replaced by
   `signal_timeframes` (the old key is refused); `BoardConfig.strategies()` returns a `BoardRule`
   (rule and timeframe) per `<name>@<timeframe>`; `rule_signal_bars` takes a timeframe. The

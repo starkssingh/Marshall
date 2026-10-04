@@ -4,7 +4,10 @@
 # deliberately not timestamps, so registration is refused. The board runner implements the
 # revision (ADR 0061): rules on 1d and 1h signal bars named <name>@<timeframe>, evaluated over the
 # full pre-vault history after their own warm-up, with the fold-aligned view stored, and the
-# descriptive slices below. The plan records the first baseline board as H-0001.
+# descriptive slices below. The plan records the first baseline board as H-0001. ds_base runs from
+# 2015-01-01 to vault.start (2025-09-25T21:00:00Z), fixed by the owner before any result (ADR 0062,
+# C-26 (6)); its data is downloaded from 2014-01-01. A rule's warm-up still counts on the dataset's
+# own signal bars (ADR 0061; whether it may use the 2014 bars is C-29).
 id: H-0001
 title: Do simple strategies make money after costs? (the baseline board)
 family: baselines
@@ -15,8 +18,9 @@ statement: >
   of the forecast baselines) earns a positive net Sharpe ratio on its evaluation period that is
   significant (one-sided stationary-bootstrap p < 0.05) and survives deflation for every
   configuration evaluated in this family. A rule baseline's evaluation period is the full
-  pre-vault history of ds_base after its own warm-up (its parameters are fixed in advance, so it
-  needs no training window); a forecast-sign baseline's is the stitched walk-forward test folds.
+  pre-vault history of ds_base (from 2015-01-01 to vault.start) after its own warm-up (its
+  parameters are fixed in advance, so it needs no training window); a forecast-sign baseline's is
+  the stitched walk-forward test folds.
 rationale: >
   Trend-following and carry-like effects have been reported in gold and other futures, so simple
   rules might earn something after costs. They might not: retail XAUUSD costs (spread, slippage

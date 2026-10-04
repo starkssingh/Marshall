@@ -19,6 +19,7 @@ from xq.data.calendar import MarketClock, regular_trading_day
 from xq.datasets.leakage import FeatureFn, Inputs, check_target_bounds
 from xq.targets.base import TargetSpec
 from xq.targets.kinds import target_kind
+from xq.targets.weights import label_uniqueness
 
 AssertCausal = Callable[[FeatureFn, Inputs], None]
 CFG = load_config("research", config_dir=REPO / "config")
@@ -70,6 +71,38 @@ def test_target_uses_only_its_label_window_and_sigma_at_t(
     )
     assert report.passed, report.summary()
     assert report.points, "no finite target values to test"
+
+
+# A bar-resolved triple barrier (pessimistic same-bar handling, TGT-005) is not in the repository
+# configuration, which reads every tick; it must pass the same bounds check.
+BAR_BARRIER = CFG.target_set("barriers", "v1").model_copy(
+    update={"params": {**CFG.target_set("barriers", "v1").params, "resolution": "15min"}}
+)
+BAR_SPECS = [
+    (f"barriers@15min:{spec.name}", BAR_BARRIER, spec)
+    for spec in target_kind(BAR_BARRIER.kind).expand(BAR_BARRIER, TRADING_DAY)
+]
+
+
+@pytest.mark.parametrize(("label", "definition", "spec"), BAR_SPECS, ids=[s[0] for s in BAR_SPECS])
+def test_bar_resolved_barriers_use_only_their_label_window(
+    label: str,
+    definition: TargetSetConfig,
+    spec: TargetSpec,
+    week_ticks: pd.DataFrame,
+    bar_inputs: dict[str, pd.DataFrame],
+) -> None:
+    kind = target_kind(definition.kind)
+    sigma = kind.sigma(close_of(bar_inputs), definition, Timeframe.M15.duration).dropna()
+    report = check_target_bounds(
+        lambda quotes, s: kind.compute(spec, quotes, s, CLOCK),
+        quotes_of(week_ticks),
+        sigma,
+        n_points=15,
+        seed=6,
+    )
+    assert report.passed, report.summary()
+    assert report.points
 
 
 FORWARD = [s for s in SPECS if s[1].kind == "forward_return"]
@@ -131,3 +164,39 @@ def test_sigma_hat_is_causal(
         )
 
     assert_causal(fn, bar_inputs)
+
+
+WEIGHTED = [
+    s for s in SPECS if s[2].name in ("fwd_ret_long_1h", "tgt_tb_long_1h", "tgt_tb_short_4h")
+]
+
+
+@pytest.mark.parametrize(("label", "definition", "spec"), WEIGHTED, ids=[s[0] for s in WEIGHTED])
+def test_uniqueness_weights_use_no_quote_after_weight_end(
+    label: str,
+    definition: TargetSetConfig,
+    spec: TargetSpec,
+    week_ticks: pd.DataFrame,
+    bar_inputs: dict[str, pd.DataFrame],
+) -> None:
+    """TGT-006: a label's uniqueness depends on the labels overlapping it, which may start
+    earlier (known before t), but never on a quote after ``weight_end``; and ``weight_end`` is
+    never before ``label_end``."""
+    kind = target_kind(definition.kind)
+    sigma = kind.sigma(close_of(bar_inputs), definition, Timeframe.M15.duration).dropna()
+    quotes = quotes_of(week_ticks)
+
+    def weights(q: pd.DataFrame) -> pd.DataFrame:
+        out = kind.compute(spec, q, sigma, CLOCK)
+        labelled = out.loc[out["value"].notna()]
+        return label_uniqueness(labelled["label_start"], labelled["label_end"], clock=CLOCK)
+
+    full = weights(quotes)
+    assert len(full) > 20
+    assert (full["concurrency"] > 1).any()  # overlapping labels: the weights are not trivial
+    ends = kind.compute(spec, quotes, sigma, CLOCK)["label_end"].reindex(full.index)
+    assert (full["weight_end"] >= ends).all()
+    rng = np.random.default_rng(3)
+    for t in rng.choice(full.index, size=12, replace=False):
+        cut = weights(quotes[quotes["ts_utc"] <= full.loc[t, "weight_end"]])
+        assert cut.loc[t, "uniqueness"] == pytest.approx(full.loc[t, "uniqueness"]), t

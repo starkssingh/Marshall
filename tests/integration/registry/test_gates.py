@@ -1,7 +1,8 @@
 """MREG-002: gate records and enforced transitions. Promotion without a passing gate record fails,
 in the service and in the database; the latest result of a gate decides; whether a result passed
 is computed from its checks, never supplied; the service and the database's trigger agree on every
-status change (ADR 0060)."""
+status change (ADR 0060); promotion to paper needs R3 recomputed on the event tier (C-27 (3),
+ADR 0062)."""
 
 import itertools
 from collections.abc import Iterator
@@ -15,7 +16,9 @@ from helpers.pipeline import REPO, config
 from helpers.quality import repo_config
 from xq.core.config import GateCheck
 from xq.registry.gates import (
+    EVENT_TIER_FOR,
     GATE_FOR,
+    EvidenceTier,
     latest_gate_result,
     list_gate_results,
     promote,
@@ -77,7 +80,14 @@ def checks(gate: str, *, passing: bool = True) -> list[GateCheck]:
     return out
 
 
-def record(engine: Engine, subject: str, gate: str, *, passing: bool = True) -> int:
+def record(
+    engine: Engine,
+    subject: str,
+    gate: str,
+    *,
+    passing: bool = True,
+    tier: EvidenceTier = EvidenceTier.SCREENING,
+) -> int:
     result = record_gate_result(
         engine,
         GATES,
@@ -90,8 +100,10 @@ def record(engine: Engine, subject: str, gate: str, *, passing: bool = True) -> 
         evaluator="test",
         evidence_paths=["reports/x.md"],
         run_id=None,
+        evidence_tier=tier,
     )
     assert result.passed is passing
+    assert result.evidence_tier is tier
     return result.gate_result_id
 
 
@@ -124,6 +136,7 @@ def test_steps_are_taken_in_order_and_live_is_not_reachable(engine: Engine, tmp_
     subject = new_version(engine, tmp_path)
     for gate in ("R1", "R2", "R3", "R4"):
         record(engine, subject, gate)
+    record(engine, subject, "R3", tier=EvidenceTier.EVENT)  # paper reads an event-tier R3
     with pytest.raises(RegistryStateError, match="the next status is candidate, not validated"):
         promote(engine, KIND, subject, Status.VALIDATED, actor="me", reason="skip")
     for status in (
@@ -151,7 +164,11 @@ def test_the_database_enforces_the_same_rules_as_the_service(
     with and without a passing gate result."""
     statuses = list(Status)
     for before, after in itertools.permutations(statuses, 2):
-        for gated in (False, True):
+        for gated, tier in (
+            (False, None),
+            (True, EvidenceTier.SCREENING),
+            (True, EvidenceTier.EVENT),
+        ):
             subject = new_version(engine, tmp_path)
             with engine.begin() as connection:  # place the subject at `before`, bypassing gates
                 connection.execute(text("DROP TRIGGER trg_model_versions_status"))
@@ -160,10 +177,13 @@ def test_the_database_enforces_the_same_rules_as_the_service(
                     {"s": before.value, "id": subject},
                 )
             upgrade_trigger(engine)
-            if gated and after in GATE_FOR:
-                record(engine, subject, GATE_FOR[after])
+            if tier is not None and after in GATE_FOR:
+                record(engine, subject, GATE_FOR[after], tier=tier)
             allowed = (after is Status.RETIRED and before is not Status.RETIRED) or (
-                PROMOTIONS.get(before) is after and after in GATE_FOR and gated
+                PROMOTIONS.get(before) is after
+                and after in GATE_FOR
+                and gated
+                and (after not in EVENT_TIER_FOR or tier is EvidenceTier.EVENT)
             )
             try:
                 with engine.begin() as connection:
@@ -174,23 +194,59 @@ def test_the_database_enforces_the_same_rules_as_the_service(
                 done = True
             except IntegrityError:
                 done = False
-            assert done is allowed, (before, after, gated)
+            assert done is allowed, (before, after, tier)
 
 
 def upgrade_trigger(engine: Engine) -> None:
-    """Recreate the status trigger exactly as migration 0012 defines it."""
+    """Recreate the status trigger exactly as the latest migration (0016) defines it."""
     import importlib.util
 
     spec = importlib.util.spec_from_file_location(
-        "migration_0012", REPO / "migrations" / "versions" / "0012_gate_results.py"
+        "migration_0016", REPO / "migrations" / "versions" / "0016_gate_evidence_tier.py"
     )
     assert spec is not None
     assert spec.loader is not None
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
-    body = module.TRIGGERS["trg_model_versions_status"]
+    body = module.status_trigger(
+        "model_versions", "model_version_id", "model_version", event_tier_for_paper=True
+    )
     with engine.begin() as connection:
         connection.execute(text(f"CREATE TRIGGER trg_model_versions_status {body}"))
+
+
+def test_promotion_to_paper_needs_r3_on_the_event_tier(engine: Engine, tmp_path: Path) -> None:
+    """C-27 (3): a screening-tier R3 (the vault's) reaches vault_passed, never paper; an
+    event-tier R3 does, in the service and in the database; the latest R3 decides."""
+    subject = new_version(engine, tmp_path)
+    for gate, status in (("R1", Status.CANDIDATE), ("R2", Status.VALIDATED)):
+        record(engine, subject, gate)
+        promote(engine, KIND, subject, status, actor="me", reason="passed")
+    screening = record(engine, subject, "R3")
+    change = promote(engine, KIND, subject, Status.VAULT_PASSED, actor="me", reason="vault")
+    assert change.gate_result_id == screening
+    with pytest.raises(RegistryStateError, match="recomputed on the event tier"):
+        promote(engine, KIND, subject, Status.PAPER, actor="me", reason="go")
+    paper = {"s": Status.PAPER.value, "id": subject}
+    update = "UPDATE model_versions SET status = :s WHERE model_version_id = :id"
+    with pytest.raises(IntegrityError, match="event-tier R3"), engine.begin() as connection:
+        connection.execute(text(update), paper)
+    # a failing event-tier R3 does not promote either
+    record(engine, subject, "R3", passing=False, tier=EvidenceTier.EVENT)
+    with pytest.raises(RegistryStateError, match="latest: R3 FAIL on the event tier"):
+        promote(engine, KIND, subject, Status.PAPER, actor="me", reason="go")
+    event = record(engine, subject, "R3", tier=EvidenceTier.EVENT)
+    # a later screening-tier R3 withdraws it: the latest R3 decides
+    record(engine, subject, "R3")
+    with pytest.raises(RegistryStateError, match="recomputed on the event tier"):
+        promote(engine, KIND, subject, Status.PAPER, actor="me", reason="go")
+    with pytest.raises(IntegrityError, match="event-tier R3"), engine.begin() as connection:
+        connection.execute(text(update), paper)
+    event = record(engine, subject, "R3", tier=EvidenceTier.EVENT)
+    change = promote(engine, KIND, subject, Status.PAPER, actor="me", reason="event-tier R3")
+    assert (change.to_status, change.gate_result_id) == (Status.PAPER, event)
+    assert latest_gate_result(engine, KIND, subject, "R3").evidence_tier is EvidenceTier.EVENT  # type: ignore[union-attr]
+    assert {r.evidence_tier for r in list_gate_results(engine, KIND, subject)} == set(EvidenceTier)
 
 
 def test_whether_a_result_passed_is_computed_and_complete(engine: Engine, tmp_path: Path) -> None:

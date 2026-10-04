@@ -15,3 +15,69 @@ fwd_returns:
       max_fill_delay_s: 300        # no quote within 5 minutes of the intended fill time: no label
       sigma_span_bars: 96          # EWMA span of the interim sigma-hat (VOL-006 replaces it)
       vol_normalized: true         # also emit <name>_vol = return / (sigma-hat * sqrt(horizon))
+
+realized_vol:
+  v1:
+    kind: realized_vol        # TGT-003: realized volatility of the mid over each label window
+    # The forward returns' windows (entry and exit fills after the latency, market time), sampled
+    # every 5 market minutes; a window crossing a close includes the overnight return (ADR 0063).
+    horizons: [15m, 1h, 4h, 1d]
+    price_refs: [mid]
+    params:
+      execution_latency_ms: 1000   # as fwd_returns.v1
+      max_fill_delay_s: 300
+      sigma_span_bars: 96          # interim sigma-hat, as fwd_returns.v1 (VOL-006 replaces it)
+      sample_minutes: 5            # grid of market time from the intended entry
+      vol_normalized: true         # also emit <name>_vol = realized / (sigma-hat * sqrt(horizon))
+
+excursions:
+  v1:
+    kind: excursion           # TGT-004: maximum favourable / adverse excursion in sigma units
+    # Every market-hours quote after the entry fill up to the exit fill, marked on the exit side
+    # (long: bid against the entry ask; short: ask against the entry bid), divided by the interim
+    # sigma-hat over the horizon (ADR 0063).
+    horizons: [15m, 1h, 4h, 1d]
+    price_refs: [long, short]
+    params:
+      execution_latency_ms: 1000   # as fwd_returns.v1
+      max_fill_delay_s: 300
+      sigma_span_bars: 96
+
+barriers:
+  v1:
+    kind: triple_barrier      # TGT-005: triple-barrier labels (+1 / -1 / 0) with time to hit
+    # Take-profit and stop in units of the interim sigma-hat over the horizon, marked on the exit
+    # side of the quote; the vertical barrier is the forward return's exit fill. PROVISIONAL
+    # multiples, fixed before any result (ADR 0063); every quote is a path point (`tick`), so
+    # same-bar ambiguity cannot arise here (a bar resolution resolves it pessimistically).
+    horizons: [15m, 1h, 4h, 1d]
+    price_refs: [long, short]
+    params:
+      execution_latency_ms: 1000   # as fwd_returns.v1
+      max_fill_delay_s: 300
+      sigma_span_bars: 96
+      tp_sigmas: 1.0
+      sl_sigmas: 1.0
+      resolution: tick
+
+derived:
+  v1:
+    kind: derived_label       # TGT-006: sign, big move and trade/no-trade labels
+    # From the forward returns' windows: mid -> tgt_sign_<h> and tgt_big_<h>; long and short ->
+    # tgt_trade_<ref>_<h>, 1 when the side's return (spread paid) beats the rest of the round
+    # trip's costs. Those costs mirror config/costs/placeholder.yaml (PROVISIONAL, a test checks
+    # they agree) without its session multipliers (ADR 0063).
+    horizons: [15m, 1h, 4h, 1d]
+    price_refs: [long, short, mid]
+    params:
+      execution_latency_ms: 1000   # as fwd_returns.v1
+      max_fill_delay_s: 300
+      sigma_span_bars: 96
+      big_move_sigmas: 1.0              # |r| above 1 sigma-hat over the horizon
+      commission_usd_per_oz_per_side: 0.035   # 3.5 USD per lot of 100 oz
+      slippage_fixed_bps: 0.5
+      slippage_sigma_multiple: 0.1      # times sigma-hat over one market minute, in bps
+      financing_long_annual_pct: 6.0
+      financing_short_annual_pct: 2.0   # a cost on both sides while costs are placeholders
+      financing_day_count: 360
+      triple_weekday: wed

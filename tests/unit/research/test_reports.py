@@ -1,6 +1,7 @@
 """EDA-001: deterministic report builds and discovery-window enforcement."""
 
 import json
+from datetime import date
 from pathlib import Path
 
 import numpy as np
@@ -10,6 +11,7 @@ import pytest
 from helpers.pipeline import REPO, config
 from xq.core.errors import ConfigError
 from xq.core.time import trading_day, trading_day_bounds
+from xq.datasets.spec import load_spec
 from xq.research.reports import (
     DiscoveryWindow,
     DiscoveryWindowError,
@@ -134,6 +136,16 @@ def test_discovery_window_from_the_fraction_ends_at_a_trading_day_start() -> Non
     assert window.end <= halfway < window.end + pd.Timedelta(days=1)
     assert window.end == pd.Timestamp("2023-09-26T21:00:00Z")
     assert "first 0.5" in window.rule
+
+
+def test_discovery_window_default_for_ds_base() -> None:
+    """With ds_base from 2015-01-01 (ADR 0062) the default ends at trading day 2020-05-15."""
+    cfg = config(REPO)
+    spec = load_spec(REPO / "experiments" / "configs" / "ds_base.yaml")
+    window = resolve_discovery_window(cfg, pd.Timestamp(spec.start))
+    assert window.start == pd.Timestamp("2015-01-01T22:00:00Z")
+    assert window.end == pd.Timestamp("2020-05-14T21:00:00Z")
+    assert trading_day(window.end) == date(2020, 5, 15)
 
 
 def test_discovery_window_with_a_fixed_end() -> None:

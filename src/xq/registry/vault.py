@@ -90,7 +90,12 @@ from xq.registry.bundles import (
     load_bundle,
     performance_history,
 )
-from xq.registry.gates import GateResultRef, latest_gate_result, record_gate_result
+from xq.registry.gates import (
+    EvidenceTier,
+    GateResultRef,
+    latest_gate_result,
+    record_gate_result,
+)
 from xq.registry.models import RegistryStateError, Status, SubjectKind
 from xq.tracking import registry
 from xq.tracking.db import session_factory
@@ -285,6 +290,8 @@ def run_vault_evaluation(
         evaluator="xq gate vault-evaluate",
         evidence_paths=[str(report), str(report.with_suffix(".md"))],
         run_id=run_id,
+        # risk-limit breaches read on the screening tier: promotes to vault_passed, not to paper
+        evidence_tier=EvidenceTier.SCREENING,
     )
     return VaultEvaluation(
         bundle.bundle_id, run_id, len(daily), sharpe, quantile, breaches, result, directory

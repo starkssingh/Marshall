@@ -5,16 +5,17 @@
 # of the quote after the execution latency. The builder pins the bar build, the quality run and a
 # config digest when it resolves this spec, and stores the resolved spec with the dataset.
 #
-# The source is the primary research feed, Dukascopy ticks in UTC (ADR 0057). The window is about
-# four years before the vault, as the plan asks; Dukascopy's history (from 2003-05-05) no longer
-# limits it, so a longer window is the owner's decision (docs/STATUS.md), taken before results.
-# `end` equals vault.start: research datasets never reach into the vault.
+# The source is the primary research feed, Dukascopy ticks in UTC (ADR 0057). The window starts on
+# 2015-01-01, the owner's decision taken before any result (ADR 0062, C-26 (6)); the owner downloads
+# from 2014-01-01 so the year before it is there for warm-up. Trading day 2015-01-01 is New Year's
+# Day (closed), so the start is that of trading day 2015-01-02, the first of 2015. Changing the
+# window needs an ADR. `end` equals vault.start: research datasets never reach into the vault.
 name: ds_base
 source: dukascopy
 instrument: xauusd
 base_timeframe: 15m
 price_basis: mid
-start: "2021-09-26T21:00:00Z"   # start of trading day 2021-09-27
+start: "2015-01-01T22:00:00Z"   # start of trading day 2015-01-02 (17:00 New York, EST)
 end: "2025-09-25T21:00:00Z"     # vault.start
 warmup: 10D
 context_timeframes: [1h, 4h, 1d]

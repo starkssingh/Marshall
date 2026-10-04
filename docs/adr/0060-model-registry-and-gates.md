@@ -6,6 +6,8 @@
   instruction to build MREG-001 … MREG-005 and GATE-001 … GATE-003 on synthetic data. Open points
   are flagged for the owner's review.
 - **Tasks:** MREG-001, MREG-002, MREG-003, MREG-005, MREG-004, GATE-001, GATE-002, GATE-003
+- **Amended by:** ADR 0062 (C-27): promotion to `paper` needs R3 recomputed on the event tier
+  (migration 0016); GATE-004 will record the SHA-256 of the signed GATE-003 review
 
 Everything here is tested on synthetic data only. No bundle has been gated on real data, and the
 vault has never been opened.

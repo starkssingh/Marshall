@@ -16,7 +16,7 @@ from helpers.datasets import QUALITY_RUN
 from helpers.gate_board import VAULT_QUALITY_RUN, build_world, register, xq
 from xq.core.config import AppConfig
 from xq.registry.bundles import get_bundle, performance_history
-from xq.registry.gates import latest_gate_result, promote, record_gate_result
+from xq.registry.gates import EvidenceTier, latest_gate_result, promote, record_gate_result
 from xq.registry.models import Status, SubjectKind
 from xq.registry.vault import VAULT_KIND
 from xq.tracking import registry
@@ -144,6 +144,7 @@ def test_the_vault_is_opened_once_per_validated_bundle(
         "walk_forward_interval.low",
     ]
     assert r3.values["checks"]["vault_access_logged"]["value"] == 1.0
+    assert r3.evidence_tier is EvidenceTier.SCREENING  # never promotes to paper (ADR 0062)
     assert r3.describe() in output
     vault = performance_history(engine, first, "vault")
     assert [str(d) for d in vault["trading_day"]] == [
