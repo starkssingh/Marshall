@@ -889,6 +889,12 @@ IDs from `docs/specs/development-plan.md`.
 
 ### Changed
 
+- C-26 (6) (owner's decision, ADR 0062): `experiments/configs/ds_base.yaml` starts on
+  2015-01-01 (`2015-01-01T22:00:00Z`, the start of trading day 2015-01-02; 2015-01-01 is closed),
+  fixed before any result; the data is downloaded from 2014-01-01. The discovery-window default
+  (fraction 0.5) now resolves to the start of trading day 2020-05-15. The H-0001 draft names the
+  window and stays unregistered. The README and `docs/runbooks/real-data.md` document the working
+  dukascopy-node CSV route (`-r 3 -re -fr`, the owner's monthly loop) (C-26 (1)).
 - C-15 (ADR 0061): the board configuration's `signal_timeframe` is replaced by
   `signal_timeframes` (the old key is refused); `BoardConfig.strategies()` returns a `BoardRule`
   (rule and timeframe) per `<name>@<timeframe>`; `rule_signal_bars` takes a timeframe. The

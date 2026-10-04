@@ -16,6 +16,7 @@ from helpers.pipeline import REPO, config, run_pipeline
 from xq.cli.main import app
 from xq.core.config import AppConfig
 from xq.core.errors import ConfigError, VaultAccessError
+from xq.core.time import trading_day, trading_day_bounds
 from xq.core.types import Timeframe
 from xq.data.catalog import Catalog
 from xq.datasets.builder import (
@@ -239,4 +240,9 @@ def test_base_spec_is_valid() -> None:
     assert spec.name == "ds_base"
     assert spec.source == "dukascopy"  # the primary research feed (ADR 0057)
     assert spec.end == pd.Timestamp("2025-09-25T21:00:00Z")
+    # the owner's window, fixed before any result (ADR 0062): the first trading day of 2015
+    start = pd.Timestamp(spec.start)
+    assert start == pd.Timestamp("2015-01-01T22:00:00Z")
+    assert trading_day(start) == date(2015, 1, 2)
+    assert trading_day_bounds(date(2015, 1, 2))[0] == start
     assert [tf.value for tf in spec.context_timeframes] == ["1h", "4h", "1d"]

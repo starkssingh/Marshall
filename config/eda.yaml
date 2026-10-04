@@ -7,6 +7,8 @@ discovery:
   # EDA reads only the discovery window: the first `fraction` of the non-vault span, from the
   # dataset's start to vault.start, ending at a trading-day start (plan: the first 50-60 %).
   # `end` (a UTC instant) replaces the fraction once it is fixed from the real data's depth.
+  # With ds_base from 2015-01-01 (ADR 0062) the fraction resolves to the start of trading day
+  # 2020-05-15 (2020-05-14T21:00:00Z).
   fraction: 0.5
   end: null
 
