@@ -16,8 +16,9 @@ that the stored content still hashes to its id: runtimes load only intact bundle
 run and strategy a bundle was built from) is provenance, not content: it is where the gate
 evaluator finds the evidence (GATE-001).
 
-`bundle_from_board_run` builds the bundle of a rule baseline of a baseline board run. A
-forecast-sign strategy needs registered model versions (ML-009) and is refused until they exist.
+`bundle_from_board_run` builds the bundle of a rule baseline of a baseline board run (a strategy
+``<name>@<timeframe>``; the bundle's ``signal_timeframe`` is the rule's own). A forecast-sign
+strategy needs registered model versions (ML-009) and is refused until they exist.
 
 **The active bundle of an environment** (MREG-005). `activate` points an environment (``paper``,
 ``prod``) at a bundle whose status allows it (paper: paper, live_eligible or live; prod: live);
@@ -31,8 +32,9 @@ the middle of handling one.
 **Performance history** (MREG-004). `append_performance` appends one row per trading day and
 source (``backtest``, ``vault``, ``paper``, ``live``): the net return on the capital, the net P&L
 and the trades closed, with the run that produced it. Days are appended in order and never
-rewritten. Registering a bundle from a board run appends its out-of-sample screen as its
-``backtest`` history (`append_board_history`); the vault evaluation appends ``vault`` rows
+rewritten. Registering a bundle from a board run appends its fold-aligned record (the daily net
+returns on the walk-forward test days, ``returns.parquet``; ADR 0061) as its ``backtest``
+history (`append_board_history`); the vault evaluation appends ``vault`` rows
 (GATE-002), paper and live trading their own later (PAPER-004, PAPER-006).
 """
 
@@ -258,7 +260,7 @@ def bundle_from_board_run(
             f"{strategy!r} is not a rule of board run {run_id}; a forecast-sign strategy needs "
             "registered model versions before it can be bundled (ML-009)"
         )
-    rule = rules[strategy]
+    rule, signal_timeframe = rules[strategy].rule, rules[strategy].timeframe
     spec = recorded_spec(engine, run.dataset_id)
     config: dict[str, Any] = {"rule": rule.model_dump(mode="json")}
     if rule.vol_target and board.vol_target is not None:
@@ -274,7 +276,7 @@ def bundle_from_board_run(
             kind="baseline_rule",
             name=strategy,
             config=config,
-            signal_timeframe=board.signal_timeframe,
+            signal_timeframe=signal_timeframe,
         ),
         risk_config=cfg.risk_config().model_dump(mode="json"),
         cost_model_version=cost_model_version(costs),

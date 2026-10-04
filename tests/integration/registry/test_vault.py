@@ -73,8 +73,11 @@ def test_the_vault_is_opened_once_per_validated_bundle(
     world: tuple[Path, AppConfig, Engine, str],
 ) -> None:
     root, cfg, engine, run_id = world
-    first = register(root, run_id, "tsmom_8")
-    second = register(root, run_id, "buy_and_hold")
+    first = register(root, run_id, "tsmom_8@4h")
+    second = register(root, run_id, "buy_and_hold@1h")
+    # a bundle's signal timeframe is its rule's, not the board's first (C-15)
+    assert get_bundle(engine, first).content.strategy.signal_timeframe == "4h"
+    assert get_bundle(engine, second).content.strategy.signal_timeframe == "1h"
     code, output = xq(root, "gate", "vault-token", first[:12], "--issued-by", "owner")
     assert code == 2
     assert "is draft: only a validated bundle" in output

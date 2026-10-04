@@ -19,6 +19,10 @@ financing) multiplied by k leaves no net P&L. Net P&L is almost linear in k (the
 charged on the widened side price), so k is found by the secant method on actual runs, starting
 from the linear estimate ``gross P&L / total costs``. It is 0 when the strategy loses before costs
 and infinite when it pays none. Latency is held at the model's own.
+
+With ``days``, every figure (Sharpe ratio, net and gross P&L, costs and the break-even multiplier)
+reads those trading days only, a day without activity counting as 0: a rule baseline screened over
+its full history is judged on its out-of-sample days (ADR 0061).
 """
 
 from __future__ import annotations
@@ -26,6 +30,7 @@ from __future__ import annotations
 import math
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
+from datetime import date
 
 import numpy as np
 import pandas as pd
@@ -153,6 +158,7 @@ def cost_stress(
     gates: GatesConfig,
     sigma_1m_bps: pd.Series | None = None,
     scenarios: Sequence[CostScenario] | None = None,
+    days: Sequence[date] | None = None,
 ) -> CostStressResult:
     """Screen `positions` under every scenario and find the break-even multiplier.
 
@@ -161,6 +167,8 @@ def cost_stress(
         periods_per_year: Annualization of the Sharpe ratio (``backtest.periods_per_year``).
         gates: The evidence policy (the R2 scenario's multipliers).
         scenarios: Scenarios to run (default `plan_scenarios`); the R2 scenario is always added.
+        days: Trading days every figure reads (default: every day the screen has); fills and
+            missed decisions are the whole screen's.
     """
     chosen = list(scenarios if scenarios is not None else plan_scenarios(gates))
     if GATE_SCENARIO not in {s.name for s in chosen}:
@@ -178,10 +186,13 @@ def cost_stress(
             sigma_1m_bps=sigma_1m_bps,
         )
 
+    def daily_of(result: BacktestResult) -> pd.DataFrame:
+        return result.daily if days is None else result.daily.reindex(list(days), fill_value=0.0)
+
     rows = []
     for scenario in chosen:
         result = screen(scenario)
-        daily = result.daily
+        daily = daily_of(result)
         rows.append(
             {
                 "scenario": scenario.name,
@@ -193,13 +204,13 @@ def cost_stress(
                 "net_sharpe": return_metrics(daily["return"], periods_per_year)["sharpe"],
                 "net_pnl": float(daily["net_pnl"].sum()),
                 "gross_pnl": float(daily["gross_pnl"].sum()),
-                "costs": _total_costs(result),
+                "costs": _total_costs(daily),
                 "fills": len(result.fills),
                 "missed": len(result.missed),
             }
         )
     table = pd.DataFrame(rows).set_index("scenario")
-    return CostStressResult(table, _break_even(screen), costs.result_label)
+    return CostStressResult(table, _break_even(lambda s: daily_of(screen(s))), costs.result_label)
 
 
 def _worse(rate: float, multiplier: float) -> float:
@@ -209,16 +220,17 @@ def _worse(rate: float, multiplier: float) -> float:
     return rate / multiplier if multiplier > 0 else math.inf
 
 
-def _total_costs(result: BacktestResult) -> float:
-    return float(result.daily[list(COST_COLUMNS)].to_numpy(np.float64).sum())
+def _total_costs(daily: pd.DataFrame) -> float:
+    return float(daily[list(COST_COLUMNS)].to_numpy(np.float64).sum())
 
 
-def _break_even(screen: Callable[[CostScenario], BacktestResult]) -> float:
-    """The all-cost multiplier with zero net P&L, by the secant method from the linear estimate."""
+def _break_even(screen: Callable[[CostScenario], pd.DataFrame]) -> float:
+    """The all-cost multiplier with zero net P&L, by the secant method from the linear estimate
+    (`screen` gives a scenario's daily figures)."""
 
     def net(k: float) -> tuple[float, float]:
-        result = screen(CostScenario.all_costs("break_even", k))
-        return float(result.daily["net_pnl"].sum()), _total_costs(result)
+        daily = screen(CostScenario.all_costs("break_even", k))
+        return float(daily["net_pnl"].sum()), _total_costs(daily)
 
     net_1, costs_1 = net(1.0)
     gross = net_1 + costs_1

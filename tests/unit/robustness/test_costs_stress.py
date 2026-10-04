@@ -189,3 +189,32 @@ def test_credited_financing_is_reduced_and_scenarios_are_checked() -> None:
         stress(intraday_longs(), drifting_quotes(1.0, 1), scenarios=[base, replace(base)])
     only = stress(intraday_longs(), drifting_quotes(1.0, 1), scenarios=[base])
     assert list(only.table.index) == ["baseline", GATE_SCENARIO]  # the gate's is always run
+
+
+def test_given_days_every_figure_reads_those_days_only() -> None:
+    # ADR 0061: a rule screened over its full history is stressed on its out-of-sample days.
+    positions, quotes = intraday_longs(), drifting_quotes(4.0, 2)
+    full = run_vectorized(positions, quotes, COSTS, CLOCK, capital=CAPITAL).daily
+    days = [*full.index[len(full) // 2 :], pd.Timestamp("2024-04-08").date()]  # and an idle day
+    result = stress(positions, quotes, days=days)
+    on_days = full.reindex(days, fill_value=0.0)
+    baseline = result.table.loc["baseline"]
+    assert baseline["net_pnl"] == pytest.approx(on_days["net_pnl"].sum())
+    assert baseline["gross_pnl"] == pytest.approx(on_days["gross_pnl"].sum())
+    assert baseline["costs"] == pytest.approx(
+        on_days[["spread_cost", "slippage_cost", "commission", "financing"]].to_numpy().sum()
+    )
+    returns = on_days["return"].to_numpy()
+    expected = returns.mean() / returns.std(ddof=1) * np.sqrt(252)
+    assert baseline["net_sharpe"] == pytest.approx(expected)
+    assert baseline["net_pnl"] < stress(positions, quotes).table.loc["baseline", "net_pnl"]
+    # the break-even multiplier zeroes the net P&L of those days
+    k = result.break_even_multiplier
+    at_k = run_vectorized(
+        positions,
+        stressed_quotes(quotes, k),
+        stressed_costs(COSTS, CostScenario.all_costs("check", k)),
+        CLOCK,
+        capital=CAPITAL,
+    )
+    assert abs(at_k.daily["net_pnl"].reindex(days, fill_value=0.0).sum()) < 1e-6 * baseline["costs"]

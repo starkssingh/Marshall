@@ -1,5 +1,6 @@
 """BASE-002: rule baselines give known positions and trades on hand-built series; the random-entry
-null keeps the template's trade count, holding times and sides."""
+null keeps the template's trade count, holding times and sides. C-15 (ADR 0061): each rule's
+warm-up, computed from its parameters, is the bar of its first possible position."""
 
 import math
 from collections import Counter
@@ -26,6 +27,7 @@ from xq.models.baselines import (
     random_entry,
     random_entry_null,
     rule_exposure,
+    rule_warmup,
     signal_bars,
     time_series_momentum,
     zscore_reversion,
@@ -97,12 +99,66 @@ def test_donchian_breakout_channel_exit_and_reversal() -> None:
 
 
 def test_donchian_atr_stop_is_fixed_at_entry() -> None:
-    # Long at bar 5 (close 103) with ATR 2.25 and a 0.5-ATR stop: 101.875. The 20-bar exit channel
-    # is still unknown, so only the stop closes the trade, at bar 6 (close 101.5); no reversal,
+    # Long at bar 5 (close 103) with ATR 2.25 and a 0.5-ATR stop: 101.875. The 2-bar exit low
+    # (99.5) is far below, so only the stop closes the trade, at bar 6 (close 101.5); no reversal,
     # since 101.5 is above the 3-bar low (99.5).
     frame = bars(100, 100.5, 100, 100.5, 100, 103, 101.5, 101, 101.2, 101)
-    signal = donchian_breakout(frame, {"entry": 3, "exit": 20, "atr_window": 2, "atr_stop": 0.5})
+    signal = donchian_breakout(frame, {"entry": 3, "exit": 2, "atr_window": 2, "atr_stop": 0.5})
     assert signal.tolist() == [0, 0, 0, 0, 0, 1, 0, 0, 0, 0]
+
+
+def test_donchian_waits_for_every_channel() -> None:
+    # The 3-bar entry channel and the ATR are known from bar 3, the 6-bar exit channel only from
+    # bar 6 (ADR 0061): the breakout at bar 5 is not taken, the one at bar 6 is.
+    frame = bars(100, 100.5, 100, 100.5, 100, 103, 104, 104.5)
+    params = {"entry": 3, "exit": 6, "atr_window": 2, "atr_stop": 2.0}
+    assert donchian_breakout(frame, params).tolist() == [0, 0, 0, 0, 0, 0, 1, 1]
+    assert donchian_breakout(frame, {**params, "exit": 2}).tolist()[5] == 1.0
+
+
+def trend(n: int) -> pd.DataFrame:
+    """A steady uptrend: every bar closes one point above the last, its high above the previous
+    high by half a point."""
+    return bars(*(100.0 + i for i in range(n)), spread=0.5)
+
+
+TARGET = VolTargetConfig(annual_vol=0.10, lookback=12, max_exposure=2.0)
+WARMUPS = [
+    ("buy_and_hold", {}, False, 1),
+    ("time_series_momentum", {"lookback": 8}, False, 9),
+    ("time_series_momentum", {"lookback": 252}, False, 253),
+    # the z-score of a steady trend's latest close is 1.60 over 20 bars: entry 1.0 is reached
+    ("zscore_reversion", {"lookback": 20, "entry": 1.0, "exit": 0.0}, False, 20),
+    ("ma_crossover", {"fast": 4, "slow": 12}, False, 12),
+    ("ma_crossover", {"fast": 50, "slow": 200}, False, 200),
+    ("donchian_breakout", {"entry": 20, "exit": 10, "atr_window": 20, "atr_stop": 2.0}, False, 21),
+    ("donchian_breakout", {"entry": 8, "exit": 15, "atr_window": 4, "atr_stop": 2.0}, False, 16),
+    ("donchian_breakout", {"entry": 8, "exit": 4, "atr_window": 30, "atr_stop": 2.0}, False, 31),
+    ("buy_and_hold", {}, True, 13),  # the volatility target's 12 returns need 13 bars
+    ("time_series_momentum", {"lookback": 8}, True, 13),
+    ("time_series_momentum", {"lookback": 20}, True, 21),  # the rule's own warm-up is longer
+    ("ma_crossover", {"fast": 4, "slow": 12}, True, 13),
+]
+
+
+@pytest.mark.parametrize(("rule", "params", "vol", "expected"), WARMUPS)
+def test_warm_up_is_the_bar_of_the_first_position_on_a_trend(
+    rule: str, params: dict[str, float], vol: bool, expected: int
+) -> None:
+    strategy = RuleStrategyConfig(rule=rule, params=params, vol_target=vol)
+    assert rule_warmup(strategy, TARGET) == expected
+    exposure = rule_exposure(trend(expected + 30), strategy, vol_target=TARGET)
+    first = int(np.flatnonzero(exposure.to_numpy() != 0)[0]) + 1  # bars counted from 1
+    assert first == expected
+
+
+def test_warm_up_configuration_errors() -> None:
+    with pytest.raises(ConfigError, match="unknown rule"):
+        rule_warmup(RuleStrategyConfig(rule="astrology"))
+    with pytest.raises(ConfigError, match="no target is set"):
+        rule_warmup(RuleStrategyConfig(rule="buy_and_hold", vol_target=True))
+    with pytest.raises(ConfigError, match="'slow' is missing"):
+        rule_warmup(RuleStrategyConfig(rule="ma_crossover", params={"fast": 2}))
 
 
 def test_vol_targeting_scales_to_the_target_and_caps() -> None:

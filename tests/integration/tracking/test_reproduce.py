@@ -33,7 +33,7 @@ BOARD = {
     "targets": ["fwd_ret_mid_1h"],
     "walk_forward": {"min_train": "5D", "test_len": "2D", "embargo": "1h"},
     "forecast_baselines": ["zero_return", "historical_mean", "ar1"],
-    "signal_timeframe": "1h",
+    "signal_timeframes": ["1h"],
     "rules": {
         "buy_and_hold": {"rule": "buy_and_hold"},
         "tsmom_8": {"rule": "time_series_momentum", "params": {"lookback": 8}},
@@ -188,7 +188,7 @@ def test_a_deleted_dataset_is_rebuilt_from_its_recorded_spec(
 
 
 def test_a_changed_result_is_not_reproduced(root: Path, engine: Engine, board_run: str) -> None:
-    name = "board/buy_and_hold/sharpe"
+    name = "board/buy_and_hold@1h/sharpe"
     with session_factory(engine)() as session:
         (original,) = session.scalars(
             select(Metric.value).where(Metric.run_id == board_run, Metric.name == name)
