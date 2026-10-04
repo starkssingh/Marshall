@@ -8,6 +8,8 @@
   source.
 - **Tasks:** DATA-013 (promoted from an optional secondary feed to the primary feed); DATA-011
   later
+- **Amended by:** ADR 0062 (C-26): the dukascopy-node CSV route is the working route, exported
+  with `-r 3 -re -fr` (`-re` alone aborts on the empty weekend hours); decisions 2 to 5 approved
 
 ## Context
 
@@ -160,7 +162,7 @@ Whether it works now could not be checked from the sandbox.
   and the downloader stops after four failed attempts on one hour, naming the fallback.
 - The fallback: the owner runs dukascopy-node, which now uses the JSON API, and exports one tick
   CSV per month with Unix-ms timestamps and volumes. The `dukascopy` source reads those files
-  (decision 2); the README gives the command.
+  (decision 2); the README gives the command (corrected in ADR 0062: `-r 3 -re -fr`).
 - The CSV route has no manifest or no-overwrite guarantee of its own. The raw store still hashes
   every file at ingest (ADR 0005), and re-exported files with changed bytes coexist and are
   flagged as duplicates in cleaning.

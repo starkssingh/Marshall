@@ -82,25 +82,19 @@ with the repository, the repository wins.
     nor dukascopy-node could be reached from the sandbox.
   - The previous sprint, 12 B (ROB-004, ROB-005, ROB-008, `xq validate-strategy`, ADR 0055,
     ADR 0056), was merged in PR #15. Its review (C-25) was implemented in Sprint 13.
-- **Owner's next step (C-8):** download and ingest on your machine, from the repository root.
-  Market data stays under `data/`, which is git-ignored.
+- **Owner's next step (C-8):** download and ingest on your Mac, from the repository root, with
+  the dukascopy-node CSV route (ADR 0062): the monthly loop from 2014-01 in
+  [`docs/runbooks/real-data.md`](runbooks/real-data.md) (`-r 3 -re -fr`, one CSV per month,
+  partial files deleted on failure, `caffeinate`, a log). Market data stays under `data/`, which
+  is git-ignored. March 2024 has already run end to end (328 pass / 25 warn / 3 fail, reported by
+  the owner).
 
   ```bash
   uv sync
-  uv run xq fetch dukascopy --instrument xauusd --from 2003-05-05 --to <yesterday> --out data/downloads
-  uv run xq ingest --source dukascopy --path data/downloads/XAUUSD
+  uv run xq ingest --source dukascopy --path data/downloads/csv
   ```
 
-  - The full history is about 205,000 hourly requests at two a second, so more than a day. It
-    can run in pieces (for example a year at a time) and resumes where it stopped. If time is
-    short, fetch `--from 2021-09-01` first (the base dataset's window, and more than the year
-    C-8 needs), then the earlier years.
-  - If `xq fetch` stops with "no answer (timed out) after 4 attempts", the `.bi5` endpoint is
-    down (reported since July 2026, ADR 0057). Use the dukascopy-node CSV route in the README
-    (one CSV per month), then `uv run xq ingest --source dukascopy --path data/downloads/csv`,
-    and tell Claude which route was used.
-  - Then the next session runs, where the ingested `data/` directory is available (it is never
-    committed, so on your machine or with that directory attached):
+  - Then the C-8 session runs in Claude Code on the owner's Mac, where `data/` is:
 
     ```bash
     uv run xq clean --source dukascopy
@@ -112,7 +106,11 @@ with the repository, the repository wins.
     `xq validate` grades every ingested trading day before the vault (`--start`/`--end` narrow
     it); the report is written to `reports/quality/<run id>/report.md`. That session reads the
     report per check and per year, compares the calendar with Dukascopy's real hours (ADR 0057,
-    decision 4), then prepares the DQ-008 human review. It runs nothing else on the data.
+    decision 4; the March 2024 observation below), then prepares the DQ-008 human review. It
+    runs nothing else on the data.
+  - **Observation for DQ-004 / DQ-008** (the calendar is not changed yet, ADR 0062): Dukascopy
+    XAUUSD's last Friday tick on 2024-03-01 was at 20:59:59 UTC, an hour before the calendar's
+    22:00 UTC weekly close (17:00 New York, EST).
 - **Working system:** library code and CLI, exercised by the tests.
   - **Event backtester** (`run_event_backtest`, tick or bar mode). It runs the whole chain the
     plan prescribes:
@@ -343,10 +341,10 @@ placeholders until a venue exists. Claude's choices within it were reviewed in C
 
 - No real market data exists. Sprints 2–6 and 11 are tested only on synthetic data (Sprints 5 and
   6 also on simulated processes); nothing is validated on real data (C-8).
-- The Dukascopy `.bi5` endpoint (`datafeed.dukascopy.com`) has been reported to time out since
-  7 July 2026, and dukascopy-node moved to a JSON API. Neither could be reached from the sandbox,
-  so `xq fetch dukascopy` is tested only against a scripted vendor and a local HTTP server. It
-  stops after four failed attempts and names the dukascopy-node CSV fallback (ADR 0057, C-26).
+- The Dukascopy `.bi5` endpoint (`datafeed.dukascopy.com`) answered HTTP 503 on the owner's
+  machine on 2026-10-04 (reported to time out since 7 July 2026). The dukascopy-node CSV route
+  is the working route (ADR 0062). `xq fetch dukascopy` is kept but tested only against a
+  scripted vendor and a local HTTP server.
 - The calendar was not compared with Dukascopy's published hours or trading-breaks calendar: the
   domain is blocked here. `xq validate` on real data settles it (ADR 0057, decision 4).
 - Dukascopy tick volumes are kept in the raw mirror only; canonical tick sizes are NaN (units

@@ -143,14 +143,39 @@ docker compose --profile research run --rm xq xq --version
 
 The primary research feed is Dukascopy's XAUUSD bid/ask tick history (UTC timestamps, ticks
 from 2003-05-05), source `dukascopy` in `config/base.yaml` (ADR 0057). The research sandbox has
-no internet access, so the download runs on your machine:
+no internet access, so the download runs on your machine, and real-data sessions run in Claude
+Code there (ADR 0062). `data/` is git-ignored: market data is never committed.
+
+**The working route: dukascopy-node CSVs, one per month** (ADR 0062). On 2026-10-04 the `.bi5`
+endpoint answered HTTP 503, while dukascopy-node (Node.js, which now uses Dukascopy's JSON API)
+exported March 2024 and the whole pipeline ran on it. One CSV per month, with Unix-millisecond
+timestamps (the default) and volumes; `-to` is exclusive:
+
+```bash
+npx dukascopy-node -i xauusd -from 2024-03-01 -to 2024-04-01 -t tick -f csv -v \
+  -bs 5 -bp 1000 -r 3 -re -fr -dir data/downloads/csv -fn XAUUSD_2024-03
+```
+
+`-re` retries hours that come back empty, and `-fr` keeps the export going once an hour's three
+retries (`-r 3`) are spent: with `-re` alone the export aborts on the empty weekend hours. An hour
+skipped that way is missing from the file; `xq validate`'s gap checks report it, and the month can
+be exported again. The owner's loop over months (a partial file is deleted when an export fails,
+`caffeinate` keeps the Mac awake, everything is logged) is in
+[`docs/runbooks/real-data.md`](docs/runbooks/real-data.md). The `dukascopy` source reads these
+CSVs (`timestamp,askPrice,bidPrice,askVolume,bidVolume`). Keep the default UTC offset
+(`-utc 0`), and do not ingest both formats for the same period.
+
+The base dataset `experiments/configs/ds_base.yaml` starts on 2015-01-01 (ADR 0062); download from
+2014-01-01, so the year before it is there for warm-up and the quality report.
+
+**The `.bi5` downloader**, `xq fetch dukascopy`, stays for the day the endpoint answers again:
 
 ```bash
 uv run xq fetch dukascopy --instrument xauusd --from 2003-05-05 --to 2026-09-27 --out data/downloads
 ```
 
-- **Output.** Under `data/`, which is git-ignored: market data is never committed. One file per
-  UTC hour with ticks, exactly the vendor's bytes (LZMA-compressed records), at
+- **Output.** Under `data/`: one file per UTC hour with ticks, exactly the vendor's bytes
+  (LZMA-compressed records), at
   `data/downloads/XAUUSD/<yyyy>/<mm>/<dd>/XAUUSD_<yyyy-mm-dd>_<HH>h_ticks.bi5`. Hours without
   ticks get no file.
 - **Checksummed.** `data/downloads/XAUUSD/manifest.jsonl` has one line per hour: `ok` with the
@@ -171,25 +196,10 @@ uv run xq fetch dukascopy --instrument xauusd --from 2003-05-05 --to 2026-09-27 
   `--retry-empty` asks again for hours recorded empty.
 - **`--to` must be before today (UTC)**; `--from` may not be earlier than 2003-05-05.
 
-**If the download fails with timeouts.** Since 7 July 2026 `datafeed.dukascopy.com`, the endpoint
-that serves the `.bi5` files, has been reported to time out, and dukascopy-node moved to a JSON
-API in response (ADR 0057). It could not be tested from the sandbox. If `xq fetch` stops with
-"no answer (timed out) after 4 attempts", use dukascopy-node (Node.js) instead, one CSV per month
-with Unix-millisecond timestamps (the default) and volumes; `-to` is exclusive:
-
-```bash
-npx dukascopy-node -i xauusd -from 2024-03-01 -to 2024-04-01 -t tick -f csv -v \
-  -bs 5 -bp 1000 -r 3 -re -dir data/downloads/csv -fn XAUUSD_2024-03
-```
-
-The `dukascopy` source reads these CSVs (`timestamp,askPrice,bidPrice,askVolume,bidVolume`)
-too. Keep the default UTC offset (`-utc 0`), and do not ingest both formats for the same
-period.
-
 Then run the pipeline on the downloaded files (each step can be re-run safely):
 
 ```bash
-uv run xq ingest --source dukascopy --path data/downloads/XAUUSD   # or data/downloads/csv
+uv run xq ingest --source dukascopy --path data/downloads/csv      # or data/downloads/XAUUSD (.bi5)
 uv run xq clean --source dukascopy
 uv run xq build-bars --source dukascopy
 uv run xq spread-stats --source dukascopy
