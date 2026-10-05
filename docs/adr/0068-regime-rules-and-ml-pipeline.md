@@ -40,3 +40,27 @@ is evidence.
    each fold's cut-offs equal the quantiles of its own training rows, are unchanged when that
    fold's test rows change (later folds, which train on them, do change); too few training rows
    label nothing.
+
+## ML-001 — the Forecaster protocol and wrappers (`xq.models.base`)
+
+1. **`Forecaster`** (a protocol): `name`, `task`, `fit(x, y, sample_weight=, eval_set=)` returning
+   itself, `predict` (the forecast, or the class 0/1), `predict_proba` (P(y = 1), classification
+   only), `save(path)` and `model_card()`. The walk-forward `Estimator` of WF-002 stays as it is
+   for the baselines.
+2. **`SklearnForecaster`** wraps one scikit-learn estimator of a registered family
+   (`forecaster_spec`, `build_forecaster`): `logistic` (elastic net: `C`, `l1_ratio`, saga) and
+   `ridge` (`alpha`) in `xq.models.linear`, `random_forest` (shallow, `min_samples_leaf`,
+   `max_samples` reduced for overlapping labels) in `xq.models.trees`. It is seeded; refuses
+   missing or infinite inputs (the pipeline drops such rows), a classifier target other than 0/1
+   or with one class, and negative weights; remembers its feature columns and refuses another
+   order at prediction. `eval_set` is accepted by every forecaster and used only by a family that
+   stops early on it (none yet).
+3. **Dependencies:** scikit-learn (the estimators, isotonic and Platt calibration in ML-002) and
+   joblib (the artifact format of ML-009), both added in this sprint; mypy ignores their missing
+   stubs as for scipy.
+4. **Layout:** `xq.models.linear` and `xq.models.trees` are the plan's files; the family registry
+   is a function in `xq.models.base` (`forecaster_spec`), importing them lazily.
+5. **Known truth** (`tests/unit/models/test_forecasters.py`): every family conforms (fit with
+   weights and an eval set, predictions as float arrays, probabilities in [0, 1] whose 0.5 cut is
+   the class, a card, a save and load that predicts the same), learns a planted linear signal, is
+   identical under a fixed seed, and refuses what it cannot use.

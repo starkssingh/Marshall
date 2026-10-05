@@ -1022,6 +1022,12 @@ IDs from `docs/specs/development-plan.md`.
   (`state`, `label`, `p_<state>`, `regime_age`). Settings in `config/regimes.yaml`. Tested: hand
   labels, truncation invariance, per-fold cut-offs blind to their own test rows. ADR 0068.
 
+- ML-001: the `Forecaster` protocol (`fit` with sample weights and an eval set, `predict`,
+  `predict_proba`, `save`/`load`, `model_card`) and `SklearnForecaster` wrappers of registered
+  families: `logistic` and `ridge` (`xq.models.linear`), `random_forest` (`xq.models.trees`);
+  seeded, refusing missing inputs and reordered columns. Dependencies scikit-learn and joblib.
+  Tested: protocol conformance of every family, determinism under a fixed seed. ADR 0068.
+
 ### Changed
 
 - C-33 (owner's decision, ADR 0067), DS-001: `experiments/configs/ds_core.yaml`, `ds_base`'s
