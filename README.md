@@ -68,7 +68,8 @@ one-time vault evaluation (one token per validated bundle, ever; R3 recorded). I
 to end on synthetic ticks against a test vault start; the vault has never been opened.
 The baseline board now runs the revised H-0001 (C-15, ADR 0061): every rule on 1d and 1h signal
 bars (`<name>@<timeframe>`, 36 strategies with the forecast-sign ones), evaluated over the full
-pre-vault history after its own warm-up, with the fold-aligned view (the same returns on the
+pre-vault history from the dataset's first trading day (warmed up on quality-gated signal bars
+from before the dataset's start, C-29, ADR 0064), with the fold-aligned view (the same returns on the
 walk-forward test days) kept in `returns.parquet` for paired comparisons, validation and the
 registry, and descriptive year and session slices. H-0001 is still unregistered: its windows
 are set from the real data's depth at registration. Synthetic data only.

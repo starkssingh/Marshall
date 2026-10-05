@@ -961,6 +961,17 @@ IDs from `docs/specs/development-plan.md`.
 
 ### Changed
 
+- C-29 (owner's decision, ADR 0064), BASE-005: rule warm-ups may read signal bars from before the
+  dataset's start, up to each rule's warm-up length: the same source, bar build and price basis,
+  complete bars only, before the vault, without the spec's excluded days, every day gated by the
+  dataset's quality run (`pre_start_bars`, `warmed_signal_bars`). Every rule is evaluated from the
+  dataset's first decision (one shared evaluation start); missing or gate-failed pre-start bars
+  stop the board (`BoardError`). The warm-up guard reads the exposure before the warm-up bar. The
+  report shows `Warm-up bars (pre-start)` and `board.json` `pre_start_bars`; `xq validate-strategy`
+  rebuilds rules from the same warmed bars. The H-0001 draft (unregistered) and the board's
+  comments say so. Tested: shared start, the pre-start bars equal the catalog's, missing and
+  gate-failed pre-start bars refused, the guard; the board-based suites start their synthetic
+  ticks a week earlier.
 - ARCH-004 (owner's decision, ADR 0062): third-party loggers named in `logging.third_party`
   (`matplotlib`, `PIL`, `fontTools`) are held at `logging.third_party_level` (WARNING) whatever
   the root level, so CLI output is not flooded with matplotlib's `findfont` debug lines. Tested at

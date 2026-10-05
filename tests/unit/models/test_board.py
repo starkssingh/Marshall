@@ -132,6 +132,7 @@ def test_rendered_board_marks_every_net_row() -> None:
         "target": None,
         "signal_timeframe": "1d",
         "warmup_bars": 1,
+        "pre_start_bars": 0,
         "period": "full_history",
         "evaluation_start": "2024-01-02 00:00:00+00:00",
         "evaluation_days": 3,
@@ -163,7 +164,7 @@ def test_rendered_board_marks_every_net_row() -> None:
     assert len(rows) == 5  # the board, the fold-aligned view and one year slice
     assert all(line.endswith(f"| {SCREENING_LABEL} |") for line in rows)
     assert "rule signals on 1d, 1h bars" in text
-    assert "| hold | — | 1d | 1 | full_history | 2024-01-02 00:00:00+00:00 | 3 |" in text
+    assert "| hold | — | 1d | 1 (0) | full_history | 2024-01-02 00:00:00+00:00 | 3 |" in text
     assert "## Fold-aligned view — descriptive comparison, no p-values" in text
     assert "### By year — descriptive" in text
     assert "### By session — descriptive" in text

@@ -23,8 +23,9 @@ forecast_baselines: [zero_return, random_walk, historical_mean, climatology]
 # Rules run on the daily (17:00 New York roll) and the hourly context bars (H-0001, ADR 0035), each
 # strategy named <name>@<timeframe>, and are traded on the 15m decision grid at the first decision
 # after a signal bar is available. Lookbacks count bars of the signal timeframe (ADR 0041). A rule
-# is screened over the full pre-vault history and evaluated from the first decision after its own
-# warm-up (the bars its lookbacks and volatility target need, computed from its parameters); its
+# is screened over the full pre-vault history and evaluated from the dataset's first decision, like
+# every rule; its warm-up (the bars its lookbacks and volatility target need, computed from its
+# parameters) reads quality-gated signal bars from before the dataset's start (C-29, ADR 0064); its
 # fold-aligned view (the same returns on the walk-forward test days) is stored for comparison and
 # is not a trial (ADR 0061). 6 rules x plain/vol x 2 timeframes = 24 rule strategies, plus 4
 # targets x 3 forecast-sign strategies = 36, H-0001's trial budget.

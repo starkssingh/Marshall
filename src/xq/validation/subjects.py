@@ -73,13 +73,13 @@ from xq.datasets.builder import (
     read_manifest,
     recorded_spec,
 )
-from xq.models.baselines import VolTargetConfig, forecast_baseline
+from xq.models.baselines import VolTargetConfig, forecast_baseline, rule_warmup
 from xq.models.board import (
     BoardConfig,
     ScreeningContext,
     rule_positions,
-    rule_signal_bars,
     screening_context,
+    warmed_signal_bars,
 )
 from xq.robustness.costs_stress import CostStressResult, cost_stress, plan_scenarios
 from xq.robustness.delay import delayed_positions
@@ -149,7 +149,7 @@ def board_subject(
     days = pd.Index(context.oos_days, name="trading_day")
     family = pd.DataFrame(recorded.to_numpy(np.float64), index=days, columns=recorded.columns)
 
-    rebuild = _rule(cfg, board, strategy, context) or _forecast(
+    rebuild = _rule(cfg, engine, board, strategy, context) or _forecast(
         engine, run, board, targets, strategy, context
     )
     if rebuild is None:
@@ -244,13 +244,17 @@ class _Rebuild:
 
 
 def _rule(
-    cfg: AppConfig, board: BoardConfig, strategy: str, context: ScreeningContext
+    cfg: AppConfig, engine: Engine, board: BoardConfig, strategy: str, context: ScreeningContext
 ) -> _Rebuild | None:
     rules = board.strategies()
     if strategy not in rules:
         return None
     rule, timeframe = rules[strategy].rule, rules[strategy].timeframe
-    bars, bar_periods = rule_signal_bars(cfg, context.features, timeframe, context.periods_per_year)
+    # The board's own signal bars, with the pre-start warm-up of the rule as configured (C-29); a
+    # neighbour with a longer warm-up reads the same bars and stays flat a little longer.
+    bars, bar_periods, _ = warmed_signal_bars(
+        cfg, engine, context, strategy, timeframe, rule_warmup(rule, board.vol_target)
+    )
     constants: dict[str, Any] = {"params": dict(rule.params)}
     if rule.vol_target and board.vol_target is not None:
         constants["vol_target"] = board.vol_target.model_dump(mode="json")

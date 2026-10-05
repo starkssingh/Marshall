@@ -20,10 +20,14 @@ the same metrics, inside an experiment run:
    signal bars per year (the gate periods per year for daily bars, times the bars in a regular
    trading day below that). A rule's parameters are fixed in advance, so it needs no training
    window: it is screened over **every** decision of the dataset, and its **evaluation period**
-   (``full_history``) runs from the first decision at or after the availability of its warm-up
-   bar (`rule_warmup`, computed from its parameters) to the dataset's end, before the vault. A
-   rule holding a position before its evaluation starts means the warm-up formula is wrong, and
-   the board stops (`BoardError`); so does a dataset too short for a rule's warm-up.
+   (``full_history``) runs from the dataset's first decision to its end, before the vault: every
+   rule shares one evaluation start (C-29, ADR 0064). Its warm-up (`rule_warmup`, computed from
+   its parameters) may read signal bars from before the dataset's start, up to that length: the
+   same source, bar build and price basis, complete bars only, before the vault, without the
+   days the spec excludes, and every trading day they touch gated by the dataset's quality run
+   (`pre_start_bars`). Missing or gate-failed pre-start bars stop the board (`BoardError`). A
+   rule whose exposure is non-zero before its warm-up bar means the warm-up formula is wrong,
+   and the board stops too.
 4. **Screening.** Each strategy's exposures go through the vectorized screener (BT-002) with the
    configured cost model, on the usable quotes of the dataset's source (loaded a month at a time
    and reduced to the quotes the screener can read, `required_quotes`), with slippage from the
@@ -95,10 +99,14 @@ from xq.core.seeds import derive_seed
 from xq.core.time import trading_day, trading_day_bounds, trading_days
 from xq.core.types import Timeframe
 from xq.data.calendar import NAT_NS, MarketClock, regular_trading_day
+from xq.data.catalog import Catalog
+from xq.data.sessions import build_session_table
+from xq.datasets.base_features import AVAILABLE_AT
 from xq.datasets.builder import load_dataset, read_manifest, usable_quotes
 from xq.datasets.spec import DatasetSpec
 from xq.models.base import ModelConfig
 from xq.models.baselines import (
+    SIGNAL_COLUMNS,
     RuleStrategyConfig,
     VolTargetConfig,
     forecast_baseline,
@@ -109,6 +117,7 @@ from xq.models.baselines import (
     rule_warmup,
     signal_bars,
 )
+from xq.quality.gate import QualityGateError, gate_partitions
 from xq.robustness.costs_stress import CostScenario, stressed_costs
 from xq.robustness.slicing import (
     SESSION,
@@ -150,6 +159,8 @@ SLICES_LABEL = "descriptive (not tested: no p-values, no trials)"
 RETURNS_ARTIFACT = "baseline_returns"
 EVALUATION_RETURNS_ARTIFACT = "baseline_returns_evaluation"
 _BPS = 1e4
+#: Open trading days loaded beyond a warm-up's estimate, for early closes and missing bars.
+PRE_START_MARGIN_DAYS = 5
 
 
 class BoardError(XQError):
@@ -261,6 +272,8 @@ class _Strategy:
     period: str
     timeframe: str | None = None
     warmup_bars: int | None = None
+    #: Signal bars read from before the dataset's start for the warm-up (C-29).
+    pre_start_bars: int | None = None
 
 
 @dataclass(frozen=True)
@@ -441,7 +454,7 @@ def run_baseline_board(
         )
         forecast_rows.extend(rows)
         strategies.extend(made)
-    strategies.extend(_rule_strategies(cfg, context, board))
+    strategies.extend(_rule_strategies(cfg, run.engine, context, board))
 
     family = _family(run)
     capital = context.capital
@@ -481,6 +494,7 @@ def run_baseline_board(
             "target": strategy.target,
             "signal_timeframe": strategy.timeframe,
             "warmup_bars": strategy.warmup_bars,
+            "pre_start_bars": strategy.pre_start_bars,
             "period": strategy.period,
             "evaluation_start": str(strategy.start),
             "evaluation_days": len(strategy.days),
@@ -508,7 +522,8 @@ def run_baseline_board(
 
     strategy_frame = pd.DataFrame(rows)
     if len(strategy_frame):
-        strategy_frame["warmup_bars"] = strategy_frame["warmup_bars"].astype("Int64")
+        for column in ("warmup_bars", "pre_start_bars"):
+            strategy_frame[column] = strategy_frame[column].astype("Int64")
     forecast_frame = pd.DataFrame(forecast_rows)
     returns_frame = pd.DataFrame(
         {s.name: fold.to_numpy() for s, _, _, fold in evaluated},
@@ -697,69 +712,139 @@ def _forecast_baselines(
 
 
 def _rule_strategies(
-    cfg: AppConfig, context: ScreeningContext, board: BoardConfig
+    cfg: AppConfig, engine: Engine, context: ScreeningContext, board: BoardConfig
 ) -> list[_Strategy]:
-    """Every rule strategy on every signal timeframe, positioned on every decision, with its
-    warm-up and evaluation period (module docstring, item 3)."""
-    signal: dict[str, tuple[pd.DataFrame, int]] = {}
+    """Every rule strategy on every signal timeframe, positioned on every decision, warmed up on
+    its own pre-start bars and evaluated from the dataset's first decision (module docstring,
+    item 3)."""
     strategies = []
+    start = pd.Timestamp(context.decisions[0])
+    days = list(context.days)
     for name, entry in board.strategies().items():
         rule, timeframe = entry.rule, entry.timeframe
-        if timeframe not in signal:
-            signal[timeframe] = rule_signal_bars(
-                cfg, context.features, timeframe, context.periods_per_year
-            )
-        bars, bar_periods = signal[timeframe]
-        positions = rule_positions(bars, rule, board.vol_target, bar_periods, context.decisions)
         warmup = rule_warmup(rule, board.vol_target)
-        start = evaluation_start(name, bars, warmup, context.decisions)
-        early = positions.loc[(positions.index < start) & (positions.to_numpy() != 0)]
+        bars, bar_periods, pre_start = warmed_signal_bars(
+            cfg, engine, context, name, timeframe, warmup
+        )
+        exposure = rule_exposure(
+            bars, rule, vol_target=board.vol_target, periods_per_year=bar_periods
+        )
+        early = exposure.iloc[: warmup - 1]
+        early = early.loc[early.to_numpy() != 0]
         if len(early):
             raise BoardError(
-                f"rule {name} holds a position at {early.index[0]}, before its evaluation starts "
-                f"at {start} (warm-up {warmup} {timeframe} bars): the warm-up formula is wrong"
+                f"rule {name} holds a position at {early.index[0]}, before its warm-up bar "
+                f"(warm-up {warmup} {timeframe} bars): the warm-up formula is wrong"
             )
-        days = sorted(
-            {d.item() for d in trading_days(context.decisions[context.decisions >= start])}
-        )
         strategies.append(
             _Strategy(
                 name,
                 "rule_vol" if rule.vol_target else "rule",
                 None,
                 {"rule": rule.rule, **rule.params},
-                positions,
+                positions_at(context.decisions, exposure),
                 start=start,
                 days=days,
                 period=FULL_HISTORY,
                 timeframe=timeframe,
                 warmup_bars=warmup,
+                pre_start_bars=pre_start,
             )
         )
     return strategies
 
 
-def evaluation_start(
-    name: str, bars: pd.DataFrame, warmup: int, decisions: pd.DatetimeIndex
-) -> pd.Timestamp:
-    """The first decision at or after the availability of a rule's warm-up bar (the
-    `warmup`-th signal bar).
+def warmed_signal_bars(
+    cfg: AppConfig,
+    engine: Engine,
+    context: ScreeningContext,
+    name: str,
+    timeframe: str,
+    warmup: int,
+) -> tuple[pd.DataFrame, int, int]:
+    """Rule `name`'s signal bars of `timeframe`: the dataset's, preceded by as many pre-start
+    bars as its warm-up needs to be complete at the dataset's first decision (C-29).
+
+    Returns:
+        The signal bars, the signal bars per year (`rule_signal_bars`) and how many of the bars
+        come from before the dataset's start.
 
     Raises:
-        BoardError: naming the rule, if the dataset is too short for its warm-up.
+        BoardError: if the dataset has no context bars of `timeframe`, or the pre-start bars the
+            warm-up needs are missing or fail the quality gate.
     """
-    if len(bars) < warmup:
+    bars, periods = rule_signal_bars(cfg, context.features, timeframe, context.periods_per_year)
+    first = pd.Timestamp(context.decisions[0])
+    needed = warmup - int((bars.index <= first).sum())
+    if needed <= 0:
+        return bars, periods, 0
+    before = pre_start_bars(
+        cfg, engine, context.spec, Timeframe(timeframe), pd.Timestamp(bars.index[0]), needed, name
+    )
+    return pd.concat([before, bars]), periods, needed
+
+
+def pre_start_bars(
+    cfg: AppConfig,
+    engine: Engine,
+    spec: DatasetSpec,
+    timeframe: Timeframe,
+    before: pd.Timestamp,
+    count: int,
+    name: str,
+) -> pd.DataFrame:
+    """The last `count` signal bars of `timeframe` available before `before`, read from the
+    dataset's own source, bar build and price basis: complete bars only, without the trading days
+    the spec excludes, never from the vault (the catalog enforces it), and every trading day they
+    touch passed by the dataset's quality run (DQ-007). Indexed by availability, like
+    `signal_bars`.
+
+    Raises:
+        BoardError: naming rule `name`, if fewer than `count` such bars exist or one of their days
+            fails the quality gate (a FAIL result, or no result in the quality run).
+    """
+    sessions = cfg.sessions_config()
+    per_day = max(1, math.floor(regular_trading_day(sessions) / timeframe.duration))
+    open_days = math.ceil(count / per_day) + PRE_START_MARGIN_DAYS
+    last = trading_day(before)
+    table = build_session_table(sessions, last - timedelta(days=2 * open_days + 31), last)
+    opened = sorted(
+        pd.Timestamp(d).date()
+        for d in table.loc[table["is_open"].astype(bool), "trading_day"]
+        if pd.Timestamp(d).date() <= last
+    )
+    load_start = trading_day_bounds(opened[-min(open_days, len(opened))])[0]
+    loaded = Catalog(cfg).load_bars(
+        spec.source,
+        spec.instrument,
+        timeframe,
+        spec.price_basis,
+        load_start,
+        before,
+        build=spec.bar_build,
+    )
+    excluded = {e.trading_day for e in spec.exclusions}
+    keep = loaded["is_complete"].to_numpy(bool) & ~loaded["trading_day"].isin(excluded).to_numpy()
+    keep &= (loaded[AVAILABLE_AT] < before).to_numpy()
+    chosen = loaded.loc[keep].tail(count)
+    if len(chosen) < count:
         raise BoardError(
-            f"the dataset is too short for rule {name}: {len(bars)} signal bars, its warm-up "
-            f"needs {warmup}"
+            f"rule {name} needs {count} {timeframe.value} signal bars before the dataset's start "
+            f"for its warm-up, but only {len(chosen)} complete bars are available before {before}"
         )
-    ready = bars.index[warmup - 1]
-    later = decisions[decisions >= ready]
-    if not len(later):
+    if spec.quality_run_id is None:
+        raise BoardError("the dataset's spec names no quality run")
+    try:
+        gate_partitions(engine, spec.quality_run_id, set(chosen["trading_day"]), {})
+    except QualityGateError as exc:
         raise BoardError(
-            f"the dataset is too short for rule {name}: no decision after its warm-up bar ({ready})"
-        )
-    return pd.Timestamp(later[0])
+            f"the pre-start {timeframe.value} signal bars of rule {name} fail the quality gate: "
+            f"{exc}"
+        ) from exc
+    return pd.DataFrame(
+        {c: chosen[c].to_numpy(np.float64) for c in SIGNAL_COLUMNS},
+        index=pd.DatetimeIndex(chosen[AVAILABLE_AT], name="available_at"),
+    )
 
 
 def rule_signal_bars(
@@ -1105,9 +1190,9 @@ def render_board(summary: dict[str, Any], strategies: pd.DataFrame, forecasts: p
         f"- Base timeframe {summary['base_timeframe']}; rule signals on {timeframes} bars; "
         f"targets {', '.join(summary['targets'])}",
         f"- History: {summary['history_start']} to {summary['history_end']}, "
-        f"{summary['history_days']} trading days. Rule baselines are evaluated over it after "
-        "their own warm-up (`full_history`); forecast-sign baselines over the walk-forward test "
-        "folds (`test_folds`)",
+        f"{summary['history_days']} trading days. Rule baselines are evaluated over all of it "
+        "(`full_history`), warmed up on signal bars from before its start where needed (C-29); "
+        "forecast-sign baselines over the walk-forward test folds (`test_folds`)",
         f"- Out of sample: {summary['oos_start']} to {summary['oos_end']}, "
         f"{summary['oos_days']} trading days in {summary['folds']} walk-forward folds",
         f"- Cost model `{summary['cost_model']}` ({basis}); gates `{summary['gates_hash']}`; "
@@ -1121,9 +1206,9 @@ def render_board(summary: dict[str, Any], strategies: pd.DataFrame, forecasts: p
         "",
         f"## Strategies — net of costs over the evaluation period ({basis})",
         "",
-        "| Strategy | Target | Signal | Warm-up bars | Period | Evaluation start | Days | "
-        "Sharpe [CI] | p(SR>0) | DSR | PSR | Annual return [CI] | Max drawdown [CI] | Trades | "
-        "Random-entry p | Costs (USD) | Basis |",
+        "| Strategy | Target | Signal | Warm-up bars (pre-start) | Period | Evaluation start | "
+        "Days | Sharpe [CI] | p(SR>0) | DSR | PSR | Annual return [CI] | Max drawdown [CI] | "
+        "Trades | Random-entry p | Costs (USD) | Basis |",
         "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | "
         "--- | --- | --- |",
     ]
@@ -1134,7 +1219,7 @@ def render_board(summary: dict[str, Any], strategies: pd.DataFrame, forecasts: p
         )
         lines.append(
             f"| {row['strategy']} | {row['target'] or '—'} | {row['signal_timeframe'] or '—'} | "
-            f"{row['warmup_bars'] or '—'} | {row['period']} | {row['evaluation_start']} | "
+            f"{_warmup(row)} | {row['period']} | {row['evaluation_start']} | "
             f"{row['evaluation_days']} | "
             f"{_f(row['sharpe'])} [{_f(row['sharpe_ci_low'])}, {_f(row['sharpe_ci_high'])}] | "
             f"{_f(row['sharpe_p'], 3)} | {_f(row['dsr'], 3)} | {_f(row['psr'], 3)} | "
@@ -1237,6 +1322,13 @@ def _records(frame: pd.DataFrame) -> list[dict[str, Any]]:
                 clean[str(key)] = value
         records.append(clean)
     return records
+
+
+def _warmup(row: dict[str, Any]) -> str:
+    """A rule's warm-up bars and, in parentheses, how many came from before the dataset."""
+    if not row.get("warmup_bars"):
+        return "—"
+    return f"{row['warmup_bars']} ({row.get('pre_start_bars') or 0})"
 
 
 def _f(value: float | None, digits: int = 2) -> str:

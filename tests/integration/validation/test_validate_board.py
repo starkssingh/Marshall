@@ -93,7 +93,7 @@ def engine(
     cfg: AppConfig, root: Path, tmp_path_factory: pytest.TempPathFactory
 ) -> Iterator[Engine]:
     ticks_dir = tmp_path_factory.mktemp("validate_board_ticks")
-    ticks = dense_ticks("2024-03-03 22:00", "2024-03-23 00:00", seed=41, mean_interval_s=10)
+    ticks = dense_ticks("2024-02-25 22:00", "2024-03-23 00:00", seed=41, mean_interval_s=10)
     write_mt5(ticks, ticks_dir / "XAUUSD_three_weeks.csv")
     engine = validated_pipeline(cfg, ticks_dir)
     hypothesis(root, "H-0801", "board_plain")
