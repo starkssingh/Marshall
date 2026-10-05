@@ -17,6 +17,7 @@ from helpers.pipeline import REPO, config
 from xq.core.config import AppConfig
 from xq.core.seeds import derive_seed, make_rng
 from xq.models.hpo import PipelineSpec, optuna_search, record_hpo, record_pipeline_trial
+from xq.models.persistence import DIAGNOSTIC_LABEL, NotEvidenceError
 from xq.models.pipeline import FoldData, PipelineOutput, run_pipeline
 from xq.tracking import registry
 from xq.tracking.db import create_db_engine, session_factory, upgrade_to_head
@@ -126,3 +127,12 @@ def test_the_trial_count_is_the_number_of_distinct_specifications(
     stats = trial_count(cfg, engine, FAMILY)
     assert stats.n_trials == 6
     assert stats.n_test_evaluations == 6
+
+
+def test_diagnostic_predictions_are_refused_as_a_trial(cfg: AppConfig, engine: Engine) -> None:
+    labelled = pd.DataFrame({"p_cal": [0.5], "label": [DIAGNOSTIC_LABEL]})
+    with experiment_run(cfg, engine, "H-0101", {}, kind="ml", seed=3, exploratory=True) as run:
+        with pytest.raises(NotEvidenceError):
+            record_pipeline_trial(run, FAMILY, SPEC, predictions=labelled)
+        record_pipeline_trial(run, FAMILY, SPEC, predictions=labelled.drop(columns="label"))
+    assert trial_count(cfg, engine, FAMILY).n_trials == 1

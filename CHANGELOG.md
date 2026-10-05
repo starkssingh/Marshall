@@ -1053,6 +1053,11 @@ IDs from `docs/specs/development-plan.md`.
 
 ### Changed
 
+- C-34 (5) (owner's decision, ADR 0068), ML-009: library drift still refuses a model load; the
+  explicit override `allow_library_drift=True` / `--allow-library-drift` loads it as a
+  diagnostic labelled "diagnostic, library drift" (on the model and every prediction it makes),
+  which `require_evidence` refuses as evidence (`NotEvidenceError`; `record_pipeline_trial`
+  checks it). New CLI commands `xq model check` and `xq model predict`.
 - C-34 (4) (owner's decision, ADR 0068), ML-003 / EXP-004: the trial count of ML research is the
   number of distinct pipeline specifications (model family x feature set x target x target-set
   version) evaluated on outer test folds (`PipelineSpec`, `record_pipeline_trial`, deduplicated

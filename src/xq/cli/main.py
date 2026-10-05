@@ -513,6 +513,61 @@ def dataset_show(
     typer.echo(json.dumps(manifest, indent=2))
 
 
+model_app = typer.Typer(
+    help="Inspect stored fold models and predict with them (ML-009).", no_args_is_help=True
+)
+app.add_typer(model_app, name="model")
+
+AllowLibraryDrift = Annotated[
+    bool,
+    typer.Option(
+        "--allow-library-drift",
+        help="Load a model written with other library versions as a diagnostic: its outputs are "
+        "labelled 'diagnostic, library drift' and refused as evidence.",
+    ),
+]
+
+
+@model_app.command("check")
+def model_check(
+    model_dir: Annotated[Path, typer.Argument(help="Directory written by save_trained_fold.")],
+    allow_library_drift: AllowLibraryDrift = False,
+) -> None:
+    """Verify a stored model against its card and print what it is."""
+    from xq.models.persistence import load_model  # scikit-learn loads only when needed
+
+    with cli_errors():
+        model = load_model(model_dir, allow_library_drift=allow_library_drift)
+    card = model.card
+    typer.echo(
+        f"{card.family} fold {card.fold_id} on {card.dataset_id} ({card.feature_set}), "
+        f"trained to {card.train_end}; fallback {card.fallback}"
+    )
+    if model.label is None:
+        typer.echo("status: evidence (library versions match the card)")
+    else:
+        drift = ", ".join(f"{k} {v[0]} -> {v[1]}" for k, v in sorted(model.drift.items()))
+        typer.echo(f"status: {model.label} ({drift}); not evidence")
+
+
+@model_app.command("predict")
+def model_predict(
+    model_dir: Annotated[Path, typer.Argument(help="Directory written by save_trained_fold.")],
+    inputs: Annotated[Path, typer.Argument(help="Parquet of model inputs, one row per decision.")],
+    output: Annotated[Path, typer.Argument(help="Parquet to write the predictions to.")],
+    allow_library_drift: AllowLibraryDrift = False,
+) -> None:
+    """Predict with a stored model; a diagnostic model's predictions carry its label."""
+    from xq.models.persistence import load_model  # scikit-learn loads only when needed
+
+    with cli_errors():
+        model = load_model(model_dir, allow_library_drift=allow_library_drift)
+        predictions = model.predict(pd.read_parquet(inputs))
+    predictions.to_parquet(output)
+    status = "evidence" if model.label is None else f"{model.label}; not evidence"
+    typer.echo(f"{len(predictions)} predictions written to {output} ({status})")
+
+
 exp_app = typer.Typer(
     help="Hypotheses, experiment runs, trial counts, conclusions and reproduction (EXP-001..006).",
     no_args_is_help=True,
