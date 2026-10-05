@@ -512,6 +512,23 @@ class RobustnessResultRecord(Base):
     passed: Mapped[bool | None] = mapped_column(Boolean)
 
 
+class FeatureSetRecord(Base):
+    """The locked definition of a feature set version (FEAT-001).
+
+    The first build that uses a feature set version records its definition hash (the configured
+    instances and every feature's code version); a later build with a different definition under
+    the same version is refused.
+    """
+
+    __tablename__ = "feature_sets"
+
+    name: Mapped[str] = mapped_column(String(64), primary_key=True)
+    version: Mapped[str] = mapped_column(String(16), primary_key=True)
+    spec_json: Mapped[dict[str, Any]]
+    hash: Mapped[str] = mapped_column(String(64))
+    created_at: Mapped[pd.Timestamp]
+
+
 class TargetSetRecord(Base):
     """The locked definition of a target set version (TGT-001).
 

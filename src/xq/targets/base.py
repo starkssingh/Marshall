@@ -28,7 +28,7 @@ import hashlib
 import json
 from collections.abc import Callable, Collection, Mapping
 from dataclasses import dataclass
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import pandas as pd
 from sqlalchemy import Engine
@@ -39,6 +39,9 @@ from xq.core.time import utc_now
 from xq.data.calendar import MarketClock
 from xq.tracking.db import session_factory
 from xq.tracking.models import TargetSetRecord
+
+if TYPE_CHECKING:
+    from xq.backtest.costs import CostModel
 
 #: Columns of a computed target (one target, indexed by decision time).
 VALUE_COLUMNS = ("value", "label_start", "label_end", "crosses_close", "scale", "fill_delay_s")
@@ -58,12 +61,14 @@ class TargetSetChangedError(XQError):
 
 @dataclass(frozen=True)
 class TargetSpec:
-    """One target: its name, horizon, price reference and the kind's parameters."""
+    """One target: its name, horizon, price reference and the kind's parameters, with the
+    backtester's cost model bound for a kind that prices trades (`TargetKind.cost_model`)."""
 
     name: str
     horizon: pd.Timedelta
     price_ref: PriceRef
     params: Mapping[str, Any]
+    costs: CostModel | None = None
 
 
 @dataclass(frozen=True)
@@ -107,6 +112,9 @@ class TargetKind:
             ``ask``; `clock` measures horizons in trading time and covers every decision time.
         lookahead: ``lookahead(definition, trading_day)``: how far after a decision time the
             kind may read quotes.
+        cost_model: ``cost_model(definition)``: the name of the cost model
+            (``config/costs/<name>.yaml``) whose `CostModel` the kind's specs need, or None; bound
+            by `xq.targets.kinds.target_specs`.
     """
 
     name: str
@@ -115,6 +123,7 @@ class TargetKind:
     sigma: SigmaFn
     compute: TargetFn
     lookahead: Callable[[TargetSetConfig, pd.Timedelta], Lookahead]
+    cost_model: Callable[[TargetSetConfig], str | None] = lambda definition: None
 
 
 def definition_hash(definition: TargetSetConfig) -> str:

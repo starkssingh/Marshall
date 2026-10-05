@@ -61,23 +61,18 @@ barriers:
       resolution: tick
 
 derived:
-  v1:
+  # v1 (ADR 0063) mirrored the placeholder cost model without its session multipliers; it was
+  # never materialized outside synthetic tests and is retired (C-30 (3), ADR 0065).
+  v2:
     kind: derived_label       # TGT-006: sign, big move and trade/no-trade labels
     # From the forward returns' windows: mid -> tgt_sign_<h> and tgt_big_<h>; long and short ->
-    # tgt_trade_<ref>_<h>, 1 when the side's return (spread paid) beats the rest of the round
-    # trip's costs. Those costs mirror config/costs/placeholder.yaml (PROVISIONAL, a test checks
-    # they agree) without its session multipliers (ADR 0063).
+    # tgt_trade_<ref>_<h>, 1 when a one-lot round trip on that side makes money net of the
+    # backtester's own cost model (cost_model below, session and event multipliers included).
     horizons: [15m, 1h, 4h, 1d]
     price_refs: [long, short, mid]
     params:
-      execution_latency_ms: 1000   # as fwd_returns.v1
+      execution_latency_ms: 1000   # as fwd_returns.v1 and the cost model (checked when bound)
       max_fill_delay_s: 300
       sigma_span_bars: 96
       big_move_sigmas: 1.0              # |r| above 1 sigma-hat over the horizon
-      commission_usd_per_oz_per_side: 0.035   # 3.5 USD per lot of 100 oz
-      slippage_fixed_bps: 0.5
-      slippage_sigma_multiple: 0.1      # times sigma-hat over one market minute, in bps
-      financing_long_annual_pct: 6.0
-      financing_short_annual_pct: 2.0   # a cost on both sides while costs are placeholders
-      financing_day_count: 360
-      triple_weekday: wed
+      cost_model: placeholder           # config/costs/placeholder.yaml (PROVISIONAL)

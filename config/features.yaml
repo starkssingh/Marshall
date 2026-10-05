@@ -1,0 +1,93 @@
+# Versioned feature sets (FEAT-001). Each set lists registered features (src/xq/features/) with
+# their parameters, computed on the dataset's base bars or, with `timeframe:`, on the bars of one
+# of its context timeframes and joined on availability (FEAT-008). Every feature of every set
+# passes the leakage harness automatically (tests/leakage/test_all_features.py), and a registered
+# feature that no set uses fails that suite. A set's definition is locked on first use: a change
+# needs a new version and an ADR.
+#
+# core.v1 (ADR 0066): the plan's Phase 8 features with conventional parameter values, fixed
+# before any result. Nothing was selected, ranked or tuned on data (build-only, synthetic data
+# only); sigma units use the EWMA volatility of the timeframe's one-bar log returns, span 96 on
+# the base bars (one trading day of 15m bars, as the interim sigma-hat of fwd_returns.v1).
+core:
+  v1:
+    description: Phase 8 price, momentum, volatility, structure and time features, with context
+    base_columns: true          # base.v1's decision bar, context bars and calendar columns too
+    features:
+      # FEAT-002 price structure
+      - {feature: log_return, params: {bars: 1}}
+      - {feature: log_return, params: {bars: 2}}
+      - {feature: log_return, params: {bars: 4}}
+      - {feature: log_return, params: {bars: 8}}
+      - {feature: log_return, params: {bars: 16}}
+      - {feature: log_return, params: {bars: 32}}
+      - {feature: log_return, params: {bars: 64}}
+      - {feature: range_sigma, params: {sigma_span: 96}}
+      - {feature: candle}
+      - {feature: gap, params: {sigma_span: 96}}
+      - {feature: extreme_distance, params: {window: 96, sigma_span: 96}}
+      - {feature: session_vwap, params: {sigma_span: 96}}
+      - {feature: ema_distance, params: {span: 20, sigma_span: 96}}
+      - {feature: ema_distance, params: {span: 100, sigma_span: 96}}
+      # FEAT-003 momentum
+      - {feature: roc, params: {bars: 16}}
+      - {feature: rsi, params: {window: 14}}
+      - {feature: macd_hist, params: {fast: 12, slow: 26, signal: 9, sigma_span: 96}}
+      - {feature: ma_slope_t, params: {window: 20}}
+      - {feature: ma_slope_t, params: {window: 96}}
+      - {feature: sign_agreement, params: {horizons: [1, 4, 16, 64]}}
+      # FEAT-004 volatility (VOL-001's estimators, window 20 and Wilder ATR 14 as config/volatility.yaml)
+      - {feature: range_vol, params: {estimator: close_to_close, window: 20}}
+      - {feature: range_vol, params: {estimator: parkinson, window: 20}}
+      - {feature: range_vol, params: {estimator: garman_klass, window: 20}}
+      - {feature: range_vol, params: {estimator: rogers_satchell, window: 20}}
+      - {feature: range_vol, params: {estimator: yang_zhang, window: 20}}
+      - {feature: atr, params: {window: 14}}
+      - {feature: vol_ratio, params: {short: 16, long: 96}}
+      - {feature: vol_of_vol, params: {window: 96, inner: 16}}
+      - {feature: ewma_sigma, params: {span: 96}}
+      - {feature: range_expansion, params: {window: 20}}
+      # FEAT-005 market structure
+      - {feature: breakout, params: {window: 20, sigma_span: 96}}
+      - {feature: breakout, params: {window: 96, sigma_span: 96}}
+      - {feature: efficiency_ratio, params: {window: 20}}
+      - {feature: adx, params: {window: 14}}
+      - {feature: swing, params: {strength: 3, sigma_span: 96}}
+      - {feature: mean_reversion_z, params: {window: 20}}
+      - {feature: mean_reversion_z, params: {window: 96}}
+      - {feature: compression, params: {window: 20, history: 96}}
+      - {feature: prior_day, params: {sigma_span: 96}}
+      - {feature: prior_session, params: {session: tokyo, sigma_span: 96}}
+      - {feature: prior_session, params: {session: london, sigma_span: 96}}
+      - {feature: prior_session, params: {session: new_york, sigma_span: 96}}
+      - {feature: round_distance, params: {step: 10.0, sigma_span: 96}}
+      - {feature: round_distance, params: {step: 50.0, sigma_span: 96}}
+      - {feature: round_distance, params: {step: 100.0, sigma_span: 96}}
+      # FEAT-006 time and event proximity (the calendar of config/sessions.yaml)
+      - {feature: time_of_day, params: {tz: America/New_York}}
+      - {feature: day_of_week}
+      - {feature: session}
+      - {feature: event_minutes, params: {anchor: lbma_am, cap_minutes: 1440}}
+      - {feature: event_minutes, params: {anchor: lbma_pm, cap_minutes: 1440}}
+      - {feature: event_minutes, params: {anchor: us_data_release, cap_minutes: 1440}}
+      - {feature: event_minutes, params: {anchor: rollover, cap_minutes: 1440}}
+      # FEAT-008 multi-timeframe context: selected features on the 1h, 4h and 1d context bars,
+      # joined on availability as mtf_<tf>_<column> (sigma units over 20 bars of the timeframe)
+      - {feature: log_return, params: {bars: 1}, timeframe: 1h}
+      - {feature: rsi, params: {window: 14}, timeframe: 1h}
+      - {feature: atr, params: {window: 14}, timeframe: 1h}
+      - {feature: ma_slope_t, params: {window: 20}, timeframe: 1h}
+      - {feature: extreme_distance, params: {window: 20, sigma_span: 20}, timeframe: 1h}
+      - {feature: efficiency_ratio, params: {window: 20}, timeframe: 1h}
+      - {feature: log_return, params: {bars: 1}, timeframe: 4h}
+      - {feature: rsi, params: {window: 14}, timeframe: 4h}
+      - {feature: atr, params: {window: 14}, timeframe: 4h}
+      - {feature: ma_slope_t, params: {window: 20}, timeframe: 4h}
+      - {feature: extreme_distance, params: {window: 20, sigma_span: 20}, timeframe: 4h}
+      - {feature: adx, params: {window: 14}, timeframe: 4h}
+      - {feature: log_return, params: {bars: 1}, timeframe: 1d}
+      - {feature: rsi, params: {window: 14}, timeframe: 1d}
+      - {feature: atr, params: {window: 14}, timeframe: 1d}
+      - {feature: range_vol, params: {estimator: yang_zhang, window: 20}, timeframe: 1d}
+      - {feature: extreme_distance, params: {window: 20, sigma_span: 20}, timeframe: 1d}
+      - {feature: mean_reversion_z, params: {window: 20}, timeframe: 1d}

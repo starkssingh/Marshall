@@ -1,6 +1,7 @@
 # ADR 0063 — Sprint 7, part 1: targets TGT-003 … TGT-006, WF-004 and WF-005
 
-- **Status:** accepted (readings flagged for the owner's review: C-30)
+- **Status:** accepted (readings flagged for the owner's review: C-30; decided in ADR 0065,
+  which replaces the trade/no-trade label's mirrored costs with the backtester's cost model)
 - **Date:** 2026-10-04
 - **Decided by:** Claude, within the plan (Phase 9, Phase 12, Sprint 7) and the owner's
   instruction for this session: Sprint 7 build-only, part 1 (TGT-003, TGT-004, TGT-005, TGT-006,

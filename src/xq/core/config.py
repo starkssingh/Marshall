@@ -4,8 +4,8 @@ Layers, from lowest to highest precedence:
 
 1. ``config/base.yaml`` plus the section files next to it (``instruments/<id>.yaml``,
    ``costs/<model>.yaml``, ``risk/<profile>.yaml``, ``sessions.yaml``, ``quality.yaml``,
-   ``targets.yaml``, ``gates.yaml``, ``eda.yaml``, ``stats.yaml``, ``volatility.yaml``,
-   ``validation.yaml``)
+   ``targets.yaml``, ``features.yaml``, ``gates.yaml``, ``eda.yaml``, ``stats.yaml``,
+   ``volatility.yaml``, ``validation.yaml``)
 2. ``config/<profile>.yaml`` (for example ``dev``, ``research``, ``paper``, ``prod``)
 3. environment variables prefixed ``XQ_``; nested keys are separated by ``__``,
    e.g. ``XQ_LOGGING__LEVEL=DEBUG``
@@ -70,6 +70,7 @@ FRAGMENT_FILES = {
     "sessions": "sessions.yaml",
     "quality": "quality.yaml",
     "targets": "targets.yaml",
+    "features": "features.yaml",
     "gates": "gates.yaml",
     "eda": "eda.yaml",
     "stats": "stats.yaml",
@@ -521,6 +522,29 @@ class TargetSetConfig(FrozenModel):
     @classmethod
     def _positive_horizons(cls, value: list[str]) -> list[str]:
         return check_horizon_labels(value)
+
+
+class FeatureInstanceConfig(FrozenModel):
+    """One feature of a feature set (``config/features.yaml``, FEAT-001): a registered feature
+    with its parameters, computed on the dataset's base bars or, for multi-timeframe context
+    (FEAT-008), on the bars of one of its context timeframes and joined on availability."""
+
+    feature: str = Field(pattern=r"^[a-z][a-z0-9_]*$")
+    params: dict[str, Any] = {}
+    #: The bars it is computed on; None means the dataset's base timeframe.
+    timeframe: Timeframe | None = None
+    #: The output column (default: the feature's name and its parameter values).
+    column: str | None = Field(default=None, pattern=r"^[a-z][a-z0-9_]*$")
+
+
+class FeatureSetConfig(FrozenModel):
+    """A versioned feature set (``config/features.yaml``, FEAT-001). Its definition is
+    hash-locked on first use: a change needs a new version."""
+
+    description: str = ""
+    #: Also carry the base columns (decision bar, context bars, calendar; ``base.v1``).
+    base_columns: bool = True
+    features: list[FeatureInstanceConfig] = Field(min_length=1)
 
 
 class TrialClusteringConfig(FrozenModel):
@@ -1644,6 +1668,7 @@ class AppConfig(BaseSettings):
     risk: dict[str, RiskConfig] = {}
     backtest: BacktestConfig | None = None
     targets: dict[str, dict[str, TargetSetConfig]] = {}
+    features: dict[str, dict[str, FeatureSetConfig]] = {}
     gates: GatesConfig | None = None
     eda: EdaConfig | None = None
     stats: StatsConfig | None = None
@@ -1726,6 +1751,16 @@ class AppConfig(BaseSettings):
             known = ", ".join(f"{n}.{v}" for n, vs in sorted(self.targets.items()) for v in vs)
             raise ConfigError(
                 f"unknown target set {name}.{version}; configured: {known or 'none'}"
+            ) from None
+
+    def feature_set_config(self, name: str, version: str) -> FeatureSetConfig:
+        """Return the definition of feature set `name` / `version`; raise if unknown."""
+        try:
+            return self.features[name][version]
+        except KeyError:
+            known = ", ".join(f"{n}.{v}" for n, vs in sorted(self.features.items()) for v in vs)
+            raise ConfigError(
+                f"unknown feature set {name}.{version}; configured: {known or 'none'}"
             ) from None
 
     def experiments_config(self) -> ExperimentsConfig:

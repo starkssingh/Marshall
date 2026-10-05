@@ -8,6 +8,7 @@ import pytest
 from pydantic import ValidationError
 
 from xq.core.errors import NaiveTimestampError
+from xq.targets.weights import label_uniqueness
 from xq.validation.splitters import (
     CombinatorialPurgedCV,
     PurgedKFold,
@@ -153,3 +154,40 @@ def test_kfold_parameters_are_validated(make: object, match: str) -> None:
 def test_too_few_samples_for_the_groups() -> None:
     with pytest.raises(ValueError, match="cannot form"):
         PurgedKFold(5).split(T[:3], pd.Series(T[:3]))
+
+
+# --- C-30 (4), ADR 0065: weights that read other labels purge by max(label_end, weight_end) ------
+
+
+def test_uniqueness_weights_computed_across_windows_purge_by_their_weight_end() -> None:
+    # Labels of 2h every hour: each overlaps the next, so a label's uniqueness (and weight) is
+    # known only when the following label ends, an hour after its own label_end.
+    uniqueness = label_uniqueness(pd.Series(T), ENDS)
+    weight_end = uniqueness["weight_end"]
+    assert (weight_end[:-1].to_numpy() == (T + 3 * H)[:-1]).all()
+    by_label = splitter(embargo="1h").split(T, ENDS)
+    by_weight = splitter(embargo="1h").split(T, ENDS, weight_end=weight_end)
+    for plain, weighted in zip(by_label, by_weight, strict=True):
+        cutoff = weighted.test_start - H  # the embargoed test start
+        np.testing.assert_array_equal(plain.test_idx, weighted.test_idx)
+        # by label_end alone the last training label's weight reads a label ending at the cutoff
+        assert weight_end.iloc[plain.train_idx[-1]] >= cutoff
+        # by max(label_end, weight_end) every training weight is known before the cutoff
+        assert (weight_end.iloc[weighted.train_idx] < cutoff).all()
+        np.testing.assert_array_equal(weighted.train_idx, plain.train_idx[:-1])
+        assert weighted.train_end == weighted.test_start - 2 * H
+    # purged k-fold and combinatorial CV purge the same way
+    plain_k = PurgedKFold(4).split(T, ENDS)
+    weighted_k = PurgedKFold(4).split(T, ENDS, weight_end=weight_end)
+    for plain, weighted in zip(plain_k, weighted_k, strict=True):
+        assert set(weighted.train_idx) < set(plain.train_idx)
+        first = T[weighted.test_idx[0]]
+        before = weighted.train_idx[weighted.train_idx < weighted.test_idx[0]]
+        assert (weight_end.iloc[before] < first).all()
+    combinatorial = CombinatorialPurgedCV(4, 2).split(T, ENDS, weight_end=weight_end)
+    assert len(combinatorial) == comb(4, 2)
+    # a weight end must be tz-aware and aligned with the labels
+    with pytest.raises(NaiveTimestampError, match="weight_end"):
+        splitter().split(T, ENDS, weight_end=weight_end.dt.tz_localize(None))
+    with pytest.raises(ValueError, match="weight ends"):
+        splitter().split(T, ENDS, weight_end=weight_end[:-1])

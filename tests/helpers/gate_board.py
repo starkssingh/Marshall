@@ -88,7 +88,7 @@ def build_world(root: Path, ticks_dir: Path) -> tuple[AppConfig, Engine, Dataset
     """The pipeline, the vault quality run, the dataset and a confirmatory board run."""
     clean_repo(root)
     cfg = gate_config(root)
-    ticks = dense_ticks("2024-03-03 22:00", "2024-03-23 00:00", seed=41, mean_interval_s=10)
+    ticks = dense_ticks("2024-02-25 22:00", "2024-03-23 00:00", seed=41, mean_interval_s=10)
     write_mt5(ticks, ticks_dir / "XAUUSD_three_weeks.csv")
     engine = validated_pipeline(cfg, ticks_dir)
     validate_source(

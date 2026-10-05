@@ -53,13 +53,14 @@ TABLES = {
     "metrics",
     "artifacts",
     "target_sets",
+    "feature_sets",
     "fold_results",
     "conclusions",
     "backtests",
     "stat_tests",
     "robustness_results",
 }
-LATEST = "0016"
+LATEST = "0017"
 NOW = pd.Timestamp("2026-09-26 01:00:00.123456789", tz="UTC")
 
 

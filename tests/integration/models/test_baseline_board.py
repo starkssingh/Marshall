@@ -1,17 +1,20 @@
 """BASE-005 end to end: `xq baselines run` puts every baseline (with BASE-003's AR(1)) through
 walk-forward and the cost model on a synthetic dataset and writes a board whose net figures are
-marked as screening. C-15 (ADR 0061): rules run on two signal timeframes over the full history
-after their own warm-up, with the fold-aligned view of the same returns and descriptive slices."""
+marked as screening. C-15 (ADR 0061): rules run on two signal timeframes over the full history,
+with the fold-aligned view of the same returns and descriptive slices. C-29 (ADR 0064): every rule
+is evaluated from the dataset's first decision, warmed up on gated signal bars from before the
+dataset's start (the ticks begin a week before it)."""
 
 import json
 from collections.abc import Iterator
+from datetime import date
 from pathlib import Path
 
 import numpy as np
 import pandas as pd
 import pytest
 import yaml
-from sqlalchemy import Engine
+from sqlalchemy import Engine, select
 from typer.testing import CliRunner
 
 from helpers.datasets import dataset_spec, validated_pipeline
@@ -21,11 +24,20 @@ from xq.backtest.costs import SCREENING_LABEL
 from xq.cli.main import app
 from xq.core.config import AppConfig
 from xq.core.errors import ConfigError
+from xq.data.catalog import Catalog
 from xq.datasets.builder import DatasetRef, build_dataset, load_dataset
 from xq.models import board as board_module
-from xq.models.board import evaluation_start, load_board_config, rule_signal_bars
+from xq.models.board import (
+    BoardConfig,
+    load_board_config,
+    rule_signal_bars,
+    screening_context,
+    warmed_signal_bars,
+)
 from xq.tracking import registry
+from xq.tracking.db import session_factory
 from xq.tracking.hypotheses import load_hypothesis
+from xq.tracking.models import QualityResultRecord
 from xq.tracking.trials import trial_count
 
 FWD = {"name": "fwd_returns", "version": "v1"}
@@ -78,7 +90,7 @@ def cfg(root: Path) -> AppConfig:
 @pytest.fixture(scope="module")
 def engine(cfg: AppConfig, tmp_path_factory: pytest.TempPathFactory) -> Iterator[Engine]:
     ticks_dir = tmp_path_factory.mktemp("board_ticks")
-    ticks = dense_ticks("2024-03-03 22:00", "2024-03-23 00:00", seed=41, mean_interval_s=10)
+    ticks = dense_ticks("2024-02-25 22:00", "2024-03-23 00:00", seed=41, mean_interval_s=10)
     write_mt5(ticks, ticks_dir / "XAUUSD_three_weeks.csv")
     engine = validated_pipeline(cfg, ticks_dir)
     registry.add_hypothesis_version(
@@ -238,7 +250,7 @@ def test_daily_returns_cover_every_out_of_sample_day(
             assert row["sharpe"] == row["fold_sharpe"]
 
 
-def test_rules_are_evaluated_over_the_full_history_after_their_warm_up(
+def test_every_rule_is_evaluated_from_the_dataset_s_first_decision(
     cfg: AppConfig, root: Path, dataset: DatasetRef, first_run: str
 ) -> None:
     (directory,) = report_dirs(root, dataset)
@@ -256,17 +268,18 @@ def test_rules_are_evaluated_over_the_full_history_after_their_warm_up(
             assert start == pd.Timestamp(board["oos_start"])
             assert row["signal_timeframe"] is None
             assert row["warmup_bars"] is None
+            assert row["pre_start_bars"] is None
         else:
             name, timeframe = row["strategy"].split("@")
             warmup = max(WARMUPS[name.removesuffix("_vol")], 13 if name.endswith("_vol") else 0)
             assert (row["signal_timeframe"], row["warmup_bars"]) == (timeframe, warmup)
+            # one shared evaluation start: the dataset's first decision, for every rule
+            assert start == decisions[0]
+            assert row["evaluation_days"] == board["history_days"]
+            # the dataset holds one signal bar at its first decision; the rest is pre-start
             bars, _ = rule_signal_bars(cfg, features, timeframe, 252)
-            ready = bars.index[warmup - 1]  # the warm-up bar's availability
-            assert start == decisions[decisions >= ready][0]
-            assert start == evaluation_start(row["strategy"], bars, warmup, decisions)
-            assert start < pd.Timestamp(board["oos_start"])  # longer than the test folds
-            if warmup > 1:
-                assert start > decisions[0]
+            assert int((bars.index <= decisions[0]).sum()) == 1
+            assert row["pre_start_bars"] == warmup - 1
         # the evaluation period is the trailing run of days from its start; missing before it
         assert column.notna().sum() == row["evaluation_days"]
         assert column.notna().to_numpy()[::-1].cumprod().sum() == row["evaluation_days"]
@@ -274,6 +287,46 @@ def test_rules_are_evaluated_over_the_full_history_after_their_warm_up(
     assert {r["strategy"] for r in board["strategies"] if r["period"] == "full_history"} == set(
         RULE_STRATEGIES
     )
+
+
+def test_pre_start_bars_are_the_catalog_s_own_bars_up_to_the_warm_up(
+    cfg: AppConfig, engine: Engine, dataset: DatasetRef
+) -> None:
+    board = BoardConfig.model_validate(BOARD)
+    context = screening_context(cfg, engine, dataset.dataset_id, board, BOARD["targets"])
+    first = context.decisions[0]
+    spec = dataset.spec
+    for timeframe in TIMEFRAMES:
+        own, _ = rule_signal_bars(cfg, context.features, timeframe, 252)
+        catalog = Catalog(cfg).load_bars(
+            spec.source,
+            spec.instrument,
+            timeframe,
+            spec.price_basis,
+            "2024-02-20T00:00:00Z",
+            spec.start,
+            build=spec.bar_build,
+        )
+        catalog = catalog.loc[catalog["is_complete"].to_numpy(bool)]
+        catalog = catalog.loc[(catalog["available_at_utc"] < own.index[0]).to_numpy()]
+        for warmup in (1, 9, 13):
+            bars, _, pre_start = warmed_signal_bars(
+                cfg, engine, context, f"check@{timeframe}", timeframe, warmup
+            )
+            assert pre_start == warmup - 1
+            assert len(bars) == len(own) + pre_start
+            # complete at the first decision: the warm-up bar is available by then
+            assert bars.index[warmup - 1] <= first < bars.index[warmup]
+            # the same source, build and basis: the catalog's latest complete bars, no more
+            expected = catalog.tail(pre_start)
+            np.testing.assert_array_equal(
+                bars.index[:pre_start], pd.DatetimeIndex(expected["available_at_utc"])
+            )
+            np.testing.assert_array_equal(
+                bars[["open", "high", "low", "close"]].to_numpy()[:pre_start],
+                expected[["open", "high", "low", "close"]].to_numpy(),
+            )
+            pd.testing.assert_frame_equal(bars.iloc[pre_start:], own)
 
 
 def test_the_fold_aligned_view_is_the_full_history_on_the_test_days(
@@ -376,13 +429,42 @@ def test_a_slice_that_cannot_be_computed_is_reported_not_fatal(
     assert "slices not computed" in (directory / "board.md").read_text()
 
 
-def test_a_dataset_too_short_for_a_rule_s_warm_up_is_refused(
+def test_missing_pre_start_bars_stop_the_board(
     root: Path, dataset: DatasetRef, first_run: str, other_hypothesis: str
 ) -> None:
+    # 401 hourly bars are about 17 trading days: the ticks begin a week before the dataset.
     long = {"tsmom_400": {"rule": "time_series_momentum", "params": {"lookback": 400}}}
     path = small_board(root, "too_short", rules=long)
     output = run_board(root, dataset, path, hypothesis=other_hypothesis, expect_exit=2)
-    assert "too short for rule tsmom_400@1h" in output
+    assert "rule tsmom_400@1h needs 400 1h signal bars before the dataset's start" in output
+
+
+def test_gate_failed_pre_start_bars_stop_the_board(
+    root: Path, dataset: DatasetRef, engine: Engine, first_run: str, other_hypothesis: str
+) -> None:
+    # The 4h volatility-targeted rule warms up on 12 bars before the start, reaching back to
+    # 2024-03-01; failing every trading day before 2024-03-04 must stop the board.
+    with session_factory(engine)() as session:
+        rows = session.scalars(
+            select(QualityResultRecord).where(QualityResultRecord.trading_day < date(2024, 3, 4))
+        ).all()
+        saved = {(r.run_id, r.partition_id, r.check_id): r.status for r in rows}
+        for r in rows:
+            r.status = "fail"
+        session.commit()
+    try:
+        path = small_board(root, "gate_failed")
+        output = run_board(root, dataset, path, hypothesis=other_hypothesis, expect_exit=2)
+        assert "signal bars of rule tsmom_8" in output
+        assert "fail the quality gate" in output
+        assert "FAIL partitions" in output
+    finally:
+        with session_factory(engine)() as session:
+            for r in session.scalars(select(QualityResultRecord)).all():
+                key = (r.run_id, r.partition_id, r.check_id)
+                if key in saved:
+                    r.status = saved[key]
+            session.commit()
 
 
 def test_a_position_before_the_warm_up_ends_stops_the_board(
@@ -392,7 +474,7 @@ def test_a_position_before_the_warm_up_ends_stops_the_board(
     other_hypothesis: str,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    # A warm-up formula two bars too long: the rule trades before its evaluation would start.
+    # A warm-up formula two bars too long: the rule trades before its warm-up bar.
     real = board_module.rule_warmup
     monkeypatch.setattr(board_module, "rule_warmup", lambda rule, target: real(rule, target) + 2)
     output = run_board(

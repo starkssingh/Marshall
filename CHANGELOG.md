@@ -959,8 +959,75 @@ IDs from `docs/specs/development-plan.md`.
   (p < 0.01) and a stable edge not flagged, too few folds reported as such, day assignment, and
   end to end on a synthetic board run through the CLI. ADR 0063.
 
+- FEAT-001: the feature framework (`xq.features`). `register_feature` builds an immutable,
+  versioned `Feature` (a pure function of one timeframe's bars, indexed by availability; name,
+  code version, family, a frozen parameter model, lookback and warm-up from the parameters);
+  `FeatureSpec` is the plan's `(name, version, family, timeframe, params, lookback, warmup,
+  inputs)` plus its column. `FEATURES` is a static registry; feature sets are named and versioned
+  in `config/features.yaml` (`FeatureSetConfig`, every parameter value there) and computed by
+  `compute_feature_set` (base-timeframe features on the base bars, context-timeframe features
+  joined with `asof_join` on availability as `mtf_<tf>_*`, optionally with `base.v1`'s columns).
+  The dataset builder and the vault evaluation resolve configured sets (`resolve_feature_set`);
+  a set's definition and feature versions enter the dataset id and are locked in `feature_sets`
+  (migration 0017). `TrainingFoldScaler` and `trailing_zscore` are the only normalizations (no
+  global scalers). `tests/leakage/test_all_features.py` runs the leakage harness on every spec
+  of every configured set and fails on a registered feature no set uses; a planted leak is
+  caught. ADR 0066.
+
+- FEAT-002: price-structure features (`xq.features.price`): log returns over 1–64 bars, the
+  range in sigma units, candle body and wick ratios, the gap after a break in sigma units, the
+  distance to the rolling high and low and the position in the range, the distance to the
+  trading day's tick-count-weighted VWAP (tick-volume caveat) and to EMAs. Sigma units use
+  `bar_sigma`, the timeframe's EWMA volatility (span 96 on 15m). Feature set `core.v1` in
+  `config/features.yaml`; each feature against a hand computation; every spec honours its
+  declared warm-up; a dataset built with `core.v1` (base columns included), reproducible, its
+  definition locked. ADR 0066.
+
+- FEAT-003: momentum features (`xq.features.momentum`): rate of change, Wilder's RSI, the MACD
+  histogram in sigma units, the t-statistic of the log close's least-squares slope and the
+  sign agreement of several horizons' returns, added to `core.v1`. RSI and MACD match
+  step-by-step hand computations, the slope t-statistic SciPy's regression. ADR 0066.
+
+- FEAT-004: volatility features (`xq.features.volatility`): VOL-001's five trailing estimators,
+  Wilder's ATR relative to the close, short/long volatility ratio, volatility of volatility, the
+  EWMA sigma-hat and range expansion, added to `core.v1`. Sigma-hat from VOL-006 fitted per fold
+  stays a model-time quantity (`serve_sigma`), never a dataset column. ATR matches a
+  step-by-step hand computation. ADR 0066.
+
+- FEAT-006: time and event-proximity features (`xq.features.time`): the New York clock time on
+  a circle, one-hot trading-day weekday, one-hot sessions and overlap, and minutes to and since
+  the LBMA auctions, US releases and the rollover (capped), added to `core.v1`. The session flags
+  match the session table across DST changes. ADR 0066.
+
+- FEAT-005: market-structure features (`xq.features.structure`): channel breakout distances,
+  efficiency ratio, Wilder's ADX with +DI and -DI, swing highs and lows used only after their
+  confirmation lag (strength bars after the swing), the trailing z-score, the compression
+  percentile, distances to the prior trading day's and the latest completed session's high and
+  low, and to round-number levels, added to `core.v1`. Tested: the swing lag (a swing on bar i
+  appears on bar i + strength, unknown on data cut before), ADX by hand, the rest on hand cases.
+  ADR 0066.
+
+- FEAT-008: multi-timeframe context (`xq.features.mtf`): any registered feature on the 1h, 4h
+  or 1d context bars, joined onto the base decisions with `asof_join` on availability as
+  `mtf_<tf>_<column>` with a provenance column per timeframe; `core.v1` adds returns, RSI, ATR,
+  slope t-statistics, extreme distances, efficiency ratio, ADX, Yang-Zhang volatility and the
+  z-score on those timeframes. Tested on synthetic bars with a publication latency: a
+  higher-timeframe value appears only from its bar's `available_at` on, unpublished bars change
+  nothing earlier, a daily bar is read only after the trading-day roll. ADR 0066.
+
 ### Changed
 
+- C-29 (owner's decision, ADR 0064), BASE-005: rule warm-ups may read signal bars from before the
+  dataset's start, up to each rule's warm-up length: the same source, bar build and price basis,
+  complete bars only, before the vault, without the spec's excluded days, every day gated by the
+  dataset's quality run (`pre_start_bars`, `warmed_signal_bars`). Every rule is evaluated from the
+  dataset's first decision (one shared evaluation start); missing or gate-failed pre-start bars
+  stop the board (`BoardError`). The warm-up guard reads the exposure before the warm-up bar. The
+  report shows `Warm-up bars (pre-start)` and `board.json` `pre_start_bars`; `xq validate-strategy`
+  rebuilds rules from the same warmed bars. The H-0001 draft (unregistered) and the board's
+  comments say so. Tested: shared start, the pre-start bars equal the catalog's, missing and
+  gate-failed pre-start bars refused, the guard; the board-based suites start their synthetic
+  ticks a week earlier.
 - ARCH-004 (owner's decision, ADR 0062): third-party loggers named in `logging.third_party`
   (`matplotlib`, `PIL`, `fontTools`) are held at `logging.third_party_level` (WARNING) whatever
   the root level, so CLI output is not flooded with matplotlib's `findfont` debug lines. Tested at
@@ -1231,6 +1298,20 @@ IDs from `docs/specs/development-plan.md`.
   fixtures.
 
 ### Fixed
+
+- C-30 (3) (owner's decision, ADR 0065), TGT-006: the trade/no-trade label calls the backtester's
+  own `CostModel` instead of mirroring it: the target set names a cost model (`cost_model:
+  placeholder`); `xq.targets.kinds.target_specs` binds it to the specs (`TargetSpec.costs`,
+  `TargetKind.cost_model`), refusing a model whose latency or fill delay differs from the set's;
+  `round_trip_pnl` prices a one-lot round trip as the screener does (slippage with its session
+  and event multipliers, commission per fill, financing at the rollovers held). The kind's code
+  version goes from 1 to 2; `derived.v2` replaces `derived.v1` (never materialized outside
+  tests); the dataset config digest covers the named cost model. Tested: a trade inside the
+  rollover window pays 3x slippage in the label and in `run_vectorized`, with the same per-lot
+  net P&L; hand-computed round trips and triple-Wednesday financing; the binding refusals.
+- C-30 (4) (owner's decision, ADR 0065), WF-001: the splitters take an optional `weight_end` and
+  purge by `max(label_end, weight_end)` when sample weights read other labels. Tested on
+  overlapping labels in walk-forward and purged k-fold.
 
 - TGT-002 forward returns: a quote while the market is closed (a stray quote in the daily break,
   within the fill delay) is never an entry or exit fill; the fill is the first quote at or after
