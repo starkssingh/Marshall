@@ -5,10 +5,11 @@ sprint and whenever a decision or carry-over item changes; anything decided in c
 recorded in an ADR and here in the same session. If a memory of an earlier conversation conflicts
 with the repository, the repository wins.
 
-- **Last updated:** 2026-10-05, at the end of the session on branch
-  `claude/c29-c30-sprint7-features-ncwssz` (branched from `main` after Sprint 7 part 1 was merged
-  in PR #19): the owner's decisions on C-29 (ADR 0064) and C-30 (ADR 0065), then Sprint 7,
-  build-only, part 2 — the feature library (ADR 0066), in review.
+- **Last updated:** 2026-10-05, at the end of the second session on branch
+  `claude/c29-c30-sprint7-features-ncwssz`: the owner's decisions on C-33 (ADR 0067), then the
+  last data-independent tasks REG-001, ML-001, ML-002, ML-003 and ML-009 (ADR 0068), in review.
+  PR #20 (C-29, C-30 and Sprint 7 part 2) was still open, not merged, when this session started,
+  so this work continues on its branch and PR.
 - **Merged to `main`:** Sprints 1–6, 9, 11, 12 A, 12 B, 13 and 7 part 1, the Dukascopy data
   session and the C-15 session, with the revised H-0001 draft and the Sprint 5 and Sprint 6 review
   fixes (PRs #2, #3, #6, #7, #8, #9, #10, #11, #12, #13, #14, #15, #16, #17, #18, #19).
@@ -18,34 +19,41 @@ with the repository, the repository wins.
 
 ## Current sprint
 
-- **This session:** the owner's decisions on C-29 (ADR 0064) and C-30 (ADR 0065), then Sprint 7,
-  build-only, part 2 (ADR 0066) — **complete, in review on branch
-  `claude/c29-c30-sprint7-features-ncwssz`, synthetic data only**. One commit each:
-  - C-29: rule warm-ups read quality-gated signal bars from before the dataset's start (same
-    source, build and basis, pre-vault, up to each rule's warm-up length); every rule is evaluated
-    from the dataset's first trading day; missing or gate-failed pre-start bars stop the board
-    (`37798f5`);
-  - C-30: (3) fixed — the trade/no-trade label calls the backtester's `CostModel` (multipliers
-    included; `derived.v2`, code version 2; a trade in the rollover window pays 3x slippage in the
-    label and the backtester); (4) the splitters purge by `max(label_end, weight_end)`; (1), (2),
-    (5) recorded as approved (`5826c59`);
-  - FEAT-001 the feature spec, registry, versioned feature sets in `config/features.yaml`
-    (locked in `feature_sets`, migration 0017) and the leakage harness auto-applied to every
-    configured feature, failing on a registered feature no set uses (`661bf2d`);
-  - FEAT-002 price structure (`b8ec65e`), FEAT-003 momentum (`a1ed63a`), FEAT-004 volatility
-    (`38500f0`), FEAT-006 time and event proximity (`d5d1867`), FEAT-005 market structure with
-    swing confirmation lags (`02ab888`), FEAT-008 multi-timeframe context joined on availability
-    (`0400dae`), all in feature set `core.v1`;
-  - this STATUS, ADR 0066's closing sections and the README.
-  - Proven on synthetic data: every configured feature (base and multi-timeframe) passes the
-    leakage harness and honours its declared warm-up; a planted leak is caught on both paths;
-    RSI, MACD, ATR and ADX match step-by-step hand computations and the slope t-statistic SciPy's
-    regression; session flags match the session table across DST changes; a swing appears only
-    after its confirmation lag; a higher-timeframe value appears only from its bar's
-    `available_at`; a dataset builds with `core.v1` and reproduces. **Nothing has run on real
-    data**, nothing was selected or ranked on data, and no dataset spec names `core.v1`.
-  - The readings for review are C-33 (ADR 0066).
-- **Previous session:** the owner's decisions on C-26, C-27 and C-28 (ADR 0062), then Sprint 7,
+- **This session:** the owner's decisions on C-33 (ADR 0067), then REG-001, ML-001, ML-002,
+  ML-003 and ML-009 (ADR 0068) — **complete, in review on branch
+  `claude/c29-c30-sprint7-features-ncwssz` (PR #20), synthetic data only**. One commit each:
+  - C-33 (3): no filling; a dataset's feature set warms up on pre-start bars (same rules as
+    C-29), its length the longest lookback per timeframe, computed from the specs; missing bars
+    refuse the build (`a674fe0`); (1), (2), (5) recorded as approved (a changed calendar means a
+    new feature-set version);
+  - C-33 (4): admission gates; the VWAP distance is computed and checked but refused as a model
+    input until FEAT-007 (`4255902`);
+  - `experiments/configs/ds_core.yaml`: ds_base's window with `core.v1`, a spec only, not built
+    until DQ-008; ds_base stays on `base.v1` (`50fd2ba`);
+  - REG-001 rule regimes (volatility, trend, compression) with training-fold cut-offs
+    (`2272514`);
+  - ML-001 the `Forecaster` protocol and scikit-learn wrappers (`abc0efa`); ML-002 the in-fold
+    pipeline with purged inner CV and calibration on validation (`1267771`); ML-003 seeded
+    Optuna HPO with every configuration a trial (`9f1a919`); ML-009 persistence and model cards
+    (`1b2fab7`);
+  - this STATUS, ADR 0067 and ADR 0068's closing sections, the README.
+  - Proven on synthetic data: `core.v1` has no missing value from a dataset's first trading day
+    when warm-up bars exist (seventeen weeks of ticks), and missing or gate-failed warm-up bars
+    refuse the build; a model-input request for the VWAP distance is refused; regime cut-offs
+    equal each fold's own training quantiles and ignore its test rows; **the purging
+    demonstration**: on overlapping labels without signal, shuffled CV shows spurious skill
+    (AUC 0.76–0.82) while purged CV and the pipeline sit at chance (AUC 0.44–0.59, no
+    out-of-sample log-loss gain); calibration on validation cuts ECE by more than two thirds on
+    overconfident scores; a seeded search is reproducible and every configuration is counted
+    by the trial counter; a reloaded model reproduces its test predictions within 1e-9.
+    **Nothing has run on real data**, and no model was trained or regime cut on data.
+  - New dependencies: scikit-learn, joblib, Optuna. The readings for review are C-34 (ADR 0068).
+- **Previous session (same branch, PR #20, open):** the owner's decisions on C-29 (ADR 0064) and
+  C-30 (ADR 0065), then Sprint 7 part 2, the feature library (ADR 0066), synthetic data only:
+  C-29 (`37798f5`), C-30 (`5826c59`), FEAT-001 (`661bf2d`), FEAT-002 (`b8ec65e`), FEAT-003
+  (`a1ed63a`), FEAT-004 (`38500f0`), FEAT-006 (`d5d1867`), FEAT-005 (`02ab888`), FEAT-008
+  (`0400dae`), feature set `core.v1`. Its readings were decided in C-33.
+- **Earlier session:** the owner's decisions on C-26, C-27 and C-28 (ADR 0062), then Sprint 7,
   build-only, part 1 (ADR 0063) — **complete, merged in PR #19, synthetic data only**: target
   sets of TGT-003 … TGT-006, the monthly retraining schedule and stitching (WF-004), the
   walk-forward report (WF-005). Its readings were decided in C-30.
@@ -134,7 +142,7 @@ with the repository, the repository wins.
     - the monthly retraining schedule (the research default when no `test_len` is given) and
       `stitch_oos` (WF-004);
     - the walk-forward report and `xq exp wf-report <run> --strategy <name>` (WF-005).
-  - **Added this session** (ADR 0064, ADR 0066):
+  - **Added in the C-29/C-30 and Sprint 7 part 2 session** (ADR 0064, ADR 0066):
     - the board's rule warm-ups on quality-gated pre-start signal bars, one evaluation start for
       every rule (C-29);
     - the feature library `xq.features` (FEAT-001 … FEAT-006, FEAT-008): registered, versioned
@@ -142,13 +150,23 @@ with the repository, the repository wins.
       `core.v1` in `config/features.yaml` (computed by `xq dataset build` for any spec that names
       it, locked in `feature_sets`), `TrainingFoldScaler` and trailing z-scores as the only
       normalizations, and the leakage harness on every configured feature.
+  - **Added this session** (ADR 0067, ADR 0068):
+    - the dataset builder's automatic feature warm-up on pre-start bars (C-33 (3)), admission
+      gates and `model_inputs` (C-33 (4)), the `ds_core` spec (not built);
+    - rule regimes (`xq.research.regimes.rules`, REG-001; `config/regimes.yaml`);
+    - the ML research layer (`config/ml.yaml`): the `Forecaster` protocol and wrappers
+      (`logistic`, `ridge`, `random_forest`; ML-001), the in-fold pipeline and calibration
+      (`xq.models.pipeline`, `xq.models.calibration`; ML-002), seeded Optuna search with trial
+      recording (`xq.models.hpo`; ML-003), persistence and model cards
+      (`xq.models.persistence`; ML-009).
   - `xq exp reproduce <run_id>` rebuilds a baseline-board run's dataset, reruns it and reports
     REPRODUCED, NOT_REPRODUCED or RERUN_DIFFERENT_CODE.
   - Validation and robustness settings are in `config/validation.yaml`; the thresholds stay in
     `config/gates.yaml`.
-- **Next:** the owner's review of this session (C-33). Then, by the plan's order, Sprint 8's
-  build-only parts (REG-001, REG-006, REG-007, FEAT-010's machinery without any importance on
-  data, BASE-004) on synthetic data, unless the owner orders otherwise. The owner downloads and
+- **Next:** the owner's review of this session (C-34). The data-independent tasks the owner
+  ordered are done; what remains needs real data or the board: the C-8 session on the owner's Mac
+  (download, `xq validate`, DQ-008), then REG-006/REG-007, FEAT-010, BASE-004 and ML-004 onwards
+  on `ds_core`, each only once the owner allows it. The owner downloads and
   ingests Dukascopy data with the CSV route (above); the C-8 session on the owner's Mac runs
   `xq validate` on it and prepares DQ-008.
   - After the quality review: H-0001 is registered with windows from the real data, alongside
@@ -186,6 +204,8 @@ with the repository, the repository wins.
     real run, included);
   - feature selection, importance or ranking on any data, real or synthetic (owner's instruction
     for Sprint 7; FEAT-010 reports importance only within folds and only when stable);
+  - building `ds_core`, cutting regimes, or training or tuning a model on real data before the
+    DQ-008 review and the owner's go-ahead (ML-004 onwards);
   - committing market data (it stays under the git-ignored `data/`);
   - treating Dukascopy's spreads as execution costs (no venue; costs stay placeholders,
     ADR 0057);
@@ -233,7 +253,8 @@ with the repository, the repository wins.
 | C-30 | Owner review of Sprint 7 part 1's readings (ADR 0063) | Sprint 7 part 1 | Owner | decided (ADR 0065): (1), (2), (4), (5) approved — every volatility evaluation names its target (TGT-003 includes gap returns, VOL-002's RV excludes them); new payoffs only as new target-set versions; purging by `max(label_end, weight_end)` (the splitters' `weight_end`, tested). (3) fixed: the trade/no-trade label calls the backtester's `CostModel` (multipliers included), `derived.v2`, code version 2 — `5826c59` |
 | C-31 | GATE-004 requirement (owner's decision C-27 (6), ADR 0062): the live-readiness record stores the SHA-256 of the signed GATE-003 review document, so the reviewed text is identified | ADR 0062 | Claude, when GATE-004 is built | open |
 | C-32 | The event-tier R3 evaluation (owner's requirement C-27 (3), ADR 0062): R3 recomputed with the event backtester and the real risk engine, recorded with `evidence_tier: event`. The transition rule is enforced (migration 0016); the evaluator is not built, so no subject can reach `paper` | ADR 0062 | Claude, when a candidate runs on the event tier | open |
-| C-33 | Owner review of Sprint 7 part 2's readings (ADR 0066): (1) `core.v1`'s conventional parameter values, fixed before results; (2) sigma units from the timeframe's own trailing EWMA (`bar_sigma`), VOL-006's per-fold sigma-hat kept at model time; (3) features missing until their warm-up, nothing filled — ds_base's 10-day warm-up leaves 20-day 1d features missing for its first weeks; (4) the VWAP's tick weights gated by FEAT-007; (5) calendar features on a calendar DQ-004/DQ-008 must still confirm. Whether a dataset spec should name `core.v1` | Sprint 7 part 2 | Owner | decided (ADR 0067): (1), (2), (5) approved — a changed calendar means a new feature-set version; (3) no filling, the dataset's feature warm-up reads quality-gated pre-start bars, its length the set's longest lookback (`feat(datasets): C-33 (3)`); (4) the VWAP distance gated out of model inputs until FEAT-007 (`feat(features): C-33 (4)`); `ds_core.yaml` (core.v1, not built until DQ-008; `feat(datasets): C-33 ds_core`) |
+| C-33 | Owner review of Sprint 7 part 2's readings (ADR 0066): (1) `core.v1`'s conventional parameter values, fixed before results; (2) sigma units from the timeframe's own trailing EWMA (`bar_sigma`), VOL-006's per-fold sigma-hat kept at model time; (3) features missing until their warm-up, nothing filled — ds_base's 10-day warm-up leaves 20-day 1d features missing for its first weeks; (4) the VWAP's tick weights gated by FEAT-007; (5) calendar features on a calendar DQ-004/DQ-008 must still confirm. Whether a dataset spec should name `core.v1` | Sprint 7 part 2 | Owner | decided (ADR 0067): (1), (2), (5) approved — a changed calendar means a new feature-set version; (3) no filling, the dataset's feature warm-up reads quality-gated pre-start bars, its length the set's longest lookback (`a674fe0`); (4) the VWAP distance gated out of model inputs until FEAT-007 (`4255902`); `ds_core.yaml` (core.v1, not built until DQ-008; `50fd2ba`) |
+| C-34 | Owner review of ADR 0068's readings: (1) calibration weighted by the validation labels' raw uniqueness, Platt's slope with a unit L2 penalty; (2) no filling at model time (rows with a missing input dropped or unpredicted, a column constant in training set to 0); (3) REG-001's cut-off quantiles; (4) the HPO budget counted per fold (50 trials × folds in the family); (5) a model load refused on library drift | Sprint 8/10 data-independent tasks | Owner | open |
 
 ## Open owner decisions
 
@@ -308,7 +329,12 @@ Decided on 2026-10-05: rule warm-ups may read quality-gated signal bars before t
 up to each rule's warm-up length, and every rule is evaluated from the dataset's first trading
 day (C-29, ADR 0064); Sprint 7 part 1's readings approved, except the trade/no-trade label, which
 must call the backtester's own cost model (C-30, ADR 0065); Sprint 7 part 2 build-only, with no
-feature selection or importance on any data.
+feature selection or importance on any data. Decided on 2026-10-05 (C-33, ADR 0067): `core.v1`'s
+readings approved, a changed calendar means a new feature-set version, no filling — a dataset's
+feature warm-up reads quality-gated pre-start bars for the set's longest lookback — the VWAP
+distance gated out of model inputs until FEAT-007, `ds_base` kept on `base.v1` and `ds_core`
+added as a spec only; then the last data-independent tasks (REG-001, ML-001, ML-002, ML-003,
+ML-009), synthetic only.
 
 ## Provisional assumptions not yet confirmed
 
@@ -334,6 +360,8 @@ feature selection or importance on any data.
 | Sigma-hat | interim EWMA, span 96 base bars | `fwd_returns.v1` | a VOL-006 selection on real data, approved by the owner and recorded in an ADR (C-18) |
 | Sprint 7 targets (TGT-003 … TGT-006) | the forward returns' windows (latency 1 s, fill delay 300 s, sigma-hat span 96); realized volatility on a 5-minute market-time grid of the mid; barriers at 1.0 / 1.0 sigma-hats over the horizon, every tick a path point; big move above 1.0 sigma-hat; trade/no-trade label priced by the backtester's cost model (`placeholder`, session multipliers included; `derived.v2`) | `config/targets.yaml`, ADR 0063, ADR 0065 | fixed before results; changes need a new set version and an ADR |
 | Feature set `core.v1` (FEAT-001 … FEAT-008) | log returns 1–64 bars; sigma units over 96 base bars (20 context bars); extremes and breakouts 20/96; EMA 20/100; RSI 14; MACD 12/26/9; slope t 20/96; ATR 14, ADX 14; VOL-001 estimators over 20; vol ratio 16/96; vol of vol 96 over 16; swing strength 3; z-score 20/96; compression 20 in 96; round numbers 10/50/100 USD; event minutes capped at 1,440; context features on 1h, 4h, 1d | `config/features.yaml`, ADR 0066 | fixed before results; changes need a new set version and an ADR |
+| Rule regimes (REG-001) | volatility terciles of `ewma_sigma_96`; trend when efficiency ratio and ADX reach their upper-third training quantiles and the absolute slope t-statistic its median; compression/expansion at the 0.25/0.75 training quantiles of the volatility ratio and the band-width percentile; at least 100 training rows | `config/regimes.yaml`, ADR 0068 | fixed before results; changes need an ADR |
+| ML pipeline and search (ML-002, ML-003) | validation = last 20 % of the training window after purging; 5 purged inner folds with the plan's embargo; uniqueness weights; isotonic above 1,000 validation rows, Platt otherwise, weighted by raw uniqueness; at least 200 fitting rows; Optuna TPE, 50 configurations per family and fold, search spaces for logistic, ridge and random forest | `config/ml.yaml`, ADR 0068 | fixed before results; changes need an ADR |
 | Retraining schedule | monthly (from the start of the trading day dated the 1st) when no `test_len` is given; the board keeps its fixed 91-day folds | `xq.validation.splitters`, ADR 0063 | fixed before results |
 | Baseline board | fixed parameters (rules on 1d and 1h signal bars, lookbacks in bars of the signal timeframe, MA 20/50 and 50/200, 10 % vol target, 1,000 random-entry seeds); rules evaluated over the full pre-vault history after their warm-up, forecast-sign strategies on the folds; folds: expanding, ≥ 3 years training, 91-day tests, 1-day embargo | `experiments/configs/baselines/board.yaml`, ADR 0033, ADR 0034, ADR 0035, ADR 0061 | fixed before results; changes need an ADR |
 | Random-walk forecast baseline | persistence of the latest completed bar return of the horizon's timeframe (`zero_return` covers the price random walk) | ADR 0033 | owner review of Sprint 4 |
@@ -382,10 +410,14 @@ feature selection or importance on any data.
   selection on real data is approved and promoted (C-18); the per-fold VOL-006 sigma-hat is a
   model-time quantity (`serve_sigma`), never a dataset column, and nothing wires it in-fold
   until ML-002.
-- The feature library is tested on synthetic data only. With `ds_base`'s 10-day warm-up, 1d
-  context features with 20-day windows would be missing for the first weeks of a dataset; their
+- The feature library is tested on synthetic data only. A `core.v1` dataset warms up on pre-start
+  bars (C-33 (3)): 77 daily bars before 2015-01-02 for `ds_core`, from the 2014 download. Its
   speed on ten years of real 15m bars is unmeasured (Wilder recursions in Python loops). The
-  session VWAP weights by tick counts, a quote-activity proxy gated by FEAT-007 (DATA-011).
+  session VWAP distance is gated out of model inputs until FEAT-007 (C-33 (4)).
+- The ML layer (ML-001 … ML-003, ML-009) and the rule regimes (REG-001) are tested on synthetic
+  data only. A 50-trial search per fold fits five inner models per configuration (250 fits per
+  fold before the refit); speed on real data is unmeasured. Model artifacts are joblib pickles,
+  loaded only from this project's own runs, their hashes checked.
 - Sprint 6 methods are validated on simulated processes only; none has run on real data, and
   there is no CLI for the statistical verdict report or the volatility board (C-18). Their speed on
   four years of real 1m bars is unmeasured (EGARCH multi-step forecasts are simulated, 1,000 paths
