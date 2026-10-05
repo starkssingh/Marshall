@@ -1,0 +1,26 @@
+# Machine-learning research settings (Phase 11). Fixed before any result; changes need an ADR.
+# Nothing here was tuned on data (build-only, synthetic data only; ADR 0068).
+
+pipeline:                       # ML-002, the in-fold pipeline
+  validation_fraction: 0.2      # plan: the last 20 % of the training window, after purging
+  inner_splits: 5               # purged k-fold with embargo inside the fitting rows (HPO)
+  calibration: auto             # isotonic above isotonic_min_samples validation rows, else Platt
+  isotonic_min_samples: 1000    # plan
+  min_training_rows: 200
+  sample_weights: uniqueness    # average uniqueness of the fitting rows' labels (TGT-006)
+
+hpo:                            # ML-003, Optuna TPE with a seeded sampler
+  n_trials: 50                  # plan: a fixed budget per family
+  search_spaces:
+    logistic:
+      C: {low: 0.001, high: 10.0, log: true}
+      l1_ratio: {low: 0.0, high: 1.0}
+    ridge:
+      alpha: {low: 0.01, high: 100.0, log: true}
+    random_forest:
+      max_depth: {choices: [2, 3, 4, 6]}
+      min_samples_leaf: {low: 50, high: 500, log: true, integer: true}
+      max_samples: {low: 0.1, high: 0.5}
+  fixed:
+    logistic: {max_iter: 5000}
+    random_forest: {n_estimators: 300}

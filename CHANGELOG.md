@@ -1028,6 +1028,16 @@ IDs from `docs/specs/development-plan.md`.
   seeded, refusing missing inputs and reordered columns. Dependencies scikit-learn and joblib.
   Tested: protocol conformance of every family, determinism under a fixed seed. ADR 0068.
 
+- ML-002: the in-fold pipeline (`xq.models.pipeline`): per walk-forward fold, usable rows only
+  (no filling), the last 20 % of the training window for validation after purging, uniqueness
+  sample weights, hyperparameters from a purged k-fold with embargo inside the fitting rows,
+  a refit on training-fold-scaled inputs, calibration on validation rows only
+  (`xq.models.calibration`: isotonic above 1,000 rows, Platt otherwise, weighted by the
+  validation labels' raw uniqueness), test predictions stitched out of sample. Settings in
+  `config/ml.yaml` (with ML-003's search spaces). Tested: the purging demonstration (chance on
+  purged CV and the pipeline, spurious skill on shuffled CV), transforms and calibration blind to
+  test rows, ECE improved by calibration, determinism. ADR 0068.
+
 ### Changed
 
 - C-33 (owner's decision, ADR 0067), DS-001: `experiments/configs/ds_core.yaml`, `ds_base`'s

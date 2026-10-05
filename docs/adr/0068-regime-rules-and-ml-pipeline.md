@@ -64,3 +64,51 @@ is evidence.
    weights and an eval set, predictions as float arrays, probabilities in [0, 1] whose 0.5 cut is
    the class, a card, a save and load that predicts the same), learns a planted linear signal, is
    identical under a fixed seed, and refuses what it cannot use.
+
+## ML-002 — the in-fold pipeline (`xq.models.pipeline`, `xq.models.calibration`)
+
+1. **`train_fold(family, fold, data, cfg, embargo=, seed=, ...)`** trains on one walk-forward
+   fold's training window only (`config/ml.yaml`, `pipeline`):
+   - usable rows have a known target and finite inputs (nothing filled; a test row with a
+     missing input stays unpredicted); model inputs come from `model_inputs` (C-33 (4));
+   - the last 20 % of the window's rows validate; fitting rows are purged against the validation
+     start minus the embargo;
+   - sample weights (`uniqueness`): average uniqueness of the fitting rows' labels among
+     themselves, mean 1 (TGT-006);
+   - hyperparameters are given, or chosen by a search (ML-003) minimizing `inner_cv_loss`: the
+     mean log loss (MSE for regression) over a **purged k-fold with embargo** (5 splits) inside
+     the fitting rows, purged by `max(label_end, weight_end)` (C-30 (4)), each inner split with
+     its own scaler;
+   - the model is refitted on every fitting row after a `TrainingFoldScaler` fitted on them (a
+     column constant there is set to 0: it carries no information);
+   - **calibration on the validation rows only**: isotonic above 1,000 rows, Platt otherwise
+     (the plan); ECE and log loss on validation are recorded raw and calibrated;
+   - the test rows get `p_raw`, `p_cal` and `y_pred` in the walk-forward prediction columns, with
+     `train_end` the latest purge end of any row used.
+2. **`run_pipeline`** runs every fold with a seed derived from the run seed and the fold id,
+   skips (and lists) folds with fewer than 200 fitting rows, and stitches the test predictions
+   (`stitch_oos`). The embargo is the plan's `max(label horizon, 1 trading day)`
+   (`default_embargo`).
+3. **Calibration weights (a choice for review, C-34).** Validation labels overlap: 200 hourly
+   rows of 48-hour labels hold about four independent outcomes. Platt scaling fitted as if they
+   were 200 independent rows extrapolated a spurious validation pattern to the test rows (the
+   purging demonstration's out-of-sample log loss reached 1.98 against a climatology of 0.65).
+   Calibration is therefore weighted by the validation labels' **raw** average uniqueness, and
+   Platt's slope carries a unit L2 penalty (the intercept is not penalized), which shrinks the
+   map towards the validation base rate when the independent evidence is thin.
+4. **The purging demonstration** (`tests/unit/models/test_pipeline.py`; the plan's test): hourly
+   samples, two slowly drifting inputs unrelated to the returns, the sign of the next 48 hourly
+   returns as the label (overlapping, no signal), a deep random forest. Unpurged **shuffled**
+   5-fold CV shows spurious skill (AUC above 0.7, log loss more than 0.1 below climatology; it
+   gave 0.76–0.82 and 0.52–0.54 against 0.66–0.68 on three seeds); **purged** 5-fold CV with
+   embargo and the walk-forward pipeline are at chance (AUC within 0.1 of 0.5) and the pipeline
+   has no out-of-sample skill (log loss not below the out-of-sample climatology). Shuffled splits
+   exist only in that test (scikit-learn's `KFold`); the library has none.
+5. **Known truth** (the same files and `tests/unit/models/test_calibration.py`): the validation
+   split's purge by hand; the embargo default; the scaler, the validation metrics and the
+   calibrator unchanged when every test row's inputs and labels change; fitting rows before the
+   validation rows and purged against them; determinism under a fixed seed; a missing test input
+   unpredicted; inner CV splits purged and embargoed (no training label within a test group's
+   span plus the embargo) and at chance on no signal; calibration on validation rows cuts ECE on
+   three-times-overconfident scores by more than two thirds (Platt below 1,000 rows, isotonic
+   above); weights shrink Platt's map.

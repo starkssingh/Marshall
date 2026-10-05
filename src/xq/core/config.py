@@ -5,7 +5,7 @@ Layers, from lowest to highest precedence:
 1. ``config/base.yaml`` plus the section files next to it (``instruments/<id>.yaml``,
    ``costs/<model>.yaml``, ``risk/<profile>.yaml``, ``sessions.yaml``, ``quality.yaml``,
    ``targets.yaml``, ``features.yaml``, ``gates.yaml``, ``eda.yaml``, ``stats.yaml``,
-   ``volatility.yaml``, ``validation.yaml``, ``regimes.yaml``)
+   ``volatility.yaml``, ``validation.yaml``, ``regimes.yaml``, ``ml.yaml``)
 2. ``config/<profile>.yaml`` (for example ``dev``, ``research``, ``paper``, ``prod``)
 3. environment variables prefixed ``XQ_``; nested keys are separated by ``__``,
    e.g. ``XQ_LOGGING__LEVEL=DEBUG``
@@ -77,6 +77,7 @@ FRAGMENT_FILES = {
     "volatility": "volatility.yaml",
     "validation": "validation.yaml",
     "regimes": "regimes.yaml",
+    "ml": "ml.yaml",
 }
 #: Sections that only their own file may set: no base.yaml key, profile, environment variable or
 #: override may change them (evidence gates are fixed before results are seen, ADR 0032).
@@ -607,6 +608,60 @@ class RegimesConfig(FrozenModel):
     """Regime research settings (``config/regimes.yaml``, Phase 7)."""
 
     rules: RuleRegimesConfig
+
+
+class MlPipelineConfig(FrozenModel):
+    """ML-002's in-fold pipeline (``config/ml.yaml``)."""
+
+    #: The last share of a fold's training rows that calibrates (after purging).
+    validation_fraction: float = Field(gt=0, lt=1)
+    #: Purged k-fold splits for hyperparameter search inside the fitting rows.
+    inner_splits: int = Field(ge=2)
+    calibration: Literal["auto", "isotonic", "platt", "none"]
+    #: With ``auto``: isotonic above this many validation rows, Platt otherwise (plan).
+    isotonic_min_samples: int = Field(ge=1)
+    #: Fewer usable fitting rows: the fold is skipped.
+    min_training_rows: int = Field(ge=2)
+    #: Sample weights: none, or average uniqueness of the fitting rows' labels (TGT-006).
+    sample_weights: Literal["none", "uniqueness"]
+
+
+class SearchDimension(FrozenModel):
+    """One hyperparameter's search range (ML-003): a numeric interval, or a list of choices."""
+
+    low: float | None = None
+    high: float | None = None
+    log: bool = False
+    integer: bool = False
+    choices: list[Any] | None = None
+
+    @model_validator(mode="after")
+    def _one_kind(self) -> SearchDimension:
+        interval = self.low is not None and self.high is not None
+        if interval == (self.choices is not None):
+            raise ValueError("a search dimension is either low/high or choices")
+        if interval and not self.low < self.high:  # type: ignore[operator]
+            raise ValueError("a search dimension needs low < high")
+        if self.log and interval and self.low <= 0:  # type: ignore[operator]
+            raise ValueError("a log-scaled search dimension needs low > 0")
+        return self
+
+
+class MlHpoConfig(FrozenModel):
+    """ML-003's hyperparameter search (``config/ml.yaml``)."""
+
+    #: Configurations evaluated per family and fold (the plan's fixed seeded budget).
+    n_trials: int = Field(ge=1)
+    #: Per family: the parameters searched and the parameters held fixed.
+    search_spaces: dict[str, dict[str, SearchDimension]]
+    fixed: dict[str, dict[str, Any]] = {}
+
+
+class MlConfig(FrozenModel):
+    """Machine-learning research settings (``config/ml.yaml``, Phase 11)."""
+
+    pipeline: MlPipelineConfig
+    hpo: MlHpoConfig
 
 
 class TrialClusteringConfig(FrozenModel):
@@ -1737,6 +1792,7 @@ class AppConfig(BaseSettings):
     volatility: VolatilityConfig | None = None
     validation: ValidationConfig | None = None
     regimes: RegimesConfig | None = None
+    ml: MlConfig | None = None
     secrets: SecretsConfig = SecretsConfig()
 
     @classmethod
@@ -1958,6 +2014,12 @@ class AppConfig(BaseSettings):
         if self.volatility is None:
             raise ConfigError("no volatility research configuration (config/volatility.yaml)")
         return self.volatility
+
+    def ml_config(self) -> MlConfig:
+        """Return the machine-learning research settings (``config/ml.yaml``), or raise."""
+        if self.ml is None:
+            raise ConfigError("no machine-learning configuration (config/ml.yaml)")
+        return self.ml
 
     def regimes_config(self) -> RegimesConfig:
         """Return the regime research settings (``config/regimes.yaml``), or raise."""
