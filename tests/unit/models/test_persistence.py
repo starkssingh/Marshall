@@ -126,6 +126,8 @@ def test_a_fold_that_fell_back_reloads_to_its_base_rate_and_its_card_says_so(
     card = save_trained_fold(tmp_path, fold, null, dataset_id="ds-null", feature_set="core.v1")
     assert card.fallback
     assert (card.base_rate, card.shrinkage) == (fold.base_rate, 0.0)
+    assert card.dropped == fold.dropped
+    assert card.dropped["purged"] > 0
     again = load_model(tmp_path).predict(null.x.loc[fold.predictions.index])
     np.testing.assert_allclose(again["p_cal"], fold.base_rate)
     assert max_abs_difference(again["p_cal"], fold.predictions["p_cal"]) <= 1e-9
