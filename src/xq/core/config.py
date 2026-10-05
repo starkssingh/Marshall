@@ -5,7 +5,7 @@ Layers, from lowest to highest precedence:
 1. ``config/base.yaml`` plus the section files next to it (``instruments/<id>.yaml``,
    ``costs/<model>.yaml``, ``risk/<profile>.yaml``, ``sessions.yaml``, ``quality.yaml``,
    ``targets.yaml``, ``features.yaml``, ``gates.yaml``, ``eda.yaml``, ``stats.yaml``,
-   ``volatility.yaml``, ``validation.yaml``)
+   ``volatility.yaml``, ``validation.yaml``, ``regimes.yaml``)
 2. ``config/<profile>.yaml`` (for example ``dev``, ``research``, ``paper``, ``prod``)
 3. environment variables prefixed ``XQ_``; nested keys are separated by ``__``,
    e.g. ``XQ_LOGGING__LEVEL=DEBUG``
@@ -76,6 +76,7 @@ FRAGMENT_FILES = {
     "stats": "stats.yaml",
     "volatility": "volatility.yaml",
     "validation": "validation.yaml",
+    "regimes": "regimes.yaml",
 }
 #: Sections that only their own file may set: no base.yaml key, profile, environment variable or
 #: override may change them (evidence gates are fixed before results are seen, ADR 0032).
@@ -548,6 +549,64 @@ class FeatureSetConfig(FrozenModel):
     #: Gated features (C-33 (4)): computed, stored and leakage-checked like the others, but
     #: refused as model inputs until their gate is admitted (FEAT-007 for tick weights).
     gated: list[FeatureInstanceConfig] = []
+
+
+class VolatilityRegimeConfig(FrozenModel):
+    """REG-001's volatility regime: the sigma-hat column and the training-fold quantiles that cut
+    it into low, mid and high."""
+
+    column: str
+    quantiles: tuple[float, float]
+
+    @model_validator(mode="after")
+    def _ordered(self) -> VolatilityRegimeConfig:
+        low, high = self.quantiles
+        if not 0 < low < high < 1:
+            raise ValueError("volatility regime quantiles must satisfy 0 < low < high < 1")
+        return self
+
+
+class TrendRegimeConfig(FrozenModel):
+    """REG-001's trend regime: efficiency ratio, ADX and slope t-statistic columns, each cut at a
+    training-fold quantile (the slope's absolute value)."""
+
+    efficiency_column: str
+    adx_column: str
+    slope_column: str
+    efficiency_quantile: float = Field(gt=0, lt=1)
+    adx_quantile: float = Field(gt=0, lt=1)
+    slope_abs_quantile: float = Field(gt=0, lt=1)
+
+
+class CompressionRegimeConfig(FrozenModel):
+    """REG-001's compression/expansion regime: the short/long volatility ratio and the band-width
+    percentile, each cut at a low and a high training-fold quantile."""
+
+    ratio_column: str
+    bandwidth_column: str
+    low_quantile: float = Field(gt=0, lt=1)
+    high_quantile: float = Field(gt=0, lt=1)
+
+    @model_validator(mode="after")
+    def _ordered(self) -> CompressionRegimeConfig:
+        if self.low_quantile >= self.high_quantile:
+            raise ValueError("compression regime needs low_quantile < high_quantile")
+        return self
+
+
+class RuleRegimesConfig(FrozenModel):
+    """REG-001's rule regimes (``config/regimes.yaml``)."""
+
+    min_training_rows: int = Field(ge=2)
+    volatility: VolatilityRegimeConfig
+    trend: TrendRegimeConfig
+    compression: CompressionRegimeConfig
+
+
+class RegimesConfig(FrozenModel):
+    """Regime research settings (``config/regimes.yaml``, Phase 7)."""
+
+    rules: RuleRegimesConfig
 
 
 class TrialClusteringConfig(FrozenModel):
@@ -1677,6 +1736,7 @@ class AppConfig(BaseSettings):
     stats: StatsConfig | None = None
     volatility: VolatilityConfig | None = None
     validation: ValidationConfig | None = None
+    regimes: RegimesConfig | None = None
     secrets: SecretsConfig = SecretsConfig()
 
     @classmethod
@@ -1898,6 +1958,12 @@ class AppConfig(BaseSettings):
         if self.volatility is None:
             raise ConfigError("no volatility research configuration (config/volatility.yaml)")
         return self.volatility
+
+    def regimes_config(self) -> RegimesConfig:
+        """Return the regime research settings (``config/regimes.yaml``), or raise."""
+        if self.regimes is None:
+            raise ConfigError("no regime research configuration (config/regimes.yaml)")
+        return self.regimes
 
     def validation_config(self) -> ValidationConfig:
         """Return the validation and robustness settings (``config/validation.yaml``), or raise."""

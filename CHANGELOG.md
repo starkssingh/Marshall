@@ -1015,6 +1015,13 @@ IDs from `docs/specs/development-plan.md`.
   higher-timeframe value appears only from its bar's `available_at` on, unpublished bars change
   nothing earlier, a daily bar is read only after the trading-day roll. ADR 0066.
 
+- REG-001: rule regimes (`xq.research.regimes.rules`): volatility (sigma-hat terciles), trend
+  (efficiency ratio, ADX and the slope t-statistic, with its direction) and compression/expansion
+  (short/long volatility ratio and band-width percentile) on `core.v1` columns, with cut-offs from
+  the training fold's own rows only (`fit`, `fit_per_fold`) and causal labels in REG-007's columns
+  (`state`, `label`, `p_<state>`, `regime_age`). Settings in `config/regimes.yaml`. Tested: hand
+  labels, truncation invariance, per-fold cut-offs blind to their own test rows. ADR 0068.
+
 ### Changed
 
 - C-33 (owner's decision, ADR 0067), DS-001: `experiments/configs/ds_core.yaml`, `ds_base`'s
