@@ -134,3 +134,47 @@ is evidence.
    parameters carried); the best evaluated configuration is returned; inside a run with three
    walk-forward folds and a budget of 6, the trial counter holds 6 × 3 search trials plus the one
    out-of-sample trial, of which one is on test, and the planted signal is found out of sample.
+
+## ML-009 — persistence and model cards (`xq.models.persistence`)
+
+1. `save_trained_fold(directory, trained, data, dataset_id=, feature_set=)` writes
+   `model.joblib` (the forecaster with its training-fold scaler and calibrator) and `card.json`,
+   the **model card**: family, code version, task, hyperparameters, seed, input columns,
+   feature-set version, dataset id, fold id, training cutoff, fitting and validation row counts,
+   validation metrics, calibration method, the SHA-256 of the training data (the fitting rows'
+   inputs, targets and decision times), the library versions (Python, NumPy, pandas,
+   scikit-learn, joblib, Optuna) and the artifact's SHA-256.
+2. `load_model(directory)` refuses an artifact whose bytes no longer match the card, and one
+   written with other library versions unless `allow_version_drift=True`; the loaded model
+   predicts as the pipeline did (scaler, forecaster, calibrator).
+3. joblib unpickles: only artifacts this project wrote are loaded; the hash guards their
+   integrity, not their origin. Registering model versions in the registry (MREG-001's
+   `model_versions`) from these cards waits for the first real candidate.
+4. **Known truth** (`tests/unit/models/test_persistence.py`): for a logistic and a random-forest
+   fold, a reload reproduces the pipeline's test `p_raw` and `p_cal` within 1e-9; the card carries
+   every field above; the training-data hash changes with a fitting row; a tampered artifact and a
+   library-version drift are refused.
+
+## Readings for the owner's review (C-34)
+
+1. **Calibration weights** (ML-002, item 3): validation rows are weighted by their labels' raw
+   average uniqueness and Platt's slope carries a unit L2 penalty, so a calibration map fitted on
+   a few independent outcomes shrinks towards the base rate. The plan names isotonic and Platt
+   without weights.
+2. **No filling at model time**: a training row with a missing input is dropped, a test row with
+   one is not predicted, and a column constant in the fitting rows is set to 0 after scaling.
+3. **Regime cut-off quantiles** (REG-001): terciles for volatility, the upper third for the
+   efficiency ratio and ADX, the median of the absolute slope t-statistic, quartiles for
+   compression; fixed before any result, as `config/regimes.yaml`.
+4. **The HPO budget** counts per fold: a 50-trial search on 40 monthly folds is 2,000 trials in
+   the family, which the deflated Sharpe ratio then charges for. The plan's "fixed budget per
+   family" could also be read as per family overall.
+5. **Version drift refuses a load** unless explicitly allowed (ML-009).
+
+## Consequences
+
+- The data-independent tasks of Phases 7 and 11 that the owner ordered are built; ML-004 onwards
+  (Stage A on `ds_core`), REG-006 and REG-007 need real data or the board.
+- New dependencies: scikit-learn, joblib, Optuna.
+- Speed on real data is unmeasured: the inner CV fits `inner_splits` models per configuration,
+  so a 50-trial search per fold fits 250 models per fold before the refit.

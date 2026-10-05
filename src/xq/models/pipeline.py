@@ -168,7 +168,7 @@ def inner_cv_loss(
         if not len(test) or (task == "classification" and y_train.nunique() < 2):
             continue
         scaler = TrainingFoldScaler().fit(x, train)
-        scaled = _scaled(scaler, x)
+        scaled = scaled_inputs(scaler, x)
         model = build_forecaster(family, params, seed).fit(
             scaled.iloc[train],
             y_train,
@@ -231,7 +231,7 @@ def train_fold(
         chosen = {**held, **dict(params or {})}
 
     scaler = TrainingFoldScaler().fit(data.x, fit)
-    scaled = _scaled(scaler, data.x)
+    scaled = scaled_inputs(scaler, data.x)
     model = build_forecaster(family, chosen, seed).fit(
         scaled.iloc[fit], y_fit, sample_weight=weights
     )
@@ -319,7 +319,7 @@ def _weights(
     return weights, unique["weight_end"].set_axis(times)
 
 
-def _scaled(scaler: TrainingFoldScaler, x: pd.DataFrame) -> pd.DataFrame:
+def scaled_inputs(scaler: TrainingFoldScaler, x: pd.DataFrame) -> pd.DataFrame:
     """Standardized inputs; a column constant in the fitting rows (no scale) becomes 0."""
     out = scaler.transform(x)
     assert scaler.std_ is not None

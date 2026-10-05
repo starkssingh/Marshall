@@ -1044,6 +1044,13 @@ IDs from `docs/specs/development-plan.md`.
   trial (not on test). Dependency Optuna. Tested: reproducible under a seed, the exact budget
   inside the space, every configuration counted by the trial counter in a run. ADR 0068.
 
+- ML-009: persistence and model cards (`xq.models.persistence`): a fold's forecaster, scaler and
+  calibrator in `model.joblib` and a `card.json` with family, code version, hyperparameters,
+  seed, inputs, feature-set version, dataset id, fold id, training cutoff, validation metrics,
+  calibration, training-data SHA-256, library versions and the artifact's SHA-256; loads refuse a
+  tampered artifact or library drift. Tested: a reload reproduces the pipeline's test
+  predictions within 1e-9. ADR 0068.
+
 ### Changed
 
 - C-33 (owner's decision, ADR 0067), DS-001: `experiments/configs/ds_core.yaml`, `ds_base`'s
