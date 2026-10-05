@@ -1017,6 +1017,9 @@ IDs from `docs/specs/development-plan.md`.
 
 ### Changed
 
+- C-33 (owner's decision, ADR 0067), DS-001: `experiments/configs/ds_core.yaml`, `ds_base`'s
+  window, source, bars and targets with the feature set `core.v1`; a spec only, not built until
+  the DQ-008 review. `ds_base` stays on `base.v1`.
 - C-33 (4) (owner's decision, ADR 0067), FEAT-001 / FEAT-007: admission gates for features
   (`GATES`, `Feature.gate`, `FeatureSetConfig.gated`). The session VWAP distance waits for
   FEAT-007's admission of tick weights: computed, stored and leakage-checked, but

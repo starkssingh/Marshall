@@ -66,3 +66,22 @@ Synthetic data only. No feature set has been materialized on real data.
 - **Known truth** (`tests/unit/features/test_gates.py`, the dataset test): the VWAP distance is
   `core.v1`'s only gated feature; requesting it as a model input is refused, the default inputs
   exclude it, and the built dataset still stores it with no missing value.
+
+## Dataset specs
+
+- `ds_base` stays on `base.v1` (the baseline board, H-0001).
+- `experiments/configs/ds_core.yaml` is `ds_base` with `feature_set: core.v1` and its own name: the
+  same source, window (2015-01-01 to `vault.start`), bars, warm-up and target set. **It is a spec
+  only: it is not built until the DQ-008 review of the real data.** Its daily warm-up (77 bars)
+  comes from the 2014 download.
+- **Known truth** (`tests/integration/datasets/test_builder.py`): `ds_core` equals `ds_base` in
+  every field but its name and feature set, and every timeframe `core.v1` reads is one of its
+  context timeframes.
+
+## Consequences
+
+- Every dataset of a configured feature set warms up on pre-start bars and has a new id
+  (`FRAMEWORK_VERSION` 2); `base.v1` datasets are unchanged.
+- The 2014 download must cover `core.v1`'s 77-bar daily warm-up as well as the board's rules
+  (C-29), and pass `xq validate`.
+- Models read features only through `model_inputs`; ML-002's pipeline does.
