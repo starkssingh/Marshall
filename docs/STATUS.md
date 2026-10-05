@@ -5,18 +5,21 @@ sprint and whenever a decision or carry-over item changes; anything decided in c
 recorded in an ADR and here in the same session. If a memory of an earlier conversation conflicts
 with the repository, the repository wins.
 
-- **Last updated:** 2026-10-06, at the end of the **C-35 session** on branch
-  `claude/eloquent-franklin-nfoila` (cloud, synthetic data only): the owner's decisions on the
-  DQ-008 review implemented — ADR 0069 accepted (thresholds), ADR 0070 (calendar `s2`, `core.v2`),
-  ADR 0071 (re-export supersession, the exclusion list). The branch starts from PR #22's head
-  (the DQ-008 review, `0c9c4ab`), which was **still open, not merged,** when this session began;
-  its pull request contains that commit until PR #22 is merged. The C-8 real-data session (PR #22)
-  and the C-33/REG/ML session (PR #21, merged) came before.
+- **Last updated:** 2026-10-06, when the C-34 fixes were rebased onto `main` after PRs #22 and
+  #23 merged (branch `claude/wonderful-sagan-nzjxu5`, cloud, synthetic data only). The fixes were
+  written on 2026-10-05 on branch `claude/c29-c30-sprint7-features-ncwssz` after PR #21 merged and
+  were never merged; their open question, numbered C-35 there, is **C-37** here because the C-35
+  session took C-35 and C-36. Before that, the **C-35 session** on branch
+  `claude/eloquent-franklin-nfoila` (PR #23, merged) implemented the owner's decisions on the
+  DQ-008 review — ADR 0069 accepted (thresholds), ADR 0070 (calendar `s2`, `core.v2`), ADR 0071
+  (re-export supersession, the exclusion list). The C-8 real-data session (PR #22, merged) and the
+  C-33/REG/ML session (PR #21, merged) came before.
 - **Merged to `main`:** Sprints 1–7, 9, 11, 12 A, 12 B and 13, the Dukascopy data session, the
-  C-15 session, the C-29/C-30 decisions and the C-33/REG/ML session, with the revised H-0001 draft
+  C-15 session, the C-29/C-30 decisions, the C-33 decisions with REG-001 and the ML layer, the
+  C-8 real-data session with the DQ-008 review and the C-35 session, with the revised H-0001 draft
   and the Sprint 5 and Sprint 6 review fixes (PRs #2, #3, #6, #7, #8, #9, #10, #11, #12, #13, #14,
-  #15, #16, #17, #18, #19, #20, #21). PR #22 (the DQ-008 review) was open when the C-35 session
-  began; this session's branch is based on its head.
+  #15, #16, #17, #18, #19, #20, #21, #22, #23). The C-34 fixes are in review in this branch's
+  draft pull request.
 - **Real market data now exists.** 143 monthly Dukascopy XAUUSD tick CSVs, 2014-01 … 2025-11,
   520,973,737 ticks, ingested into `data/raw` on the owner's Mac. **`data/raw` is the only copy:**
   the downloaded CSVs were deleted after ingest on the owner's instruction, once `xq verify-raw`
@@ -30,9 +33,39 @@ with the repository, the repository wins.
 
 ## Current sprint
 
-- **This session (C-35):** the owner's decisions on the DQ-008 review — **complete, in review as
-  a draft pull request from `claude/eloquent-franklin-nfoila`, synthetic data only**. One commit
-  each:
+- **This session (C-34):** the owner's decisions on C-34 (ADR 0068, section "C-34 owner
+  decisions") — **complete, written on branch `claude/c29-c30-sprint7-features-ncwssz` (no pull
+  request then, on the owner's instruction; PR #21 had merged), rebased onto `main` after PRs #22
+  and #23 and in review as a draft pull request from `claude/wonderful-sagan-nzjxu5`, synthetic
+  data only**. One commit each (rebased references):
+  - C-34 (1), blocking (`126d960`):
+    - calibrated probabilities shrink towards the fold's training base rate by
+      `n_eff / (n_eff + 50)`;
+    - a fold whose calibrated map does not beat the base rate on a purged k-fold cross-fit of
+      its validation rows predicts the base rate (recorded per fold and on the model card);
+    - training with uniqueness weights is tested.
+  - C-34 (1) acceptance, seed by seed in ADR 0068:
+    - null process: within climatology + 0.01 in 19 of 20 seeds (was 0.75–1.30 against ~0.66);
+    - planted signal: beats climatology in all 10 runs, but 4 of 100 folds fall back, so the
+      per-fold reading of "fallback not triggered" is **not met** (open as C-37 (1)).
+  - C-34 (1) disclosures:
+    - the cross-fit was changed from validation halves to the purged k-fold after the first
+      run;
+    - the purging demonstration's single-seed pipeline AUC check moved to the 20-seed mean
+      (0.504).
+  - C-34 (2): every fold reports what it dropped (`TrainedFold.dropped`, `fold_table()`, the card)
+    (`65abd57`); (3) recorded as approved (cut-offs fixed before results);
+  - C-34 (4): a trial is a distinct pipeline specification (model family x feature set x target x
+    target-set version) evaluated on test, deduplicated per family across runs; search
+    configurations are recorded per fold (count, seed, chosen parameters) and are not trials
+    (`2439d6d`);
+  - C-34 (5): library drift refuses a load; `--allow-library-drift` (and `xq model check` /
+    `xq model predict`) loads a diagnostic labelled "diagnostic, library drift", refused as
+    evidence (`424386f`);
+  - the CI timeout of 30 minutes (merged in PR #21) is approved;
+  - this STATUS, ADR 0068, the README and the changelog.
+- **Previous session (C-35; merged in PR #23):** the owner's decisions on the DQ-008 review —
+  **complete, synthetic data only**. One commit each:
   - **ADR 0069 accepted** (T1–T6 together, the one change ADR 0013 item 1 allowed, now spent;
     `7a48c50`): `tick.spikes` in events per million usable ticks, warn 2000, fail 4000 — fixed,
     not re-calibrated after T2's rebuild; `cleaning.spike.min_scale_bps` 0.125 bp, clean rules
@@ -58,10 +91,37 @@ with the repository, the repository wins.
   - Proven on synthetic data only. **Nothing ran on real data**: the clean store, bars and quality
     run on the owner's Mac are still those of `c1` / `s1` (quality run
     `01M47ZDA2E631VVD7703MXWMQN`) until the local session rebuilds them (C-36).
-- **Previous session (C-33 decisions, REG-001, ML-001 … ML-003, ML-009; merged in PR #21):**
-  C-33 (3) warm-up on pre-start bars (`30a9592`), C-33 (4) admission gates (`fcbe538`),
-  `ds_core` (`61b625e`), REG-001 (`757eba5`), ML-001 (`872caee`), ML-002 (`d90d78a`), ML-003
-  (`b2abb93`), ML-009 (`3c5a806`); synthetic data only, readings for review in C-34 (ADR 0068).
+- **Earlier session (C-33/REG/ML, merged in PR #21):** the owner's decisions on C-33 (ADR 0067),
+  then REG-001, ML-001, ML-002, ML-003 and ML-009 (ADR 0068), synthetic data only. One commit
+  each:
+  - C-33 (3): no filling; a dataset's feature set warms up on pre-start bars (same rules as
+    C-29), its length the longest lookback per timeframe, computed from the specs; missing bars
+    refuse the build (`30a9592`); (1), (2), (5) recorded as approved (a changed calendar means a
+    new feature-set version);
+  - C-33 (4): admission gates; the VWAP distance is computed and checked but refused as a model
+    input until FEAT-007 (`fcbe538`);
+  - `experiments/configs/ds_core.yaml`: ds_base's window with `core.v1`, a spec only, not built
+    until DQ-008; ds_base stays on `base.v1` (`61b625e`);
+  - REG-001 rule regimes (volatility, trend, compression) with training-fold cut-offs
+    (`757eba5`);
+  - ML-001 the `Forecaster` protocol and scikit-learn wrappers (`872caee`); ML-002 the in-fold
+    pipeline with purged inner CV and calibration on validation (`d90d78a`); ML-003 seeded
+    Optuna HPO with every configuration a trial (`b2abb93`); ML-009 persistence and model cards
+    (`3c5a806`);
+  - this STATUS, ADR 0067 and ADR 0068's closing sections, the README.
+  - Proven on synthetic data: `core.v1` has no missing value from a dataset's first trading day
+    when warm-up bars exist (seventeen weeks of ticks), and missing or gate-failed warm-up bars
+    refuse the build; a model-input request for the VWAP distance is refused; regime cut-offs
+    equal each fold's own training quantiles and ignore its test rows; **the purging
+    demonstration**: on overlapping labels without signal, shuffled CV shows spurious skill
+    (AUC 0.76–0.82) while purged CV and the pipeline rank at chance (AUC 0.44–0.59) with no
+    out-of-sample log-loss gain — the pipeline's log loss is worse than chance, and the test's
+    thresholds were lowered after a three-seed run (ADR 0068, ML-002 item 4); calibration on validation cuts ECE by more than two thirds on
+    overconfident scores; a seeded search is reproducible and every configuration is counted
+    by the trial counter; a reloaded model reproduces its test predictions within 1e-9.
+    **Nothing has run on real data**, and no model was trained or regime cut on data.
+  - New dependencies: scikit-learn, joblib, Optuna. Its readings were decided in C-34 (this
+    session), which replaced the excess log loss and the trial counting described above.
 - **Earlier session (same branch as PR #20):** the owner's decisions on C-29 (ADR 0064)
   and C-30 (ADR 0065), then Sprint 7 part 2, the feature library (ADR 0066), synthetic data only:
   C-29 (`37798f5`), C-30 (`5826c59`), FEAT-001 (`661bf2d`), FEAT-002 (`b8ec65e`), FEAT-003
@@ -75,7 +135,7 @@ with the repository, the repository wins.
   registry and the release gates, ADR 0060, PR #17) and the Dukascopy primary feed (ADR 0057,
   PR #16), all synthetic only; their open points were decided in C-28, C-27 and C-26.
 - **C-8 (the real-data pipeline and DQ-008) — done (PR #22); the owner decided its proposals in
-  C-35 (this session, ADR 0069–0071).** The whole
+  C-35 (the C-35 session, PR #23, ADR 0069–0071).** The whole
   pipeline ran on the owner's Mac with no error: ingest 24 m 51 s (142 files, 1 skipped by
   SHA-256), clean 16 m 39 s (3,056 trading days, 1,029,287 ticks flagged, **0 dropped**),
   build-bars 4 m 35 s (144 months; 4,134,802 1m bars, 3,075 daily bars), spread-stats 1 m 21 s
@@ -120,7 +180,7 @@ with the repository, the repository wins.
     before the calendar's close — not an hour before it. Corrected in ADR 0062 (a correction
     note), this file and the runbook; the calendar it questioned is confirmed.
   - **Nothing was applied in that session.** The proposals (review §7) were decided in C-35 and
-    implemented in this session on synthetic data; applying them to the real stores is C-36.
+    implemented in the C-35 session on synthetic data; applying them to the real stores is C-36.
 - **Working system:** library code and CLI, exercised by the tests.
   - **Event backtester** (`run_event_backtest`, tick or bar mode). It runs the whole chain the
     plan prescribes:
@@ -188,9 +248,11 @@ with the repository, the repository wins.
     - rule regimes (`xq.research.regimes.rules`, REG-001; `config/regimes.yaml`);
     - the ML research layer (`config/ml.yaml`): the `Forecaster` protocol and wrappers
       (`logistic`, `ridge`, `random_forest`; ML-001), the in-fold pipeline and calibration
-      (`xq.models.pipeline`, `xq.models.calibration`; ML-002), seeded Optuna search with trial
-      recording (`xq.models.hpo`; ML-003), persistence and model cards
-      (`xq.models.persistence`; ML-009).
+      (`xq.models.pipeline`, `xq.models.calibration`; ML-002, with C-34's shrinkage, no-skill
+      fallback and dropped-row counts), seeded Optuna search with per-fold records and pipeline
+      specifications as trials (`xq.models.hpo`; ML-003, C-34 (4)), persistence and model
+      cards with the library-drift diagnostic (`xq.models.persistence`, `xq model`; ML-009,
+      C-34 (5)).
   - **Added in the C-35 session** (ADR 0069, ADR 0070, ADR 0071):
     - the graded `tick.spikes` rate and the silence-free `tick.stale_quotes`; clean rules `c2`;
     - calendar version `s2` with date-dependent early closes (`TimeSchedule`, `time_on`,
@@ -203,7 +265,8 @@ with the repository, the repository wins.
     REPRODUCED, NOT_REPRODUCED or RERUN_DIFFERENT_CODE.
   - Validation and robustness settings are in `config/validation.yaml`; the thresholds stay in
     `config/gates.yaml`.
-- **Next:** the owner's review of this session's pull request, and C-34 (still open). Then the
+- **Next:** the owner's review of this pull request (the C-34 fixes) and the owner's answer to
+  C-37 (the per-fold reading of C-34 (1)'s planted-signal acceptance). Then the
   **C-36 local session on the owner's Mac** (real data; runbook §2): rebuild the whole history
   under the decisions — `xq clean`, `xq build-bars`, `xq spread-stats` (clean rules `c2`, calendar
   `s2`; a new store, the old one stays) — re-export the damaged months (2014-10 first; review §7.3)
@@ -303,9 +366,10 @@ with the repository, the repository wins.
 | C-31 | GATE-004 requirement (owner's decision C-27 (6), ADR 0062): the live-readiness record stores the SHA-256 of the signed GATE-003 review document, so the reviewed text is identified | ADR 0062 | Claude, when GATE-004 is built | open |
 | C-32 | The event-tier R3 evaluation (owner's requirement C-27 (3), ADR 0062): R3 recomputed with the event backtester and the real risk engine, recorded with `evidence_tier: event`. The transition rule is enforced (migration 0016); the evaluator is not built, so no subject can reach `paper` | ADR 0062 | Claude, when a candidate runs on the event tier | open |
 | C-33 | Owner review of Sprint 7 part 2's readings (ADR 0066): (1) `core.v1`'s conventional parameter values, fixed before results; (2) sigma units from the timeframe's own trailing EWMA (`bar_sigma`), VOL-006's per-fold sigma-hat kept at model time; (3) features missing until their warm-up, nothing filled — ds_base's 10-day warm-up leaves 20-day 1d features missing for its first weeks; (4) the VWAP's tick weights gated by FEAT-007; (5) calendar features on a calendar DQ-004/DQ-008 must still confirm. Whether a dataset spec should name `core.v1` | Sprint 7 part 2 | Owner | decided (ADR 0067): (1), (2), (5) approved — a changed calendar means a new feature-set version; (3) no filling, the dataset's feature warm-up reads quality-gated pre-start bars, its length the set's longest lookback (`30a9592`); (4) the VWAP distance gated out of model inputs until FEAT-007 (`fcbe538`); `ds_core.yaml` (core.v1, not built until DQ-008; `61b625e`) |
-| C-34 | Owner review of ADR 0068's readings: (1) calibration weighted by the validation labels' raw uniqueness, Platt's slope with a unit L2 penalty; (2) no filling at model time (rows with a missing input dropped or unpredicted, a column constant in training set to 0); (3) REG-001's cut-off quantiles; (4) the HPO budget counted per fold (50 trials × folds in the family); (5) a model load refused on library drift | Sprint 8/10 data-independent tasks | Owner | open |
+| C-34 | Owner review of ADR 0068's readings: (1) calibration weighted by the validation labels' raw uniqueness, Platt's slope with a unit L2 penalty; (2) no filling at model time (rows with a missing input dropped or unpredicted, a column constant in training set to 0); (3) REG-001's cut-off quantiles; (4) the HPO budget counted per fold (50 trials × folds in the family); (5) a model load refused on library drift | Sprint 8/10 data-independent tasks | Owner | decided (ADR 0068): (1) shrinkage towards the training base rate (`n_eff / (n_eff + 50)`) and a no-skill fallback on a purged k-fold cross-fit of validation, weighted training tested — null acceptance met (19 of 20 seeds within climatology + 0.01), planted signal beats climatology in every run but 4 of 100 folds fall back (C-37 (1)) (`126d960`); (2) approved, dropped-row counts per fold (`65abd57`); (3) approved; (4) changed: a trial is a distinct pipeline specification on test, search configurations recorded per fold, not trials (`2439d6d`); (5) approved with `--allow-library-drift`, outputs labelled "diagnostic, library drift" and refused as evidence (`424386f`); the CI timeout of 30 minutes approved |
 | C-35 | Owner decisions on the DQ-008 review ([`docs/data/quality-review-2026-10.md`](data/quality-review-2026-10.md) §7): (1) the eight calendar proposals C1–C8, of which C3 (a date-dependent holiday early-close time, 13:00 to 2021 and 14:30 from 2022) needs a schema change because ADR 0002 assumes one schedule for every year; (2) the one allowed threshold change, drafted as ADR 0069 "proposed" — `tick.spikes` graded per million ticks (warn 2000, fail 4000), `cleaning.spike.min_scale_bps` 0.05 → 0.125 bp (a clean-store rebuild), `tick.stale_quotes` to stop counting silence as staleness, everything else unchanged, spread buckets kept hourly; (3) the 15 trading days proposed for exclusion (11 of them the run 2014-10-13 … 2014-10-31); (4) whether to re-export the damaged months | DQ-008 | Owner | decided 2026-10-06, implemented on synthetic data: ADR 0069 accepted (`7a48c50`), calendar ADR 0070 (`9a5b03c`), re-export supersession ADR 0071 (`188d3a9`), exclusion list ADR 0071 (`90662b0`; the 15 days are not carried over — the list is filled after the re-export) |
 | C-36 | Apply C-35 to the real data on the owner's Mac: rebuild clean (`c2`, calendar `s2`), bars and spread statistics; re-export the damaged months (2014-10 first, review §7.3) and ingest each with `--supersedes` and a reason; repeat `xq validate`; fill `config/exclusions.yaml` from that run under the 20 % rule (ADR 0071); report what changed against run `01M47ZDA2E631VVD7703MXWMQN`; back up `data/raw` again | C-35 | Owner, with Claude in a local session | open |
+| C-37 | C-34 (1)'s planted-signal acceptance read per fold: "fallback not triggered" holds per run (no run carried by the fallback; every run beats climatology by 0.008–0.038) but 4 of 100 planted folds fell back, each with a cross-fitted validation loss 0.0001–0.0023 above the base rate's (validation `n_eff` 24–72). The cross-fit was changed from two validation halves (11 of 100 folds) to the purged k-fold after the first run. Options: accept the per-run reading; a margin or minimum `n_eff` before falling back; a larger validation share; a stronger planted signal. Also: null seed 4 is +0.0104 (the one seed of 20 outside +0.01) | C-34 session (ADR 0068) | Owner | open |
 
 ## Open owner decisions
 

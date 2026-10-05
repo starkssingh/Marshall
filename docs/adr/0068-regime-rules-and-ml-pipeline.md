@@ -321,7 +321,7 @@ evidence either way). So "fallback not triggered" holds per run (no run is carri
 fallback; the test asserts fewer than half of each run's folds) but **not per fold**. Meeting it
 per fold would need a choice the owner has not made (a margin or a minimum `n_eff` before falling
 back, a larger validation share, or a stronger planted signal); it is listed for the owner as
-C-35 (1) in `docs/STATUS.md`. It is not tuned here.
+C-37 (1) in `docs/STATUS.md`. It is not tuned here.
 
 Tests: `tests/unit/models/test_no_skill_fallback.py` (both acceptances; a fallback fold predicts
 its fitting rows' mean; the shrinkage factor and map; weighted training),
