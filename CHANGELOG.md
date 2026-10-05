@@ -994,6 +994,11 @@ IDs from `docs/specs/development-plan.md`.
   stays a model-time quantity (`serve_sigma`), never a dataset column. ATR matches a
   step-by-step hand computation. ADR 0066.
 
+- FEAT-006: time and event-proximity features (`xq.features.time`): the New York clock time on
+  a circle, one-hot trading-day weekday, one-hot sessions and overlap, and minutes to and since
+  the LBMA auctions, US releases and the rollover (capped), added to `core.v1`. The session flags
+  match the session table across DST changes. ADR 0066.
+
 ### Changed
 
 - C-29 (owner's decision, ADR 0064), BASE-005: rule warm-ups may read signal bars from before the

@@ -47,3 +47,11 @@ core:
       - {feature: vol_of_vol, params: {window: 96, inner: 16}}
       - {feature: ewma_sigma, params: {span: 96}}
       - {feature: range_expansion, params: {window: 20}}
+      # FEAT-006 time and event proximity (the calendar of config/sessions.yaml)
+      - {feature: time_of_day, params: {tz: America/New_York}}
+      - {feature: day_of_week}
+      - {feature: session}
+      - {feature: event_minutes, params: {anchor: lbma_am, cap_minutes: 1440}}
+      - {feature: event_minutes, params: {anchor: lbma_pm, cap_minutes: 1440}}
+      - {feature: event_minutes, params: {anchor: us_data_release, cap_minutes: 1440}}
+      - {feature: event_minutes, params: {anchor: rollover, cap_minutes: 1440}}

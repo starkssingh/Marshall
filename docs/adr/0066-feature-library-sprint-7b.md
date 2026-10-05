@@ -108,3 +108,21 @@ range over the mean of the 20 bars before it).
 - **Known truth** (`tests/unit/features/test_volatility.py`): Wilder's ATR step by step by hand
   (true ranges 2, 2, 1, 3; ATR 5/3 then 19/9), Parkinson and close-to-close by hand, the ratio,
   the volatility of volatility and the range expansion against direct computations.
+
+## FEAT-006 — time and event proximity (`xq.features.time`)
+
+`time_of_day` (sin and cos of the New York clock time on a 24-hour circle), `day_of_week`
+(one-hot of the trading day's weekday, 17:00 New York roll), `session` (one-hot flags of every
+configured session and the London–New York overlap) and `event_minutes` (minutes to the next and
+since the last LBMA AM, LBMA PM, US data release and rollover, capped at 1,440).
+
+- Functions of the decision time and `config/sessions.yaml` only, read from the same per-day
+  session table as DS-007's calendar columns; known in advance and DST-correct by construction.
+- A next or last occurrence beyond the cap, or beyond the calendar's seven-day lookup (a Friday
+  evening's next release), reads as the cap, so the value never depends on how far the data
+  extends.
+- **Known truth** (`tests/unit/features/test_time.py`): the session flags equal the session
+  table's `open <= t < close` on three days (both zones in winter time, New York only in summer
+  time, both in summer time; London opens at 08:00 UTC in March and 07:00 UTC in April); hand
+  values for the clock circle, the trading day's weekday across the roll and the minutes to and
+  since events.

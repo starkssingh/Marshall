@@ -51,6 +51,7 @@ from xq.datasets.spec import SetRef
 from xq.features.base import AVAILABLE_AT, BarContext, Feature, FeatureSpec
 from xq.features.momentum import MOMENTUM
 from xq.features.price import PRICE
+from xq.features.time import TIME
 from xq.features.volatility import VOLATILITY
 from xq.tracking.db import session_factory
 from xq.tracking.models import FeatureSetRecord
@@ -59,7 +60,7 @@ from xq.tracking.models import FeatureSetRecord
 #: of a configured feature set, next to each feature's own version.
 FRAMEWORK_VERSION = 1
 MTF_PREFIX = "mtf_"
-_FAMILY_FEATURES: tuple[Feature, ...] = (*PRICE, *MOMENTUM, *VOLATILITY)
+_FAMILY_FEATURES: tuple[Feature, ...] = (*PRICE, *MOMENTUM, *VOLATILITY, *TIME)
 
 
 class FeatureSetChangedError(ConfigError):
