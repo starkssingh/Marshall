@@ -29,7 +29,6 @@ from collections.abc import Mapping, Sequence
 from types import MappingProxyType
 from typing import Any
 
-import numpy as np
 import pandas as pd
 from sqlalchemy import Engine
 
@@ -37,11 +36,8 @@ from xq.core.config import AppConfig, FeatureSetConfig
 from xq.core.errors import ConfigError
 from xq.core.time import utc_now
 from xq.core.types import Timeframe
-from xq.datasets.asof import PROVENANCE_SUFFIX as PROVENANCE
-from xq.datasets.asof import asof_join
 from xq.datasets.base_features import (
     BASE_INPUT,
-    DECISION_TIME,
     FEATURE_SETS,
     FeatureContext,
     FeatureSetDef,
@@ -50,8 +46,9 @@ from xq.datasets.base_features import (
 )
 from xq.datasets.leakage import Inputs
 from xq.datasets.spec import SetRef
-from xq.features.base import AVAILABLE_AT, BarContext, Feature, FeatureSpec
+from xq.features.base import BarContext, Feature, FeatureSpec
 from xq.features.momentum import MOMENTUM
+from xq.features.mtf import context_prefix, join_on_availability
 from xq.features.price import PRICE
 from xq.features.structure import STRUCTURE
 from xq.features.time import TIME
@@ -62,7 +59,6 @@ from xq.tracking.models import FeatureSetRecord
 #: Code version of the feature-set machinery (the joins and naming); part of every dataset id
 #: of a configured feature set, next to each feature's own version.
 FRAMEWORK_VERSION = 1
-MTF_PREFIX = "mtf_"
 _FAMILY_FEATURES: tuple[Feature, ...] = (*PRICE, *MOMENTUM, *VOLATILITY, *STRUCTURE, *TIME)
 
 
@@ -119,7 +115,7 @@ def feature_specs(
 
 def output_prefix(spec: FeatureSpec) -> str:
     """``mtf_<timeframe>_`` for a context-timeframe spec, nothing for a base-timeframe one."""
-    return "" if spec.timeframe is None else f"{MTF_PREFIX}{spec.timeframe.value}_"
+    return "" if spec.timeframe is None else context_prefix(spec.timeframe)
 
 
 def compute_feature_set(
@@ -160,40 +156,13 @@ def compute_feature_set(
         computed = pd.concat(
             [feature(s.name, registry).on_bars(s, bars, bar_context) for s in group], axis=1
         )
-        parts.append(_join_on_availability(index, computed, f"{MTF_PREFIX}{timeframe.value}_"))
+        parts.append(join_on_availability(index, computed, context_prefix(timeframe)))
     if not parts:
         return pd.DataFrame(index=index)
     out = pd.concat(parts, axis=1)
     duplicated = sorted({str(c) for c in out.columns[out.columns.duplicated()]})
     if duplicated:
         raise ValueError(f"feature columns {duplicated} are written twice")
-    return out
-
-
-def _join_on_availability(
-    decisions: pd.DatetimeIndex, computed: pd.DataFrame, prefix: str
-) -> pd.DataFrame:
-    """`computed` (indexed by its bars' availability) at each decision: the row of the latest bar
-    available by then, found by `asof_join` on ``available_at``, with the provenance column
-    ``<prefix>available_at``."""
-    rows = pd.DataFrame({"row": np.arange(len(computed)), AVAILABLE_AT: computed.index})
-    joined = asof_join(
-        pd.DataFrame({DECISION_TIME: decisions}),
-        rows,
-        on_right=AVAILABLE_AT,
-        prefix=prefix,
-        columns=["row"],
-    )
-    matched = joined[f"{prefix}row"].to_numpy(dtype=np.float64)
-    known = ~np.isnan(matched)
-    take = np.where(known, matched, 0).astype(np.int64)
-    if len(computed):
-        values = computed.to_numpy(np.float64)[take]
-        values[~known] = np.nan
-    else:  # no bar of the timeframe available yet
-        values = np.full((len(take), computed.shape[1]), np.nan)
-    out = pd.DataFrame(values, index=decisions, columns=[f"{prefix}{c}" for c in computed.columns])
-    out[f"{prefix}{PROVENANCE}"] = joined[f"{prefix}{PROVENANCE}"].to_numpy()
     return out
 
 

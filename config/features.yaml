@@ -71,3 +71,23 @@ core:
       - {feature: event_minutes, params: {anchor: lbma_pm, cap_minutes: 1440}}
       - {feature: event_minutes, params: {anchor: us_data_release, cap_minutes: 1440}}
       - {feature: event_minutes, params: {anchor: rollover, cap_minutes: 1440}}
+      # FEAT-008 multi-timeframe context: selected features on the 1h, 4h and 1d context bars,
+      # joined on availability as mtf_<tf>_<column> (sigma units over 20 bars of the timeframe)
+      - {feature: log_return, params: {bars: 1}, timeframe: 1h}
+      - {feature: rsi, params: {window: 14}, timeframe: 1h}
+      - {feature: atr, params: {window: 14}, timeframe: 1h}
+      - {feature: ma_slope_t, params: {window: 20}, timeframe: 1h}
+      - {feature: extreme_distance, params: {window: 20, sigma_span: 20}, timeframe: 1h}
+      - {feature: efficiency_ratio, params: {window: 20}, timeframe: 1h}
+      - {feature: log_return, params: {bars: 1}, timeframe: 4h}
+      - {feature: rsi, params: {window: 14}, timeframe: 4h}
+      - {feature: atr, params: {window: 14}, timeframe: 4h}
+      - {feature: ma_slope_t, params: {window: 20}, timeframe: 4h}
+      - {feature: extreme_distance, params: {window: 20, sigma_span: 20}, timeframe: 4h}
+      - {feature: adx, params: {window: 14}, timeframe: 4h}
+      - {feature: log_return, params: {bars: 1}, timeframe: 1d}
+      - {feature: rsi, params: {window: 14}, timeframe: 1d}
+      - {feature: atr, params: {window: 14}, timeframe: 1d}
+      - {feature: range_vol, params: {estimator: yang_zhang, window: 20}, timeframe: 1d}
+      - {feature: extreme_distance, params: {window: 20, sigma_span: 20}, timeframe: 1d}
+      - {feature: mean_reversion_z, params: {window: 20}, timeframe: 1d}

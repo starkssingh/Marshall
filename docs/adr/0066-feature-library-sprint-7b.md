@@ -155,3 +155,27 @@ not a threshold).
   replaces an older one; ties are no swing; ADX, +DI and -DI step by step by hand; the breakout,
   efficiency ratio, z-score, compression rank, prior day (across the 21:00 UTC roll), prior
   London session (unknown while it runs) and round-number distance by hand.
+
+## FEAT-008 — multi-timeframe context (`xq.features.mtf`)
+
+Any registered feature may run on the bars of a context timeframe (`timeframe:` on an instance).
+It is computed on that timeframe's complete bars exactly as on the base bars and joined onto the
+base decision times by `asof_join` on `available_at` (`join_on_availability`): each decision reads
+the latest context bar available at or before it, never the bar that contains it and never by bar
+start. Columns are `mtf_<tf>_<column>`, with one provenance column `mtf_<tf>_available_at` per
+timeframe, which the harness audits.
+
+- `core.v1` carries, on 1h and 4h bars, the one-bar log return, RSI 14, ATR 14, the 20-bar slope
+  t-statistic and the 20-bar extreme distances, with the efficiency ratio on 1h and ADX on 4h;
+  on 1d bars, the daily return, RSI 14, ATR 14, Yang-Zhang volatility over 20 days (it carries
+  the overnight gaps), the 20-day extreme distances and the 20-day z-score. Sigma units on a
+  context timeframe use a span of 20 of its bars. The 15m base bars are the default timeframe.
+- A dataset must load every timeframe its feature set uses (`context_timeframes`); otherwise the
+  build stops with a `ConfigError` naming it. A 1d feature with a 20-day window is missing for the
+  first weeks after a dataset's warm-up when the warm-up is shorter than that (ds_base's is 10
+  days); nothing is filled.
+- **Known truth** (`tests/unit/features/test_mtf.py`): with hourly bars published five minutes
+  after they end, the 11:00 decision still reads the 09:00 bar and the 11:15 decision the 10:00
+  bar; every switch happens at the first decision at or after an availability; changing bars not
+  yet published leaves every earlier value unchanged; a daily bar is read only from the 21:00 UTC
+  roll (17:00 New York, EDT) on.

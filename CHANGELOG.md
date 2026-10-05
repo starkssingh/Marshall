@@ -1007,6 +1007,14 @@ IDs from `docs/specs/development-plan.md`.
   appears on bar i + strength, unknown on data cut before), ADX by hand, the rest on hand cases.
   ADR 0066.
 
+- FEAT-008: multi-timeframe context (`xq.features.mtf`): any registered feature on the 1h, 4h
+  or 1d context bars, joined onto the base decisions with `asof_join` on availability as
+  `mtf_<tf>_<column>` with a provenance column per timeframe; `core.v1` adds returns, RSI, ATR,
+  slope t-statistics, extreme distances, efficiency ratio, ADX, Yang-Zhang volatility and the
+  z-score on those timeframes. Tested on synthetic bars with a publication latency: a
+  higher-timeframe value appears only from its bar's `available_at` on, unpublished bars change
+  nothing earlier, a daily bar is read only after the trading-day roll. ADR 0066.
+
 ### Changed
 
 - C-29 (owner's decision, ADR 0064), BASE-005: rule warm-ups may read signal bars from before the
