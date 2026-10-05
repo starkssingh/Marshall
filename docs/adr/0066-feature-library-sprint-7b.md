@@ -88,3 +88,23 @@ so far, typical price weighted by tick count) and `ema_distance` (EMA 20 and 100
   perfect line, up to rounding) has no t-statistic.
 - **Known truth** (`tests/unit/features/test_momentum.py`): RSI and MACD step by step by hand;
   the slope t-statistic equal to SciPy's `linregress` slope over its standard error.
+
+## FEAT-004 — volatility (`xq.features.volatility`)
+
+`range_vol` (each of VOL-001's five trailing estimators, window 20, as `config/volatility.yaml`),
+`atr` (Wilder, 14, relative to the close — never dollars), `vol_ratio` (16 over 96 bars),
+`vol_of_vol` (the 96-bar standard deviation of the log of the 16-bar volatility), `ewma_sigma`
+(`bar_sigma`, span 96: the interim sigma-hat on the base bars) and `range_expansion` (the log
+range over the mean of the 20 bars before it).
+
+- **Sigma-hat from VOL-006 fitted per fold is not a dataset column.** A fitted forecaster's
+  value depends on its training fold, so it is produced at model time inside each fold by
+  `serve_sigma` (Sprint 6) and never stored with the features; storing it would be a global
+  fit. ML-002 wires it in-fold.
+- VOL-001's estimators refuse bars whose high and low do not bracket the open and close; the
+  features read `high = max(open, high, close)` and `low = min(open, low, close)` (`consistent`),
+  which leaves every real bar unchanged and keeps the harness's column-wise perturbations of
+  future bars from raising.
+- **Known truth** (`tests/unit/features/test_volatility.py`): Wilder's ATR step by step by hand
+  (true ranges 2, 2, 1, 3; ATR 5/3 then 19/9), Parkinson and close-to-close by hand, the ratio,
+  the volatility of volatility and the range expansion against direct computations.

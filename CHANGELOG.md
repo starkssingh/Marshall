@@ -988,6 +988,12 @@ IDs from `docs/specs/development-plan.md`.
   sign agreement of several horizons' returns, added to `core.v1`. RSI and MACD match
   step-by-step hand computations, the slope t-statistic SciPy's regression. ADR 0066.
 
+- FEAT-004: volatility features (`xq.features.volatility`): VOL-001's five trailing estimators,
+  Wilder's ATR relative to the close, short/long volatility ratio, volatility of volatility, the
+  EWMA sigma-hat and range expansion, added to `core.v1`. Sigma-hat from VOL-006 fitted per fold
+  stays a model-time quantity (`serve_sigma`), never a dataset column. ATR matches a
+  step-by-step hand computation. ADR 0066.
+
 ### Changed
 
 - C-29 (owner's decision, ADR 0064), BASE-005: rule warm-ups may read signal bars from before the

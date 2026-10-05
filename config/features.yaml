@@ -36,3 +36,14 @@ core:
       - {feature: ma_slope_t, params: {window: 20}}
       - {feature: ma_slope_t, params: {window: 96}}
       - {feature: sign_agreement, params: {horizons: [1, 4, 16, 64]}}
+      # FEAT-004 volatility (VOL-001's estimators, window 20 and Wilder ATR 14 as config/volatility.yaml)
+      - {feature: range_vol, params: {estimator: close_to_close, window: 20}}
+      - {feature: range_vol, params: {estimator: parkinson, window: 20}}
+      - {feature: range_vol, params: {estimator: garman_klass, window: 20}}
+      - {feature: range_vol, params: {estimator: rogers_satchell, window: 20}}
+      - {feature: range_vol, params: {estimator: yang_zhang, window: 20}}
+      - {feature: atr, params: {window: 14}}
+      - {feature: vol_ratio, params: {short: 16, long: 96}}
+      - {feature: vol_of_vol, params: {window: 96, inner: 16}}
+      - {feature: ewma_sigma, params: {span: 96}}
+      - {feature: range_expansion, params: {window: 20}}
