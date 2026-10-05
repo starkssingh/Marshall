@@ -6,7 +6,8 @@
   turns inputs into ``p_raw`` and ``p_cal``);
 - ``card.json`` — the **model card**: the family, its code version and task, the hyperparameters,
   the seed, the input columns, the feature-set version and dataset id, the fold id and its
-  training cutoff, the fitting and validation row counts and their validation metrics, a SHA-256
+  training cutoff, the fitting and validation row counts and their validation metrics, the
+  calibration's base rate, shrinkage and no-skill fallback (C-34 (1)), a SHA-256
   of the training data (the fitting rows' inputs, targets and decision times), the library
   versions (Python, NumPy, pandas, scikit-learn, joblib, Optuna) and the artifact's SHA-256.
 
@@ -24,6 +25,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 import platform
 from dataclasses import dataclass
 from importlib.metadata import version
@@ -69,8 +71,14 @@ class ModelCard(BaseModel):
     train_end: str
     n_fit: int
     n_val: int
-    val_metrics: dict[str, float]
+    #: Validation metrics; a metric that could not be computed (NaN) is None.
+    val_metrics: dict[str, float | None]
     calibration: str
+    #: C-34 (1): the training base rate, the share of the calibrated distance from it kept, and
+    #: whether the fold predicts the base rate (no skill shown on validation).
+    base_rate: float | None = None
+    shrinkage: float | None = None
+    fallback: bool = False
     training_data_sha256: str
     library_versions: dict[str, str]
     artifact_sha256: str
@@ -138,8 +146,13 @@ def save_trained_fold(
         train_end=str(trained.train_end),
         n_fit=trained.n_fit,
         n_val=trained.n_val,
-        val_metrics={k: float(v) for k, v in trained.val_metrics.items()},
+        val_metrics={
+            k: float(v) if math.isfinite(v) else None for k, v in trained.val_metrics.items()
+        },
         calibration=trained.calibrator.method if trained.calibrator is not None else "none",
+        base_rate=trained.base_rate,
+        shrinkage=trained.shrinkage,
+        fallback=trained.fallback,
         training_data_sha256=training_data_hash(data, trained.fit_index),
         library_versions=library_versions(),
         artifact_sha256=_sha256(artifact),

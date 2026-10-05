@@ -737,6 +737,9 @@ class MlPipelineConfig(FrozenModel):
     min_training_rows: int = Field(ge=2)
     #: Sample weights: none, or average uniqueness of the fitting rows' labels (TGT-006).
     sample_weights: Literal["none", "uniqueness"]
+    #: Shrinkage prior k0 (C-34 (1)): calibrated probabilities keep n_eff / (n_eff + k0) of their
+    #: distance from the training base rate, n_eff the validation labels' summed uniqueness.
+    shrinkage_prior: float = Field(ge=0)
 
 
 class SearchDimension(FrozenModel):
