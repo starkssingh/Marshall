@@ -5,26 +5,53 @@ sprint and whenever a decision or carry-over item changes; anything decided in c
 recorded in an ADR and here in the same session. If a memory of an earlier conversation conflicts
 with the repository, the repository wins.
 
-- **Last updated:** 2026-10-05, at the end of the second session on branch
-  `claude/c29-c30-sprint7-features-ncwssz`: the owner's decisions on C-33 (ADR 0067), then the
-  last data-independent tasks REG-001, ML-001, ML-002, ML-003 and ML-009 (ADR 0068), in review.
-  PR #20 (C-29, C-30 and Sprint 7 part 2) was merged during this session, after its work was
-  done; this session's commits were rebased onto `main` and go to a new pull request from the
-  same branch.
+- **Last updated:** 2026-10-05, at the end of the third session on branch
+  `claude/c29-c30-sprint7-features-ncwssz`: the owner's decisions on C-34 (ADR 0068), after PR #21
+  merged. PR #21 was merged before the review's fixes could be pushed to it; the branch was
+  restarted from `main` (a fast-forward) and the fixes pushed to it. On the owner's instruction no
+  new pull request was opened.
 - **Merged to `main`:** Sprints 1–7, 9, 11, 12 A, 12 B and 13, the Dukascopy data session, the
-  C-15 session and the C-29/C-30 decisions, with the revised H-0001 draft and the Sprint 5 and
-  Sprint 6 review fixes (PRs #2, #3, #6, #7, #8, #9, #10, #11, #12, #13, #14, #15, #16, #17, #18,
-  #19, #20).
+  C-15 session, the C-29/C-30 decisions, the C-33 decisions with REG-001 and the ML layer, the
+  revised H-0001 draft and the Sprint 5 and Sprint 6 review fixes (PRs #2, #3, #6, #7, #8, #9,
+  #10, #11, #12, #13, #14, #15, #16, #17, #18, #19, #20, #21).
 - **Where sessions run:** real-data sessions run in Claude Code on the owner's Mac, where the data
   is (`data/` is git-ignored and never leaves that machine). Cloud sessions work on synthetic data
   only (ADR 0062).
 
 ## Current sprint
 
-- **This session:** the owner's decisions on C-33 (ADR 0067), then REG-001, ML-001, ML-002,
-  ML-003 and ML-009 (ADR 0068) — **complete, in review on branch
-  `claude/c29-c30-sprint7-features-ncwssz` (a new pull request after PR #20), synthetic data
-  only**. One commit each:
+- **This session:** the owner's decisions on C-34 (ADR 0068, section "C-34 owner decisions") —
+  **complete, pushed to branch `claude/c29-c30-sprint7-features-ncwssz`, no pull request (the
+  owner's instruction; PR #21 had merged), synthetic data only**. One commit each:
+  - C-34 (1), blocking (`4bf9f17`):
+    - calibrated probabilities shrink towards the fold's training base rate by
+      `n_eff / (n_eff + 50)`;
+    - a fold whose calibrated map does not beat the base rate on a purged k-fold cross-fit of
+      its validation rows predicts the base rate (recorded per fold and on the model card);
+    - training with uniqueness weights is tested.
+  - C-34 (1) acceptance, seed by seed in ADR 0068:
+    - null process: within climatology + 0.01 in 19 of 20 seeds (was 0.75–1.30 against ~0.66);
+    - planted signal: beats climatology in all 10 runs, but 4 of 100 folds fall back, so the
+      per-fold reading of "fallback not triggered" is **not met** (open as C-35 (1)).
+  - C-34 (1) disclosures:
+    - the cross-fit was changed from validation halves to the purged k-fold after the first
+      run;
+    - the purging demonstration's single-seed pipeline AUC check moved to the 20-seed mean
+      (0.504).
+  - C-34 (2): every fold reports what it dropped (`TrainedFold.dropped`, `fold_table()`, the card)
+    (`42897dc`); (3) recorded as approved (cut-offs fixed before results);
+  - C-34 (4): a trial is a distinct pipeline specification (model family x feature set x target x
+    target-set version) evaluated on test, deduplicated per family across runs; search
+    configurations are recorded per fold (count, seed, chosen parameters) and are not trials
+    (`23614f7`);
+  - C-34 (5): library drift refuses a load; `--allow-library-drift` (and `xq model check` /
+    `xq model predict`) loads a diagnostic labelled "diagnostic, library drift", refused as
+    evidence (`2e0e3bf`);
+  - the CI timeout of 30 minutes (merged in PR #21) is approved;
+  - this STATUS, ADR 0068, the README and the changelog.
+- **Previous session (same branch, merged in PR #21):** the owner's decisions on C-33 (ADR 0067),
+  then REG-001, ML-001, ML-002, ML-003 and ML-009 (ADR 0068), synthetic data only. One commit
+  each:
   - C-33 (3): no filling; a dataset's feature set warms up on pre-start bars (same rules as
     C-29), its length the longest lookback per timeframe, computed from the specs; missing bars
     refuse the build (`30a9592`); (1), (2), (5) recorded as approved (a changed calendar means a
@@ -51,7 +78,8 @@ with the repository, the repository wins.
     overconfident scores; a seeded search is reproducible and every configuration is counted
     by the trial counter; a reloaded model reproduces its test predictions within 1e-9.
     **Nothing has run on real data**, and no model was trained or regime cut on data.
-  - New dependencies: scikit-learn, joblib, Optuna. The readings for review are C-34 (ADR 0068).
+  - New dependencies: scikit-learn, joblib, Optuna. Its readings were decided in C-34 (this
+    session), which replaced the excess log loss and the trial counting described above.
 - **Previous session (same branch, merged in PR #20):** the owner's decisions on C-29 (ADR 0064)
   and C-30 (ADR 0065), then Sprint 7 part 2, the feature library (ADR 0066), synthetic data only:
   C-29 (`37798f5`), C-30 (`5826c59`), FEAT-001 (`661bf2d`), FEAT-002 (`b8ec65e`), FEAT-003
@@ -160,15 +188,17 @@ with the repository, the repository wins.
     - rule regimes (`xq.research.regimes.rules`, REG-001; `config/regimes.yaml`);
     - the ML research layer (`config/ml.yaml`): the `Forecaster` protocol and wrappers
       (`logistic`, `ridge`, `random_forest`; ML-001), the in-fold pipeline and calibration
-      (`xq.models.pipeline`, `xq.models.calibration`; ML-002), seeded Optuna search with trial
-      recording (`xq.models.hpo`; ML-003), persistence and model cards
-      (`xq.models.persistence`; ML-009).
+      (`xq.models.pipeline`, `xq.models.calibration`; ML-002, with C-34's shrinkage, no-skill
+      fallback and dropped-row counts), seeded Optuna search with per-fold records and pipeline
+      specifications as trials (`xq.models.hpo`; ML-003, C-34 (4)), persistence and model
+      cards with the library-drift diagnostic (`xq.models.persistence`, `xq model`; ML-009,
+      C-34 (5)).
   - `xq exp reproduce <run_id>` rebuilds a baseline-board run's dataset, reruns it and reports
     REPRODUCED, NOT_REPRODUCED or RERUN_DIFFERENT_CODE.
   - Validation and robustness settings are in `config/validation.yaml`; the thresholds stay in
     `config/gates.yaml`.
-- **Next:** the owner's review of this session (C-34). The data-independent tasks the owner
-  ordered are done; what remains needs real data or the board: the C-8 session on the owner's Mac
+- **Next:** the owner's answer to C-35 (the per-fold reading of C-34 (1)'s planted-signal
+  acceptance). The data-independent tasks the owner ordered are done; what remains needs real data or the board: the C-8 session on the owner's Mac
   (download, `xq validate`, DQ-008), then REG-006/REG-007, FEAT-010, BASE-004 and ML-004 onwards
   on `ds_core`, each only once the owner allows it. The owner downloads and
   ingests Dukascopy data with the CSV route (above); the C-8 session on the owner's Mac runs
@@ -258,7 +288,8 @@ with the repository, the repository wins.
 | C-31 | GATE-004 requirement (owner's decision C-27 (6), ADR 0062): the live-readiness record stores the SHA-256 of the signed GATE-003 review document, so the reviewed text is identified | ADR 0062 | Claude, when GATE-004 is built | open |
 | C-32 | The event-tier R3 evaluation (owner's requirement C-27 (3), ADR 0062): R3 recomputed with the event backtester and the real risk engine, recorded with `evidence_tier: event`. The transition rule is enforced (migration 0016); the evaluator is not built, so no subject can reach `paper` | ADR 0062 | Claude, when a candidate runs on the event tier | open |
 | C-33 | Owner review of Sprint 7 part 2's readings (ADR 0066): (1) `core.v1`'s conventional parameter values, fixed before results; (2) sigma units from the timeframe's own trailing EWMA (`bar_sigma`), VOL-006's per-fold sigma-hat kept at model time; (3) features missing until their warm-up, nothing filled — ds_base's 10-day warm-up leaves 20-day 1d features missing for its first weeks; (4) the VWAP's tick weights gated by FEAT-007; (5) calendar features on a calendar DQ-004/DQ-008 must still confirm. Whether a dataset spec should name `core.v1` | Sprint 7 part 2 | Owner | decided (ADR 0067): (1), (2), (5) approved — a changed calendar means a new feature-set version; (3) no filling, the dataset's feature warm-up reads quality-gated pre-start bars, its length the set's longest lookback (`30a9592`); (4) the VWAP distance gated out of model inputs until FEAT-007 (`fcbe538`); `ds_core.yaml` (core.v1, not built until DQ-008; `61b625e`) |
-| C-34 | Owner review of ADR 0068's readings: (1) calibration weighted by the validation labels' raw uniqueness, Platt's slope with a unit L2 penalty; (2) no filling at model time (rows with a missing input dropped or unpredicted, a column constant in training set to 0); (3) REG-001's cut-off quantiles; (4) the HPO budget counted per fold (50 trials × folds in the family); (5) a model load refused on library drift | Sprint 8/10 data-independent tasks | Owner | open |
+| C-34 | Owner review of ADR 0068's readings: (1) calibration weighted by the validation labels' raw uniqueness, Platt's slope with a unit L2 penalty; (2) no filling at model time (rows with a missing input dropped or unpredicted, a column constant in training set to 0); (3) REG-001's cut-off quantiles; (4) the HPO budget counted per fold (50 trials × folds in the family); (5) a model load refused on library drift | Sprint 8/10 data-independent tasks | Owner | decided (ADR 0068): (1) shrinkage towards the training base rate (`n_eff / (n_eff + 50)`) and a no-skill fallback on a purged k-fold cross-fit of validation, weighted training tested — null acceptance met (19 of 20 seeds within climatology + 0.01), planted signal beats climatology in every run but 4 of 100 folds fall back (C-35 (1)) (`4bf9f17`); (2) approved, dropped-row counts per fold (`42897dc`); (3) approved; (4) changed: a trial is a distinct pipeline specification on test, search configurations recorded per fold, not trials (`23614f7`); (5) approved with `--allow-library-drift`, outputs labelled "diagnostic, library drift" and refused as evidence (`2e0e3bf`); the CI timeout of 30 minutes approved |
+| C-35 | C-34 (1)'s planted-signal acceptance read per fold: "fallback not triggered" holds per run (no run carried by the fallback; every run beats climatology by 0.008–0.038) but 4 of 100 planted folds fell back, each with a cross-fitted validation loss 0.0001–0.0023 above the base rate's (validation `n_eff` 24–72). The cross-fit was changed from two validation halves (11 of 100 folds) to the purged k-fold after the first run. Options: accept the per-run reading; a margin or minimum `n_eff` before falling back; a larger validation share; a stronger planted signal. Also: null seed 4 is +0.0104 (the one seed of 20 outside +0.01) | C-34 session (ADR 0068) | Owner | open |
 
 ## Open owner decisions
 
