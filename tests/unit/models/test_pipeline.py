@@ -176,3 +176,35 @@ def test_too_few_fitting_rows_skip_the_fold() -> None:
     assert out.skipped == [f.fold_id for f in folds]
     assert isinstance(PIPELINE, MlPipelineConfig)
     assert date(2024, 1, 1) <= data.x.index[0].date()
+
+
+def test_every_fold_reports_what_it_left_out() -> None:
+    sample = no_signal(n=1500, seed=11)
+    fold = walk_forward_folds(sample)[0]
+    x = sample.x.assign(flat=1.0)  # constant in every fitting row
+    y = sample.y.copy()
+    window = np.union1d(fold.train_idx, fold.val_idx)
+    x.iloc[window[[10, 20, 30]], 0] = np.nan  # three window rows with a missing input
+    y.iloc[window[[40, 50]]] = np.nan  # two window rows with an unknown target
+    x.iloc[window[[60]], 1] = np.nan  # a row with both: counted once, as a missing input
+    y.iloc[window[[60]]] = np.nan
+    x.iloc[fold.test_idx[[0, 5]], 1] = np.inf  # two test rows left unpredicted
+    data = FoldData(x, y, sample.label_end)
+    embargo = pd.Timedelta(hours=HORIZON)
+    trained = train_fold("logistic", fold, data, PIPELINE, embargo=embargo, seed=1, params={})
+    assert trained is not None
+    usable = len(window) - 6
+    assert trained.dropped == {
+        "missing_input": 4,
+        "unknown_target": 2,
+        "purged": usable - trained.n_fit - trained.n_val,
+        "test_unpredicted": 2,
+        "constant_columns": 1,
+    }
+    assert trained.dropped["purged"] > 0  # 48-hour labels: the validation start purges fitting rows
+    assert trained.n_test == len(fold.test_idx) - 2
+    out = run_pipeline("logistic", data, [fold], PIPELINE, embargo=embargo, seed=1, params={})
+    table = out.fold_table()
+    assert table.loc[fold.fold_id, "dropped_missing_input"] == 4
+    assert table.loc[fold.fold_id, "dropped_test_unpredicted"] == 2
+    assert {"n_fit", "n_val", "n_test", "dropped_purged", "fallback"} <= set(table.columns)

@@ -3,7 +3,11 @@
 `train_fold` trains one model on one walk-forward fold, using only that fold's training window:
 
 1. **Rows.** A row is usable when its target is known and every input is finite (nothing is
-   filled). The fold's training window is its purged training (and validation) rows.
+   filled). The fold's training window is its purged training (and validation) rows. What is
+   left out is counted per fold (`TrainedFold.dropped`, C-34 (2)): window rows with a missing
+   input, window rows with an unknown target (inputs finite), usable rows purged between the
+   fitting and validation rows, test rows left unpredicted for a missing input, and input
+   columns constant in the fitting rows (set to 0).
 2. **Validation split.** The last ``validation_fraction`` of the window's rows (the plan: 20 %)
    calibrate; the fitting rows before them are purged against the validation start minus the
    embargo (by ``label_end``, or ``max(label_end, weight_end)`` with uniqueness weights, C-30 (4)).
@@ -116,6 +120,9 @@ class TrainedFold:
     shrinkage: float | None = None
     #: True when the fold predicts its base rate (no skill shown on validation, C-34 (1)).
     fallback: bool = False
+    #: What was left out (module docstring, item 1): ``missing_input``, ``unknown_target``,
+    #: ``purged``, ``test_unpredicted`` and ``constant_columns``.
+    dropped: dict[str, int] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -126,6 +133,25 @@ class PipelineOutput:
     predictions: pd.DataFrame
     folds: list[TrainedFold]
     skipped: list[str]
+
+    def fold_table(self) -> pd.DataFrame:
+        """One row per trained fold: its row counts, what was dropped (C-34 (2)) and its
+        calibration (base rate, shrinkage, fallback; C-34 (1))."""
+        rows = [
+            {
+                "fold_id": f.fold_id,
+                "n_fit": f.n_fit,
+                "n_val": f.n_val,
+                "n_test": f.n_test,
+                **{f"dropped_{k}": v for k, v in f.dropped.items()},
+                "base_rate": f.base_rate,
+                "n_eff": f.n_eff,
+                "shrinkage": f.shrinkage,
+                "fallback": f.fallback,
+            }
+            for f in self.folds
+        ]
+        return pd.DataFrame(rows).set_index("fold_id") if rows else pd.DataFrame()
 
 
 def default_embargo(horizon: pd.Timedelta, sessions: SessionsConfig) -> pd.Timedelta:
@@ -228,6 +254,9 @@ def train_fold(
     usable = usable_rows(data)
     label_end = _ns(data.label_end)
     window = np.union1d(fold.train_idx, fold.val_idx).astype(np.int64)
+    finite = usable_rows_inputs(data)
+    missing_input = int((~finite[window]).sum())
+    unknown_target = int((finite[window] & ~usable[window]).sum())
     window = window[usable[window]]
     fit, val = split_validation(times, label_end, window, cfg.validation_fraction, embargo)
     if len(fit) < cfg.min_training_rows:
@@ -262,7 +291,15 @@ def train_fold(
     calibrator, val_metrics = _calibrate(
         spec.task, model, scaled, data, _Rows(fit, val, times, label_end), cfg, embargo
     )
-    test = fold.test_idx[usable_rows_inputs(data)[fold.test_idx]]
+    test = fold.test_idx[finite[fold.test_idx]]
+    assert scaler.std_ is not None
+    dropped = {
+        "missing_input": missing_input,
+        "unknown_target": unknown_target,
+        "purged": len(window) - len(fit) - len(val),
+        "test_unpredicted": len(fold.test_idx) - len(test),
+        "constant_columns": int((~(scaler.std_ > 0)).sum()),
+    }
     predictions = _predict(spec.task, model, calibrator, scaled, data, fold, test)
     used = np.concatenate([fit, val])
     train_end = pd.Timestamp(int(label_end[used].max()), tz="UTC")
@@ -286,6 +323,7 @@ def train_fold(
         n_eff=val_metrics.get("n_eff"),
         shrinkage=val_metrics.get("shrinkage"),
         fallback=bool(val_metrics.get("fallback", 0.0)),
+        dropped=dropped,
     )
 
 

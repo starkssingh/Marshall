@@ -325,6 +325,19 @@ its fitting rows' mean; the shrinkage factor and map; weighted training),
 `tests/unit/models/test_persistence.py` (a fallback fold reloads to its base rate; its card says
 so), `tests/unit/models/test_pipeline.py` (the demonstration).
 
+### (2) No filling at model time, with dropped rows reported
+
+**Decision.** Approved; report dropped-row counts in fold results.
+
+**Implementation.** Every `TrainedFold` carries `dropped`: window rows with a missing input,
+window rows with an unknown target (inputs finite; a row with both counts once, as a missing
+input), usable rows purged between the fitting and validation rows, test rows left unpredicted
+for a missing input, and input columns constant in the fitting rows (set to 0).
+`PipelineOutput.fold_table()` lists them per fold with the row counts and C-34 (1)'s base rate,
+shrinkage and fallback, and the model card records them. Tested in
+`tests/unit/models/test_pipeline.py` (every count by hand on a fold with planted gaps) and
+`tests/unit/models/test_persistence.py` (on the card).
+
 ## Consequences
 
 - The data-independent tasks of Phases 7 and 11 that the owner ordered are built; ML-004 onwards

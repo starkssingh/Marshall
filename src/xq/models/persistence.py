@@ -7,7 +7,8 @@
 - ``card.json`` — the **model card**: the family, its code version and task, the hyperparameters,
   the seed, the input columns, the feature-set version and dataset id, the fold id and its
   training cutoff, the fitting and validation row counts and their validation metrics, the
-  calibration's base rate, shrinkage and no-skill fallback (C-34 (1)), a SHA-256
+  calibration's base rate, shrinkage and no-skill fallback (C-34 (1)), the rows and columns
+  left out (C-34 (2)), a SHA-256
   of the training data (the fitting rows' inputs, targets and decision times), the library
   versions (Python, NumPy, pandas, scikit-learn, joblib, Optuna) and the artifact's SHA-256.
 
@@ -79,6 +80,8 @@ class ModelCard(BaseModel):
     base_rate: float | None = None
     shrinkage: float | None = None
     fallback: bool = False
+    #: C-34 (2): rows and columns left out of the fold (``TrainedFold.dropped``).
+    dropped: dict[str, int] = {}
     training_data_sha256: str
     library_versions: dict[str, str]
     artifact_sha256: str
@@ -153,6 +156,7 @@ def save_trained_fold(
         base_rate=trained.base_rate,
         shrinkage=trained.shrinkage,
         fallback=trained.fallback,
+        dropped=dict(trained.dropped),
         training_data_sha256=training_data_hash(data, trained.fit_index),
         library_versions=library_versions(),
         artifact_sha256=_sha256(artifact),

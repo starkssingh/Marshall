@@ -1053,6 +1053,9 @@ IDs from `docs/specs/development-plan.md`.
 
 ### Changed
 
+- C-34 (2) (owner's decision, ADR 0068), ML-002: every fold reports what it left out
+  (`TrainedFold.dropped`: missing inputs, unknown targets, purged rows, unpredicted test rows,
+  constant columns), listed by `PipelineOutput.fold_table()` and on the model card.
 - C-34 (1) (owner's decision, ADR 0068), ML-002: calibrated probabilities shrink towards the
   fold's training base rate, keeping `n_eff / (n_eff + k0)` of their distance (`n_eff` the
   validation labels' summed uniqueness, `k0 = shrinkage_prior = 50` in `config/ml.yaml`), and a
