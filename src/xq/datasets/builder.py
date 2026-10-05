@@ -60,10 +60,10 @@ from xq.datasets.base_features import (
     DECISION_TIME,
     FeatureContext,
     decision_index,
-    feature_set,
 )
 from xq.datasets.spec import DatasetSpec, code_versions, dataset_id, dump_spec
 from xq.datasets.vault import GateToken, check_window, vault_start
+from xq.features import registry as feature_registry
 from xq.quality.gate import GateDecision, gate_partitions
 from xq.targets.base import (
     Lookahead,
@@ -116,13 +116,17 @@ def datasets_root(cfg: AppConfig) -> Path:
 def config_digest(cfg: AppConfig, spec: DatasetSpec) -> str:
     """Hash of the configuration the builder reads besides the stores.
 
-    Covers the calendar, the instrument, the bar exclusion flags (which ticks targets may fill
-    at), the target set definition, if any, and the cost model its kind prices trades with.
+    Covers the calendar, the instrument, a configured feature set's definition (FEAT-001), the
+    bar exclusion flags (which ticks targets may fill at), the target set definition, if any, and
+    the cost model its kind prices trades with.
     """
     payload: dict[str, Any] = {
         "sessions": cfg.sessions_config().model_dump(mode="json"),
         "instrument": cfg.instrument(spec.instrument).model_dump(mode="json"),
     }
+    feature_definition = feature_registry.configured(cfg, spec.feature_set)
+    if feature_definition is not None:
+        payload["feature_set"] = feature_registry.definition_hash(feature_definition)
     if spec.target_set is not None:
         definition = cfg.target_set(spec.target_set.name, spec.target_set.version)
         payload["target_set"] = definition_hash(definition)
@@ -136,7 +140,7 @@ def config_digest(cfg: AppConfig, spec: DatasetSpec) -> str:
 
 def code_versions_for(cfg: AppConfig, spec: DatasetSpec) -> dict[str, int]:
     """Code versions of the feature and target builders a spec uses."""
-    versions = {f"features:{spec.feature_set}": feature_set(spec.feature_set).code_version}
+    versions = feature_registry.code_versions(cfg, spec.feature_set)
     if spec.target_set is not None:
         definition = cfg.target_set(spec.target_set.name, spec.target_set.version)
         versions[f"targets:{spec.target_set}"] = target_kind(definition.kind).code_version
@@ -211,7 +215,7 @@ def build_dataset(cfg: AppConfig, engine: Engine, spec: DatasetSpec, *, git_sha:
             f"source {spec.source!r} carries {source.instrument!r}, not {spec.instrument!r}"
         )
     check_window(cfg, spec.start, spec.end)  # research datasets never read the vault
-    feature_def = feature_set(spec.feature_set)
+    feature_def = feature_registry.resolve_feature_set(cfg, spec.feature_set)
     targets_def: tuple[TargetKind, list[TargetSpec]] | None = None
     reach: Lookahead | None = None
     if spec.target_set is not None:
@@ -222,6 +226,11 @@ def build_dataset(cfg: AppConfig, engine: Engine, spec: DatasetSpec, *, git_sha:
         reach = kind.lookahead(definition, trading_day)
     resolved = resolve_spec(cfg, engine, spec)
     ds_id = dataset_id(resolved, code_versions_for(cfg, resolved))
+    feature_definition = feature_registry.configured(cfg, resolved.feature_set)
+    if feature_definition is not None:
+        feature_registry.lock_feature_set(
+            engine, resolved.feature_set.name, resolved.feature_set.version, feature_definition
+        )
 
     clock: MarketClock | None = None
     quotes_until: pd.Timestamp | None = None

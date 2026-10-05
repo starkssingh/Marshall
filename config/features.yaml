@@ -1,0 +1,7 @@
+# Versioned feature sets (FEAT-001). Each set lists registered features (src/xq/features/) with
+# their parameters, computed on the dataset's base bars or, with `timeframe:`, on the bars of one
+# of its context timeframes and joined on availability (FEAT-008). Every feature of every set
+# passes the leakage harness automatically (tests/leakage/test_all_features.py), and a registered
+# feature that no set uses fails that suite. A set's definition is locked on first use: a change
+# needs a new version and an ADR. Nothing here was selected on data (build-only, synthetic).
+{}

@@ -59,6 +59,23 @@ def bar_inputs(week_ticks: pd.DataFrame) -> dict[str, pd.DataFrame]:
     return {"base": _bars(week_ticks, Timeframe.M15), "h1": _bars(week_ticks, Timeframe.H1)}
 
 
+#: Eight trading weeks: enough daily bars for the 1d context features' windows (FEAT-008).
+LONG = ("2024-01-07 23:00", "2024-03-02 00:00")
+
+
+@pytest.fixture(scope="session")
+def feature_inputs() -> dict[str, pd.DataFrame]:
+    """15m base bars and 1h, 4h and 1d context bars of eight synthetic trading weeks, keyed as the
+    dataset builder keys a feature set's inputs (``base``, ``1h``, ``4h``, ``1d``)."""
+    ticks = dense_ticks(*LONG, seed=37, mean_interval_s=90)
+    return {
+        "base": _bars(ticks, Timeframe.M15),
+        "1h": _bars(ticks, Timeframe.H1),
+        "4h": _bars(ticks, Timeframe.H4),
+        "1d": _bars(ticks, Timeframe.D1),
+    }
+
+
 @pytest.fixture
 def assert_causal() -> AssertCausal:
     """``assert_causal(fn, inputs)``: fail with the harness report if `fn` leaks."""

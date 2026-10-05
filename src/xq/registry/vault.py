@@ -20,7 +20,7 @@ and never again:
      a ``vault_access_granted`` warning and in ``vault_access_log``. Any other run presenting the
      token is refused.
    - The bundle's rule is evaluated on the vault by the code the board ran: the feature set's own
-     function on the bars (`feature_set(...).compute`, in memory, never materialized as a
+     function on the bars (`resolve_feature_set(...).compute`, in memory, never materialized as a
      dataset), the board's signal bars and rule positions, the screener with the configured cost
      model and sigma-hat, on the signal bars of the bundle's ``signal_timeframe``. Warm-up
      history comes from before the vault (loaded from the dataset's start, less its warm-up and
@@ -71,10 +71,11 @@ from xq.core.types import Timeframe
 from xq.data.calendar import MarketClock
 from xq.data.catalog import Catalog
 from xq.data.sessions import build_session_table
-from xq.datasets.base_features import BASE_INPUT, FeatureContext, feature_set
+from xq.datasets.base_features import BASE_INPUT, FeatureContext
 from xq.datasets.builder import recorded_spec, usable_quotes
 from xq.datasets.spec import DatasetSpec
 from xq.datasets.vault import GateToken, secret_digest, vault_start
+from xq.features.registry import resolve_feature_set
 from xq.models.baselines import RuleStrategyConfig, VolTargetConfig
 from xq.models.board import (
     BoardConfig,
@@ -361,7 +362,7 @@ def _vault_returns(
     context = FeatureContext(
         spec.base_timeframe, tuple(spec.context_timeframes), cfg.sessions_config()
     )
-    features = feature_set(spec.feature_set).compute(inputs, context)
+    features = resolve_feature_set(cfg, spec.feature_set).compute(inputs, context)
     vault = vault_start(cfg)
     decisions = features.index[(features.index >= vault) & (features.index < end)]
     if not len(decisions):

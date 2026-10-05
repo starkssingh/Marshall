@@ -959,6 +959,21 @@ IDs from `docs/specs/development-plan.md`.
   (p < 0.01) and a stable edge not flagged, too few folds reported as such, day assignment, and
   end to end on a synthetic board run through the CLI. ADR 0063.
 
+- FEAT-001: the feature framework (`xq.features`). `register_feature` builds an immutable,
+  versioned `Feature` (a pure function of one timeframe's bars, indexed by availability; name,
+  code version, family, a frozen parameter model, lookback and warm-up from the parameters);
+  `FeatureSpec` is the plan's `(name, version, family, timeframe, params, lookback, warmup,
+  inputs)` plus its column. `FEATURES` is a static registry; feature sets are named and versioned
+  in `config/features.yaml` (`FeatureSetConfig`, every parameter value there) and computed by
+  `compute_feature_set` (base-timeframe features on the base bars, context-timeframe features
+  joined with `asof_join` on availability as `mtf_<tf>_*`, optionally with `base.v1`'s columns).
+  The dataset builder and the vault evaluation resolve configured sets (`resolve_feature_set`);
+  a set's definition and feature versions enter the dataset id and are locked in `feature_sets`
+  (migration 0017). `TrainingFoldScaler` and `trailing_zscore` are the only normalizations (no
+  global scalers). `tests/leakage/test_all_features.py` runs the leakage harness on every spec
+  of every configured set and fails on a registered feature no set uses; a planted leak is
+  caught. ADR 0066.
+
 ### Changed
 
 - C-29 (owner's decision, ADR 0064), BASE-005: rule warm-ups may read signal bars from before the
