@@ -56,9 +56,10 @@ from xq.features.volatility import VOLATILITY
 from xq.tracking.db import session_factory
 from xq.tracking.models import FeatureSetRecord
 
-#: Code version of the feature-set machinery (the joins and naming); part of every dataset id
-#: of a configured feature set, next to each feature's own version.
-FRAMEWORK_VERSION = 1
+#: Code version of the feature-set machinery (the joins, naming and dataset warm-up); part of
+#: every dataset id of a configured feature set, next to each feature's own version.
+#: 2: the builder reads each timeframe's warm-up bars before the start (C-33 (3), ADR 0067).
+FRAMEWORK_VERSION = 2
 _FAMILY_FEATURES: tuple[Feature, ...] = (*PRICE, *MOMENTUM, *VOLATILITY, *STRUCTURE, *TIME)
 
 
@@ -268,6 +269,21 @@ def resolve_feature_set(cfg: AppConfig, ref: SetRef) -> FeatureSetDef:
         compute=compute,
         description=definition.description,
     )
+
+
+def warmup_bars(cfg: AppConfig, ref: SetRef) -> dict[str, int]:
+    """Bars of history each input frame (``base`` or a context timeframe) needs available by a
+    dataset's first decision for every feature of set `ref` to be defined there: the longest of
+    its features' lookbacks and warm-ups on that frame (C-33 (3), ADR 0067). Empty for a built-in
+    set."""
+    definition = configured(cfg, ref)
+    if definition is None:
+        return {}
+    needs: dict[str, int] = {}
+    for spec in feature_specs(definition):
+        name = spec.inputs[0]
+        needs[name] = max(needs.get(name, 0), spec.lookback, spec.warmup)
+    return needs
 
 
 def code_versions(cfg: AppConfig, ref: SetRef) -> dict[str, int]:

@@ -22,6 +22,12 @@ enforced. Every trading day the inputs touch passes the quality gate (DQ-007): F
 days refuse the build unless the spec excludes them. Excluded days and incomplete bars are dropped
 before features are computed.
 
+A configured feature set warms up on bars from before the start (C-33 (3), ADR 0067): for every
+timeframe it reads, the builder loads the bars its longest lookback needs, available by the first
+decision (`xq.features.registry.warmup_bars`), from the same source and bar build, before the
+vault and quality-gated like the rest. Nothing is filled: missing warm-up bars refuse the build
+(`FeatureWarmupError`).
+
 Building the same resolved spec again reproduces the same bytes. If the dataset already exists,
 the rebuild is compared with it: identical content is a no-op, different content raises
 `DatasetIntegrityError` (the id no longer pins the data, which is a bug to investigate).
@@ -49,12 +55,14 @@ from xq.core.config import AppConfig
 from xq.core.errors import ConfigError, XQError
 from xq.core.ids import new_ulid
 from xq.core.logging import get_logger
-from xq.core.time import ensure_utc, trading_day, trading_days, utc_now
+from xq.core.time import ensure_utc, trading_day, trading_day_bounds, trading_days, utc_now
+from xq.core.types import Timeframe
 from xq.data.bars import bar_set_id, build_version, exclude_mask
 from xq.data.calendar import NAT_NS, MarketClock, regular_trading_day
 from xq.data.catalog import Catalog
 from xq.data.clean import rules_version
 from xq.data.raw_store import sha256_file
+from xq.data.sessions import build_session_table
 from xq.datasets.base_features import (
     BASE_INPUT,
     DECISION_TIME,
@@ -85,12 +93,18 @@ TARGETS_FILE = "targets.parquet"
 SPEC_FILE = "spec.yaml"
 MANIFEST_FILE = "manifest.json"
 DECISION_COLUMN = "decision_time_utc"
+#: Open trading days read beyond a warm-up's estimate, for early closes and missing bars.
+WARMUP_MARGIN_DAYS = 5
 
 log = get_logger(__name__)
 
 
 class NoDatasetDataError(XQError):
     """The spec selects no bars, or no quality run covers its source and bar build."""
+
+
+class FeatureWarmupError(NoDatasetDataError):
+    """The bars a feature set's warm-up needs before the dataset's start are missing."""
 
 
 class DatasetIntegrityError(XQError):
@@ -420,19 +434,38 @@ def _load_inputs(
     for tf in spec.context_timeframes:
         # Start one context bar earlier so one is already available when the window opens.
         starts[tf] = load_start - tf.duration
+    # The feature set's own warm-up (C-33 (3), ADR 0067): enough bars of every timeframe it reads,
+    # available by the first decision, for its longest lookback; read from before the start.
+    needs = feature_registry.warmup_bars(cfg, spec.feature_set)
+    first_decision = (
+        ensure_utc(spec.start)
+        + spec.base_timeframe.duration
+        + pd.Timedelta(milliseconds=cfg.bars_config().publication_latency_ms)
+    )
+    excluded_days = {e.trading_day for e in spec.exclusions}
     loaded: dict[str, pd.DataFrame] = {}
     for tf, start in starts.items():
+        name = BASE_INPUT if tf == spec.base_timeframe else tf.value
+        need = needs.get(name, 0)
+        read_from = start
+        if need:
+            read_from = min(start, warmup_load_start(cfg, ensure_utc(spec.start), tf, need))
         bars = catalog.load_bars(
             spec.source,
             spec.instrument,
             tf,
             spec.price_basis,
-            start,
+            read_from,
             spec.end,
             build=spec.bar_build,
         )
-        name = BASE_INPUT if tf == spec.base_timeframe else tf.value
-        loaded[name] = bars.loc[bars["is_complete"].to_numpy()].reset_index(drop=True)
+        bars = bars.loc[bars["is_complete"].to_numpy()].reset_index(drop=True)
+        if need:
+            keep_from = _feature_warmup_start(bars, tf, need, first_decision, excluded_days)
+            bars = bars.loc[(bars["bar_start_utc"] >= min(start, keep_from)).to_numpy()]
+        else:
+            bars = bars.loc[(bars["bar_start_utc"] >= start).to_numpy()]
+        loaded[name] = bars.reset_index(drop=True)
 
     exclusions = {e.trading_day: e.reason for e in spec.exclusions}
     days = {day for bars in loaded.values() for day in bars["trading_day"]} | set(exclusions)
@@ -458,6 +491,48 @@ def _load_inputs(
         for name, bars in loaded.items()
     }
     return inputs, decision
+
+
+def warmup_load_start(
+    cfg: AppConfig, before: pd.Timestamp, timeframe: Timeframe, count: int
+) -> pd.Timestamp:
+    """Where to start reading `count` bars of `timeframe` that end before `before`: the start of
+    the open trading day ``count / bars per regular day`` open days earlier, plus
+    `WARMUP_MARGIN_DAYS` for early closes and missing bars (C-29, C-33)."""
+    sessions = cfg.sessions_config()
+    per_day = max(1, math.floor(regular_trading_day(sessions) / timeframe.duration))
+    open_days = math.ceil(count / per_day) + WARMUP_MARGIN_DAYS
+    last = trading_day(before)
+    table = build_session_table(sessions, last - timedelta(days=2 * open_days + 31), last)
+    opened = sorted(
+        pd.Timestamp(d).date()
+        for d in table.loc[table["is_open"].astype(bool), "trading_day"]
+        if pd.Timestamp(d).date() <= last
+    )
+    return trading_day_bounds(opened[-min(open_days, len(opened))])[0]
+
+
+def _feature_warmup_start(
+    bars: pd.DataFrame,
+    timeframe: Timeframe,
+    need: int,
+    first_decision: pd.Timestamp,
+    excluded: Collection[date],
+) -> pd.Timestamp:
+    """The start of the earliest of the last `need` usable bars available by the first decision.
+
+    Raises:
+        FeatureWarmupError: if fewer than `need` such bars exist.
+    """
+    usable = ~bars["trading_day"].isin(set(excluded)).to_numpy()
+    usable &= (bars["available_at_utc"] <= first_decision).to_numpy()
+    eligible = bars.loc[usable]
+    if len(eligible) < need:
+        raise FeatureWarmupError(
+            f"the feature set's warm-up needs {need} {timeframe.value} bars available by the first "
+            f"decision ({first_decision}); only {len(eligible)} complete bars exist before it"
+        )
+    return pd.Timestamp(eligible["bar_start_utc"].iloc[-need])
 
 
 def _targets(

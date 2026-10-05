@@ -1017,6 +1017,13 @@ IDs from `docs/specs/development-plan.md`.
 
 ### Changed
 
+- C-33 (3) (owner's decision, ADR 0067), FEAT-001 / DS-005: a configured feature set warms up on
+  bars from before the dataset's start: per input timeframe, the longest lookback (or warm-up)
+  of its specs (`warmup_bars`), read from the same source and build, pre-vault, quality-gated,
+  and available by the first decision; nothing is filled, and missing warm-up bars refuse the
+  build (`FeatureWarmupError`). `FRAMEWORK_VERSION` 1 -> 2. `warmup_load_start` is shared with
+  the board's rule warm-ups. Tested on seventeen synthetic weeks: `core.v1` has no missing value
+  from the first trading day; missing and gate-failed warm-up bars refuse the build.
 - C-29 (owner's decision, ADR 0064), BASE-005: rule warm-ups may read signal bars from before the
   dataset's start, up to each rule's warm-up length: the same source, bar build and price basis,
   complete bars only, before the vault, without the spec's excluded days, every day gated by the
