@@ -983,6 +983,11 @@ IDs from `docs/specs/development-plan.md`.
   declared warm-up; a dataset built with `core.v1` (base columns included), reproducible, its
   definition locked. ADR 0066.
 
+- FEAT-003: momentum features (`xq.features.momentum`): rate of change, Wilder's RSI, the MACD
+  histogram in sigma units, the t-statistic of the log close's least-squares slope and the
+  sign agreement of several horizons' returns, added to `core.v1`. RSI and MACD match
+  step-by-step hand computations, the slope t-statistic SciPy's regression. ADR 0066.
+
 ### Changed
 
 - C-29 (owner's decision, ADR 0064), BASE-005: rule warm-ups may read signal bars from before the

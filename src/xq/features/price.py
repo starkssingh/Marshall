@@ -37,6 +37,7 @@ from xq.features.base import (
     bar_sigma,
     column,
     contiguous,
+    ewma_reach,
     frame,
     log_ratio,
     register_feature,
@@ -66,11 +67,6 @@ class NoParams(FeatureParams):
     pass
 
 
-def _ewma_reach(span: int) -> int:
-    """Bars carrying 99 % of an EWMA's weight (its effective lookback)."""
-    return int(np.ceil(np.log(0.01) / np.log(1 - 2 / (span + 1))))
-
-
 @register_feature(
     name="log_return",
     version=1,
@@ -89,7 +85,7 @@ def log_return(bars: pd.DataFrame, params: Bars, context: BarContext) -> pd.Data
     version=1,
     family="price",
     params=Sigma,
-    lookback=lambda p: _ewma_reach(p.sigma_span),
+    lookback=lambda p: ewma_reach(p.sigma_span),
     warmup=lambda p: p.sigma_span + 1,
 )
 def range_sigma(bars: pd.DataFrame, params: Sigma, context: BarContext) -> pd.DataFrame:
@@ -120,7 +116,7 @@ def candle(bars: pd.DataFrame, params: NoParams, context: BarContext) -> pd.Data
     version=1,
     family="price",
     params=Sigma,
-    lookback=lambda p: _ewma_reach(p.sigma_span) + 1,
+    lookback=lambda p: ewma_reach(p.sigma_span) + 1,
     warmup=lambda p: p.sigma_span + 2,
 )
 def gap(bars: pd.DataFrame, params: Sigma, context: BarContext) -> pd.DataFrame:
@@ -137,7 +133,7 @@ def gap(bars: pd.DataFrame, params: Sigma, context: BarContext) -> pd.DataFrame:
     version=1,
     family="price",
     params=Window,
-    lookback=lambda p: max(p.window, _ewma_reach(p.sigma_span)),
+    lookback=lambda p: max(p.window, ewma_reach(p.sigma_span)),
     warmup=lambda p: p.window,  # the position; the sigma-unit distances need sigma-hat too
 )
 def extreme_distance(bars: pd.DataFrame, params: Window, context: BarContext) -> pd.DataFrame:
@@ -159,7 +155,7 @@ def extreme_distance(bars: pd.DataFrame, params: Window, context: BarContext) ->
     version=1,
     family="price",
     params=Sigma,
-    lookback=lambda p: _ewma_reach(p.sigma_span),
+    lookback=lambda p: ewma_reach(p.sigma_span),
     warmup=lambda p: p.sigma_span + 1,
 )
 def session_vwap(bars: pd.DataFrame, params: Sigma, context: BarContext) -> pd.DataFrame:
@@ -179,7 +175,7 @@ def session_vwap(bars: pd.DataFrame, params: Sigma, context: BarContext) -> pd.D
     version=1,
     family="price",
     params=Span,
-    lookback=lambda p: max(_ewma_reach(p.span), _ewma_reach(p.sigma_span)),
+    lookback=lambda p: max(ewma_reach(p.span), ewma_reach(p.sigma_span)),
     warmup=lambda p: max(p.span, p.sigma_span + 1),
 )
 def ema_distance(bars: pd.DataFrame, params: Span, context: BarContext) -> pd.DataFrame:

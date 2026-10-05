@@ -49,6 +49,7 @@ from xq.datasets.base_features import (
 from xq.datasets.leakage import Inputs
 from xq.datasets.spec import SetRef
 from xq.features.base import AVAILABLE_AT, BarContext, Feature, FeatureSpec
+from xq.features.momentum import MOMENTUM
 from xq.features.price import PRICE
 from xq.tracking.db import session_factory
 from xq.tracking.models import FeatureSetRecord
@@ -57,7 +58,7 @@ from xq.tracking.models import FeatureSetRecord
 #: of a configured feature set, next to each feature's own version.
 FRAMEWORK_VERSION = 1
 MTF_PREFIX = "mtf_"
-_FAMILY_FEATURES: tuple[Feature, ...] = (*PRICE,)
+_FAMILY_FEATURES: tuple[Feature, ...] = (*PRICE, *MOMENTUM)
 
 
 class FeatureSetChangedError(ConfigError):

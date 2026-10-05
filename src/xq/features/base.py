@@ -214,6 +214,11 @@ def _token(value: object) -> str:
 # --- building blocks ------------------------------------------------------------------------------
 
 
+def ewma_reach(span: int) -> int:
+    """Bars carrying 99 % of an exponential average's weight (its effective lookback)."""
+    return int(np.ceil(np.log(0.01) / np.log(1 - 2 / (span + 1))))
+
+
 def availability_index(bars: pd.DataFrame) -> pd.DatetimeIndex:
     """The bars' availability times: the index of every feature computed on them."""
     return pd.DatetimeIndex(bars[AVAILABLE_AT], name="decision_time")

@@ -29,3 +29,10 @@ core:
       - {feature: session_vwap, params: {sigma_span: 96}}
       - {feature: ema_distance, params: {span: 20, sigma_span: 96}}
       - {feature: ema_distance, params: {span: 100, sigma_span: 96}}
+      # FEAT-003 momentum
+      - {feature: roc, params: {bars: 16}}
+      - {feature: rsi, params: {window: 14}}
+      - {feature: macd_hist, params: {fast: 12, slow: 26, signal: 9, sigma_span: 96}}
+      - {feature: ma_slope_t, params: {window: 20}}
+      - {feature: ma_slope_t, params: {window: 96}}
+      - {feature: sign_agreement, params: {horizons: [1, 4, 16, 64]}}

@@ -72,3 +72,19 @@ so far, typical price weighted by tick count) and `ema_distance` (EMA 20 and 100
 - **Known truth** (`tests/unit/features/test_price.py`): every feature against a hand
   computation (EWMA sigma by its weights; the gap after the 21:00 UTC close; the VWAP's tick
   weights and its reset at the trading-day roll).
+
+## FEAT-003 — momentum (`xq.features.momentum`)
+
+`roc` (16 bars), `rsi` (Wilder, 14), `macd_hist` (12, 26, 9, in sigma units of the price),
+`ma_slope_t` (the t-statistic of the least-squares slope of the log close, 20 and 96 bars) and
+`sign_agreement` (the mean sign of the 1, 4, 16 and 64-bar log returns).
+
+- **RSI:** the first averages are the simple means of the first `window` changes, then Wilder's
+  recursion; 100 with only gains, 50 without movement.
+- **MACD:** recursive EMAs (`a = 2 / (n + 1)`) from the first close, the MACD known once `slow`
+  closes exist, the signal line an EMA of the MACD over `signal` values; the histogram is divided
+  by `close * bar_sigma` so it is comparable across price levels.
+- **Slope t-statistic:** a window whose residual sum of squares is below 1e-12 of its total (a
+  perfect line, up to rounding) has no t-statistic.
+- **Known truth** (`tests/unit/features/test_momentum.py`): RSI and MACD step by step by hand;
+  the slope t-statistic equal to SciPy's `linregress` slope over its standard error.
