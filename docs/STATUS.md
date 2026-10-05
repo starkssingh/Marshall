@@ -8,11 +8,13 @@ with the repository, the repository wins.
 - **Last updated:** 2026-10-05, at the end of the second session on branch
   `claude/c29-c30-sprint7-features-ncwssz`: the owner's decisions on C-33 (ADR 0067), then the
   last data-independent tasks REG-001, ML-001, ML-002, ML-003 and ML-009 (ADR 0068), in review.
-  PR #20 (C-29, C-30 and Sprint 7 part 2) was still open, not merged, when this session started,
-  so this work continues on its branch and PR.
-- **Merged to `main`:** Sprints 1–6, 9, 11, 12 A, 12 B, 13 and 7 part 1, the Dukascopy data
-  session and the C-15 session, with the revised H-0001 draft and the Sprint 5 and Sprint 6 review
-  fixes (PRs #2, #3, #6, #7, #8, #9, #10, #11, #12, #13, #14, #15, #16, #17, #18, #19).
+  PR #20 (C-29, C-30 and Sprint 7 part 2) was merged during this session, after its work was
+  done; this session's commits were rebased onto `main` and go to a new pull request from the
+  same branch.
+- **Merged to `main`:** Sprints 1–7, 9, 11, 12 A, 12 B and 13, the Dukascopy data session, the
+  C-15 session and the C-29/C-30 decisions, with the revised H-0001 draft and the Sprint 5 and
+  Sprint 6 review fixes (PRs #2, #3, #6, #7, #8, #9, #10, #11, #12, #13, #14, #15, #16, #17, #18,
+  #19, #20).
 - **Where sessions run:** real-data sessions run in Claude Code on the owner's Mac, where the data
   is (`data/` is git-ignored and never leaves that machine). Cloud sessions work on synthetic data
   only (ADR 0062).
@@ -21,35 +23,37 @@ with the repository, the repository wins.
 
 - **This session:** the owner's decisions on C-33 (ADR 0067), then REG-001, ML-001, ML-002,
   ML-003 and ML-009 (ADR 0068) — **complete, in review on branch
-  `claude/c29-c30-sprint7-features-ncwssz` (PR #20), synthetic data only**. One commit each:
+  `claude/c29-c30-sprint7-features-ncwssz` (a new pull request after PR #20), synthetic data
+  only**. One commit each:
   - C-33 (3): no filling; a dataset's feature set warms up on pre-start bars (same rules as
     C-29), its length the longest lookback per timeframe, computed from the specs; missing bars
-    refuse the build (`a674fe0`); (1), (2), (5) recorded as approved (a changed calendar means a
+    refuse the build (`30a9592`); (1), (2), (5) recorded as approved (a changed calendar means a
     new feature-set version);
   - C-33 (4): admission gates; the VWAP distance is computed and checked but refused as a model
-    input until FEAT-007 (`4255902`);
+    input until FEAT-007 (`fcbe538`);
   - `experiments/configs/ds_core.yaml`: ds_base's window with `core.v1`, a spec only, not built
-    until DQ-008; ds_base stays on `base.v1` (`50fd2ba`);
+    until DQ-008; ds_base stays on `base.v1` (`61b625e`);
   - REG-001 rule regimes (volatility, trend, compression) with training-fold cut-offs
-    (`2272514`);
-  - ML-001 the `Forecaster` protocol and scikit-learn wrappers (`abc0efa`); ML-002 the in-fold
-    pipeline with purged inner CV and calibration on validation (`1267771`); ML-003 seeded
-    Optuna HPO with every configuration a trial (`9f1a919`); ML-009 persistence and model cards
-    (`1b2fab7`);
+    (`757eba5`);
+  - ML-001 the `Forecaster` protocol and scikit-learn wrappers (`872caee`); ML-002 the in-fold
+    pipeline with purged inner CV and calibration on validation (`d90d78a`); ML-003 seeded
+    Optuna HPO with every configuration a trial (`b2abb93`); ML-009 persistence and model cards
+    (`3c5a806`);
   - this STATUS, ADR 0067 and ADR 0068's closing sections, the README.
   - Proven on synthetic data: `core.v1` has no missing value from a dataset's first trading day
     when warm-up bars exist (seventeen weeks of ticks), and missing or gate-failed warm-up bars
     refuse the build; a model-input request for the VWAP distance is refused; regime cut-offs
     equal each fold's own training quantiles and ignore its test rows; **the purging
     demonstration**: on overlapping labels without signal, shuffled CV shows spurious skill
-    (AUC 0.76–0.82) while purged CV and the pipeline sit at chance (AUC 0.44–0.59, no
-    out-of-sample log-loss gain); calibration on validation cuts ECE by more than two thirds on
+    (AUC 0.76–0.82) while purged CV and the pipeline rank at chance (AUC 0.44–0.59) with no
+    out-of-sample log-loss gain — the pipeline's log loss is worse than chance, and the test's
+    thresholds were lowered after a three-seed run (ADR 0068, ML-002 item 4); calibration on validation cuts ECE by more than two thirds on
     overconfident scores; a seeded search is reproducible and every configuration is counted
     by the trial counter; a reloaded model reproduces its test predictions within 1e-9.
     **Nothing has run on real data**, and no model was trained or regime cut on data.
   - New dependencies: scikit-learn, joblib, Optuna. The readings for review are C-34 (ADR 0068).
-- **Previous session (same branch, PR #20, open):** the owner's decisions on C-29 (ADR 0064) and
-  C-30 (ADR 0065), then Sprint 7 part 2, the feature library (ADR 0066), synthetic data only:
+- **Previous session (same branch, merged in PR #20):** the owner's decisions on C-29 (ADR 0064)
+  and C-30 (ADR 0065), then Sprint 7 part 2, the feature library (ADR 0066), synthetic data only:
   C-29 (`37798f5`), C-30 (`5826c59`), FEAT-001 (`661bf2d`), FEAT-002 (`b8ec65e`), FEAT-003
   (`a1ed63a`), FEAT-004 (`38500f0`), FEAT-006 (`d5d1867`), FEAT-005 (`02ab888`), FEAT-008
   (`0400dae`), feature set `core.v1`. Its readings were decided in C-33.
@@ -253,7 +257,7 @@ with the repository, the repository wins.
 | C-30 | Owner review of Sprint 7 part 1's readings (ADR 0063) | Sprint 7 part 1 | Owner | decided (ADR 0065): (1), (2), (4), (5) approved — every volatility evaluation names its target (TGT-003 includes gap returns, VOL-002's RV excludes them); new payoffs only as new target-set versions; purging by `max(label_end, weight_end)` (the splitters' `weight_end`, tested). (3) fixed: the trade/no-trade label calls the backtester's `CostModel` (multipliers included), `derived.v2`, code version 2 — `5826c59` |
 | C-31 | GATE-004 requirement (owner's decision C-27 (6), ADR 0062): the live-readiness record stores the SHA-256 of the signed GATE-003 review document, so the reviewed text is identified | ADR 0062 | Claude, when GATE-004 is built | open |
 | C-32 | The event-tier R3 evaluation (owner's requirement C-27 (3), ADR 0062): R3 recomputed with the event backtester and the real risk engine, recorded with `evidence_tier: event`. The transition rule is enforced (migration 0016); the evaluator is not built, so no subject can reach `paper` | ADR 0062 | Claude, when a candidate runs on the event tier | open |
-| C-33 | Owner review of Sprint 7 part 2's readings (ADR 0066): (1) `core.v1`'s conventional parameter values, fixed before results; (2) sigma units from the timeframe's own trailing EWMA (`bar_sigma`), VOL-006's per-fold sigma-hat kept at model time; (3) features missing until their warm-up, nothing filled — ds_base's 10-day warm-up leaves 20-day 1d features missing for its first weeks; (4) the VWAP's tick weights gated by FEAT-007; (5) calendar features on a calendar DQ-004/DQ-008 must still confirm. Whether a dataset spec should name `core.v1` | Sprint 7 part 2 | Owner | decided (ADR 0067): (1), (2), (5) approved — a changed calendar means a new feature-set version; (3) no filling, the dataset's feature warm-up reads quality-gated pre-start bars, its length the set's longest lookback (`a674fe0`); (4) the VWAP distance gated out of model inputs until FEAT-007 (`4255902`); `ds_core.yaml` (core.v1, not built until DQ-008; `50fd2ba`) |
+| C-33 | Owner review of Sprint 7 part 2's readings (ADR 0066): (1) `core.v1`'s conventional parameter values, fixed before results; (2) sigma units from the timeframe's own trailing EWMA (`bar_sigma`), VOL-006's per-fold sigma-hat kept at model time; (3) features missing until their warm-up, nothing filled — ds_base's 10-day warm-up leaves 20-day 1d features missing for its first weeks; (4) the VWAP's tick weights gated by FEAT-007; (5) calendar features on a calendar DQ-004/DQ-008 must still confirm. Whether a dataset spec should name `core.v1` | Sprint 7 part 2 | Owner | decided (ADR 0067): (1), (2), (5) approved — a changed calendar means a new feature-set version; (3) no filling, the dataset's feature warm-up reads quality-gated pre-start bars, its length the set's longest lookback (`30a9592`); (4) the VWAP distance gated out of model inputs until FEAT-007 (`fcbe538`); `ds_core.yaml` (core.v1, not built until DQ-008; `61b625e`) |
 | C-34 | Owner review of ADR 0068's readings: (1) calibration weighted by the validation labels' raw uniqueness, Platt's slope with a unit L2 penalty; (2) no filling at model time (rows with a missing input dropped or unpredicted, a column constant in training set to 0); (3) REG-001's cut-off quantiles; (4) the HPO budget counted per fold (50 trials × folds in the family); (5) a model load refused on library drift | Sprint 8/10 data-independent tasks | Owner | open |
 
 ## Open owner decisions
