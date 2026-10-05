@@ -1,4 +1,5 @@
-"""ML-003: the seeded search is reproducible, stays in its space and spends exactly its budget."""
+"""ML-003: the seeded search is reproducible, stays in its space, spends exactly its budget and
+reports it (configurations evaluated and the sampler's seed, C-34 (4))."""
 
 import math
 from collections.abc import Mapping
@@ -9,6 +10,7 @@ import pytest
 from helpers.pipeline import REPO
 from xq.core.config import MlHpoConfig, SearchDimension, load_config
 from xq.core.errors import ConfigError
+from xq.core.seeds import derive_seed
 from xq.models.hpo import optuna_search, search_space
 
 HPO = load_config("research", config_dir=REPO / "config").ml_config().hpo
@@ -24,7 +26,7 @@ def run(seed: int, n: int = 20) -> tuple[dict[str, Any], list[dict[str, Any]]]:
     search = optuna_search(
         "logistic", HPO, seed=seed, n_trials=n, record=lambda c, loss: seen.append(dict(c))
     )
-    return search(bowl, "f000"), seen
+    return search(bowl, "f000").params, seen
 
 
 def test_a_seed_reproduces_every_configuration_and_the_choice() -> None:
@@ -67,9 +69,16 @@ def test_an_unusable_configuration_does_not_stop_the_search() -> None:
     search = optuna_search(
         "logistic", HPO, seed=2, n_trials=5, record=lambda c, loss: seen.append(loss)
     )
-    best = search(lambda p: math.inf if p["C"] > 1 else p["C"], "f002")
+    best = search(lambda p: math.inf if p["C"] > 1 else p["C"], "f002").params
     assert len(seen) == 5
     assert best["C"] <= 1 or all(math.isinf(x) for x in seen)
+
+
+def test_a_search_reports_its_budget_seed_and_best_loss() -> None:
+    result = optuna_search("logistic", HPO, seed=7, n_trials=12)(bowl, "f003")
+    assert result.n_configs == 12
+    assert result.seed == derive_seed(7, "hpo", "logistic", "f003")
+    assert result.best_loss == pytest.approx(bowl(result.params))
 
 
 def test_the_configuration_is_refused_when_incomplete() -> None:

@@ -15,7 +15,9 @@
    among themselves, scaled to a mean of 1; computed on the fitting rows only.
 4. **Hyperparameters.** Given, or chosen by a `Search` (ML-003) minimizing `inner_cv_loss`: the
    mean loss (log loss, or MSE for regression) over a **purged k-fold with embargo** inside the
-   fitting rows, with a scaler fitted on each inner training split alone.
+   fitting rows, with a scaler fitted on each inner training split alone. The search is recorded
+   per fold (`TrainedFold.hpo`: configurations evaluated, sampler seed, chosen parameters and
+   their inner loss); its configurations are not trials (C-34 (4), `xq.models.hpo`).
 5. **Refit** on every fitting row, after a `TrainingFoldScaler` fitted on those rows (a column
    constant there carries no information and is set to 0).
 6. **Calibration** on the validation rows only (`fit_calibrator`: isotonic above
@@ -74,8 +76,23 @@ from xq.validation.walkforward import PREDICTION_COLUMNS, stitch_oos
 IntArray = npt.NDArray[np.int64]
 FloatArray = npt.NDArray[np.float64]
 Objective = Callable[[Mapping[str, Any]], float]
-#: ``search(objective, fold_id) -> params``: a hyperparameter search (ML-003).
-Search = Callable[[Objective, str], dict[str, Any]]
+
+
+@dataclass(frozen=True)
+class SearchResult:
+    """What a hyperparameter search chose for one fold and how (ML-003, C-34 (4))."""
+
+    params: dict[str, Any]
+    #: Configurations evaluated (on the inner purged CV, never on test).
+    n_configs: int
+    #: The sampler's seed for this fold.
+    seed: int
+    #: The chosen configuration's inner CV loss.
+    best_loss: float
+
+
+#: ``search(objective, fold_id) -> SearchResult``: a hyperparameter search (ML-003).
+Search = Callable[[Objective, str], SearchResult]
 
 
 @dataclass(frozen=True)
@@ -123,6 +140,9 @@ class TrainedFold:
     #: What was left out (module docstring, item 1): ``missing_input``, ``unknown_target``,
     #: ``purged``, ``test_unpredicted`` and ``constant_columns``.
     dropped: dict[str, int] = field(default_factory=dict)
+    #: The fold's hyperparameter search (C-34 (4)): ``n_configs``, ``seed``, ``best_params`` and
+    #: ``best_inner_loss``; None when the parameters were given.
+    hpo: dict[str, Any] | None = None
 
 
 @dataclass(frozen=True)
@@ -268,6 +288,7 @@ def train_fold(
     held = dict(fixed or {})
     chosen: dict[str, Any]
     inner: dict[str, float] = {}
+    hpo: dict[str, Any] | None = None
     if search is not None:
         splits = inner_splits(
             times[fit], data.label_end.iloc[fit], weight_end, cfg.inner_splits, embargo
@@ -279,7 +300,14 @@ def train_fold(
             inner[repr(sorted(merged.items()))] = loss
             return loss
 
-        chosen = {**held, **search(objective, fold.fold_id)}
+        result = search(objective, fold.fold_id)
+        chosen = {**held, **result.params}
+        hpo = {
+            "n_configs": result.n_configs,
+            "seed": result.seed,
+            "best_params": dict(chosen),
+            "best_inner_loss": result.best_loss,
+        }
     else:
         chosen = {**held, **dict(params or {})}
 
@@ -324,6 +352,7 @@ def train_fold(
         shrinkage=val_metrics.get("shrinkage"),
         fallback=bool(val_metrics.get("fallback", 0.0)),
         dropped=dropped,
+        hpo=hpo,
     )
 
 

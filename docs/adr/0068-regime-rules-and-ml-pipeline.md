@@ -145,6 +145,8 @@ is evidence.
    records each as a trial of the hypothesis family with `evaluated_on_test=False` and its inner
    loss, so the trial counter, the effective trial count and the deflated Sharpe ratio see the
    whole search; the chosen model's out-of-sample evaluation is recorded by its caller, on test.
+   **Superseded by C-34 (4)** (below): a trial is a distinct pipeline specification evaluated on
+   outer test folds; search configurations are recorded per fold but are not trials.
 3. **Dependency:** Optuna (the TPE sampler), added in this sprint.
 4. **Known truth** (`tests/unit/models/test_hpo.py`, `tests/integration/models/test_ml_trials.py`):
    a seed reproduces every configuration in order and the choice, another seed does not; the
@@ -337,6 +339,43 @@ for a missing input, and input columns constant in the fitting rows (set to 0).
 shrinkage and fallback, and the model card records them. Tested in
 `tests/unit/models/test_pipeline.py` (every count by hand on a fold with planted gaps) and
 `tests/unit/models/test_persistence.py` (on the card).
+
+### (3) Regime cut-off quantiles
+
+**Decision.** Approved; the cut-offs (`config/regimes.yaml`) were fixed before any result and
+stay so. No change.
+
+### (4) What a trial is (changed)
+
+**Decision** (supersedes the owner's earlier "every evaluated configuration is a trial", and the
+plan's ML-003 line "every configuration counted by the trial counter"): the deflated Sharpe
+ratio's trial count is the number of **distinct pipeline specifications** (model family x
+feature set x target x target-set version) evaluated on outer test folds. Inner HPO
+configurations are recorded per fold (count, seeds, best parameters) but do not increment the
+trial counter.
+
+**Implementation** (`xq.models.hpo`, `xq.models.pipeline`, `xq.tracking.trials`):
+
+1. `PipelineSpec(model, feature_set, target, target_set_version)` is the unit.
+   `record_pipeline_trial(run, family_id, spec)` records it once per hypothesis family,
+   `evaluated_on_test=True` (with its Sharpe ratio and returns when given, for the effective trial
+   count). Evaluating the same specification again, in the same run or another one, with other
+   hyperparameters or seeds, returns the trial already recorded (`find_family_trial`, by the
+   specification's configuration hash). `trial_recorder` is removed.
+2. A search returns a `SearchResult` (chosen parameters, configurations evaluated, the sampler's
+   seed, the chosen configuration's inner loss), and each fold keeps it as `TrainedFold.hpo`.
+   `record_hpo(run, output, spec, directory)` writes the metrics `hpo_n_configs`, `hpo_seed` and
+   `hpo_best_inner_loss` per fold and `hpo_<model>.json` (the specification and every fold's
+   summary) as an artifact of kind `hpo`. It records no trial.
+3. Consequence: a 50-configuration search on 40 folds no longer adds 2,000 trials to the family;
+   the selection inside a fold is protected by the inner purged CV and its out-of-sample cost is
+   paid on the outer test folds, where the specification is the trial. Choosing among
+   specifications by their test results is what the trial count charges for.
+4. Tests: `tests/integration/models/test_ml_trials.py` (a searched run counts no trial until its
+   specification is recorded, then exactly one; every fold's count, seed and chosen parameters are
+   recorded as metrics and an artifact; five distinct specifications count five, a repeat in the
+   same run or another run counts nothing, a sixth specification in a second run counts one),
+   `tests/unit/models/test_hpo.py` (a search reports its budget, seed and best loss).
 
 ## Consequences
 
