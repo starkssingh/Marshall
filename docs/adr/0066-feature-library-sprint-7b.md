@@ -179,3 +179,40 @@ timeframe, which the harness audits.
   bar; every switch happens at the first decision at or after an availability; changing bars not
   yet published leaves every earlier value unchanged; a daily bar is read only from the 21:00 UTC
   roll (17:00 New York, EDT) on.
+
+## Not done here, on purpose
+
+- **No feature selection, importance or ranking** on any data (owner's instruction). FEAT-010's
+  diagnostics and within-fold importance are Sprint 8, and importance will be reported only when
+  stable across folds.
+- **No dataset spec names `core.v1`.** `ds_base` keeps `base.v1` (its window and feature set are
+  the owner's); `core.v1` is materialized only in a synthetic integration test.
+- FEAT-007 (tick-volume and liquidity, gated on DATA-011), FEAT-009 (external series) and the
+  `external_series` table of the plan's Phase 8 wait for their sprints.
+
+## Readings for the owner's review (C-33)
+
+1. **Parameter values.** `core.v1`'s windows and spans are conventional values (the plan's 1–64
+   bar returns, RSI 14, MACD 12/26/9, ATR 14, ADX 14, VOL-001's window 20, one trading day of
+   15m bars for sigma units) fixed before any result, not selected on data. Changing one is a new
+   set version.
+2. **Sigma units** are the timeframe's own trailing EWMA volatility (`bar_sigma`, span 96 on 15m,
+   20 on context bars), not VOL-006's forecaster: the forecaster's per-fold sigma-hat is a
+   model-time quantity (`serve_sigma`) and never a dataset column.
+3. **Warm-ups.** A feature is missing until its declared warm-up is met; nothing is filled. With
+   ds_base's 10-day warm-up the 1d context features with 20-day windows are missing for the first
+   weeks of the dataset (C-29's pre-start loading applies to the board's rules, not to features);
+   lengthening the dataset's warm-up is the owner's choice.
+4. **The VWAP's tick weights** are a quote-activity proxy on one feed; a model may rely on them
+   only after FEAT-007's admission (DATA-011).
+5. **Calendar-based features** (sessions, events, prior session, trading-day weekday) use the
+   calendar of `config/sessions.yaml`, which DQ-004 and the DQ-008 review still have to confirm
+   against Dukascopy's real hours (the Friday close observation of ADR 0062).
+
+## Consequences
+
+- `xq dataset build` accepts any configured feature set; its definition and feature versions are
+  part of the dataset id and locked in `feature_sets` (migration 0017).
+- A feature's code change bumps its version, which changes the id of every dataset using it.
+- Speed on ten years of real 15m bars is unmeasured: Wilder's RSI, ATR and ADX recursions and the
+  swing and compression windows run in NumPy or plain Python loops per feature.

@@ -5,53 +5,53 @@ sprint and whenever a decision or carry-over item changes; anything decided in c
 recorded in an ADR and here in the same session. If a memory of an earlier conversation conflicts
 with the repository, the repository wins.
 
-- **Last updated:** 2026-10-04, at the end of the session on branch
-  `claude/bold-heisenberg-c0p3bj` (branched from `main` after the C-15 session was merged in
-  PR #18): the owner's decisions on C-26, C-27 and C-28 (ADR 0062), then Sprint 7, build-only,
-  part 1 (ADR 0063), in review.
-- **Merged to `main`:** Sprints 1–6, 9, 11, 12 A, 12 B and 13, the Dukascopy data session and the
-  C-15 session, with the revised H-0001 draft and the Sprint 5 and Sprint 6 review fixes (PRs #2,
-  #3, #6, #7, #8, #9, #10, #11, #12, #13, #14, #15, #16, #17, #18).
+- **Last updated:** 2026-10-05, at the end of the session on branch
+  `claude/c29-c30-sprint7-features-ncwssz` (branched from `main` after Sprint 7 part 1 was merged
+  in PR #19): the owner's decisions on C-29 (ADR 0064) and C-30 (ADR 0065), then Sprint 7,
+  build-only, part 2 — the feature library (ADR 0066), in review.
+- **Merged to `main`:** Sprints 1–6, 9, 11, 12 A, 12 B, 13 and 7 part 1, the Dukascopy data
+  session and the C-15 session, with the revised H-0001 draft and the Sprint 5 and Sprint 6 review
+  fixes (PRs #2, #3, #6, #7, #8, #9, #10, #11, #12, #13, #14, #15, #16, #17, #18, #19).
 - **Where sessions run:** real-data sessions run in Claude Code on the owner's Mac, where the data
   is (`data/` is git-ignored and never leaves that machine). Cloud sessions work on synthetic data
   only (ADR 0062).
 
 ## Current sprint
 
-- **This session:** the owner's decisions on C-26, C-27 and C-28 (ADR 0062), then Sprint 7,
-  build-only, part 1 (ADR 0063) — **complete, in review on branch
-  `claude/bold-heisenberg-c0p3bj`, synthetic data only**. One commit each:
-  - ADR 0062 and this STATUS (`144168c`): C-28 confirmed as built; C-26 and C-27 decided;
-  - C-26: the dukascopy-node CSV route with the corrected flags `-r 3 -re -fr` and the owner's
-    monthly loop in [`docs/runbooks/real-data.md`](runbooks/real-data.md) (`fcfa9e1`, the loop
-    checked against a stub `npx` only); `ds_base` from 2015-01-01 (`d8da183`);
-  - C-27 (3): promotion to `paper` needs R3 recomputed on the event tier, in `promote` and in the
-    database (migration 0016, `0704849`);
-  - ARCH-004: matplotlib, PIL and fontTools held at WARNING (`55bf8d1`);
-  - TGT-003 future realized volatility (`b39a174`), TGT-004 MFE and MAE in sigma units
-    (`d2fefbf`), TGT-005 triple-barrier labels (`fb322f4`), TGT-006 derived labels and uniqueness
-    weights (`8ebccac`), a dataset built with each new target set (`0e477d6`);
-  - WF-004 the monthly retraining schedule and stitching (`76b52a0`), WF-005 the walk-forward
-    report with its decay regression and `xq exp wf-report` (`6528380`);
-  - this STATUS, ADR 0063 and the README.
-  - Proven on synthetic data: every new target passes the leakage harness (the bar-resolved
-    barrier and the uniqueness weights too; the harness caught a first barrier version whose
-    early labels needed the later exit fill); barrier labels recover known hit times, also
-    against a brute-force search on random paths; a bar touching both barriers is a flagged stop
-    while ticks resolve it exactly; the uniqueness weights match the hand example
-    (0.75, 0.625, 0.75); the stitched out-of-sample series has no overlaps or gaps; the
-    walk-forward report finds a planted decay and runs end to end on a synthetic board run.
-    **Nothing has run on real data**, and no target set but `fwd_returns.v1` is named by a
-    dataset spec.
-  - Sprint 7 part 2 (FEAT-001 … FEAT-006, FEAT-008) is next. The readings for review are C-30.
-- **Previous session:** C-15, the revised H-0001 in the board runner (ADR 0061) — **complete,
-  merged in PR #18, synthetic data only**. Rules on `signal_timeframes: [1d, 1h]`, 36 strategies
-  (H-0001's budget); each rule evaluated over its full history after its warm-up, the
-  fold-aligned view kept; descriptive year and session slices. Its readings were confirmed in
-  C-28. H-0001 is **not registered**.
-- **Earlier:** Sprint 13 (the registry and the release gates, ADR 0060, PR #17) and the Dukascopy
-  primary feed (ADR 0057, PR #16), both synthetic only; their open points were decided in C-27
-  and C-26.
+- **This session:** the owner's decisions on C-29 (ADR 0064) and C-30 (ADR 0065), then Sprint 7,
+  build-only, part 2 (ADR 0066) — **complete, in review on branch
+  `claude/c29-c30-sprint7-features-ncwssz`, synthetic data only**. One commit each:
+  - C-29: rule warm-ups read quality-gated signal bars from before the dataset's start (same
+    source, build and basis, pre-vault, up to each rule's warm-up length); every rule is evaluated
+    from the dataset's first trading day; missing or gate-failed pre-start bars stop the board
+    (`37798f5`);
+  - C-30: (3) fixed — the trade/no-trade label calls the backtester's `CostModel` (multipliers
+    included; `derived.v2`, code version 2; a trade in the rollover window pays 3x slippage in the
+    label and the backtester); (4) the splitters purge by `max(label_end, weight_end)`; (1), (2),
+    (5) recorded as approved (`5826c59`);
+  - FEAT-001 the feature spec, registry, versioned feature sets in `config/features.yaml`
+    (locked in `feature_sets`, migration 0017) and the leakage harness auto-applied to every
+    configured feature, failing on a registered feature no set uses (`661bf2d`);
+  - FEAT-002 price structure (`b8ec65e`), FEAT-003 momentum (`a1ed63a`), FEAT-004 volatility
+    (`38500f0`), FEAT-006 time and event proximity (`d5d1867`), FEAT-005 market structure with
+    swing confirmation lags (`02ab888`), FEAT-008 multi-timeframe context joined on availability
+    (`0400dae`), all in feature set `core.v1`;
+  - this STATUS, ADR 0066's closing sections and the README.
+  - Proven on synthetic data: every configured feature (base and multi-timeframe) passes the
+    leakage harness and honours its declared warm-up; a planted leak is caught on both paths;
+    RSI, MACD, ATR and ADX match step-by-step hand computations and the slope t-statistic SciPy's
+    regression; session flags match the session table across DST changes; a swing appears only
+    after its confirmation lag; a higher-timeframe value appears only from its bar's
+    `available_at`; a dataset builds with `core.v1` and reproduces. **Nothing has run on real
+    data**, nothing was selected or ranked on data, and no dataset spec names `core.v1`.
+  - The readings for review are C-33 (ADR 0066).
+- **Previous session:** the owner's decisions on C-26, C-27 and C-28 (ADR 0062), then Sprint 7,
+  build-only, part 1 (ADR 0063) — **complete, merged in PR #19, synthetic data only**: target
+  sets of TGT-003 … TGT-006, the monthly retraining schedule and stitching (WF-004), the
+  walk-forward report (WF-005). Its readings were decided in C-30.
+- **Earlier:** C-15, the revised H-0001 in the board runner (ADR 0061, PR #18); Sprint 13 (the
+  registry and the release gates, ADR 0060, PR #17) and the Dukascopy primary feed (ADR 0057,
+  PR #16), all synthetic only; their open points were decided in C-28, C-27 and C-26.
 - **Owner's next step (C-8):** download and ingest on your Mac, from the repository root, with
   the dukascopy-node CSV route (ADR 0062): the monthly loop from 2014-01 in
   [`docs/runbooks/real-data.md`](runbooks/real-data.md) (`-r 3 -re -fr`, one CSV per month,
@@ -125,25 +125,35 @@ with the repository, the repository wins.
       ever; the one confirmatory vault evaluation of a rule bundle, checked before the first
       read, every read logged, R3 recorded (on the screening tier: it reaches `vault_passed`;
       `paper` needs an event-tier R3, ADR 0062, migration 0016).
-  - **Added this session** (ADR 0063):
+  - **Added in Sprint 7 part 1** (ADR 0063):
     - target kinds `realized_vol` (TGT-003), `excursion` (TGT-004), `triple_barrier` (TGT-005)
       and `derived_label` (TGT-006), with target sets `realized_vol.v1`, `excursions.v1`,
-      `barriers.v1` and `derived.v1` (now `derived.v2`, ADR 0065) in `config/targets.yaml`; `label_uniqueness` and
-      `uniqueness_weights` (TGT-006) for in-fold sample weights;
+      `barriers.v1` and `derived.v2` (the trade label priced by the backtester's `CostModel`,
+      ADR 0065) in `config/targets.yaml`; `label_uniqueness` and `uniqueness_weights` (TGT-006)
+      for in-fold sample weights, and the splitters' `weight_end` to purge by them;
     - the monthly retraining schedule (the research default when no `test_len` is given) and
       `stitch_oos` (WF-004);
     - the walk-forward report and `xq exp wf-report <run> --strategy <name>` (WF-005).
+  - **Added this session** (ADR 0064, ADR 0066):
+    - the board's rule warm-ups on quality-gated pre-start signal bars, one evaluation start for
+      every rule (C-29);
+    - the feature library `xq.features` (FEAT-001 … FEAT-006, FEAT-008): registered, versioned
+      features in five families, multi-timeframe context joined on availability, feature set
+      `core.v1` in `config/features.yaml` (computed by `xq dataset build` for any spec that names
+      it, locked in `feature_sets`), `TrainingFoldScaler` and trailing z-scores as the only
+      normalizations, and the leakage harness on every configured feature.
   - `xq exp reproduce <run_id>` rebuilds a baseline-board run's dataset, reruns it and reports
     REPRODUCED, NOT_REPRODUCED or RERUN_DIFFERENT_CODE.
   - Validation and robustness settings are in `config/validation.yaml`; the thresholds stay in
     `config/gates.yaml`.
-- **Next:** the owner's review of this session (C-30). Sprint 7 part 2 (FEAT-001 … FEAT-006,
-  FEAT-008), build-only on synthetic data, unless the owner orders otherwise. The owner downloads
-  and ingests Dukascopy data with the CSV route (above); the C-8 session on the owner's Mac runs
+- **Next:** the owner's review of this session (C-33). Then, by the plan's order, Sprint 8's
+  build-only parts (REG-001, REG-006, REG-007, FEAT-010's machinery without any importance on
+  data, BASE-004) on synthetic data, unless the owner orders otherwise. The owner downloads and
+  ingests Dukascopy data with the CSV route (above); the C-8 session on the owner's Mac runs
   `xq validate` on it and prepares DQ-008.
   - After the quality review: H-0001 is registered with windows from the real data, alongside
-    H-0000 (C-15, C-16); only then may the board run on real data. Whether rules may warm up on
-    the 2014 data before `ds_base`'s start is C-29.
+    H-0000 (C-15, C-16); only then may the board run on real data. Its rules warm up on the 2014
+    bars (C-29, ADR 0064), which must therefore pass `xq validate` too.
   - With real data, after the quality review (C-8): the research halves of Sprint 5 (C-16) and
     Sprint 6 (C-18), then the research parts of Sprints 7, 8 and 10.
   - Sprint 14 (paper trading) needs a venue and its data/broker API (an owner decision), and a
@@ -172,8 +182,10 @@ with the repository, the repository wins.
     vault evaluation, before a candidate exists and the owner allows it (the vault is opened once
     per bundle, ever);
   - running anything on real Dukascopy data beyond the data pipeline and `xq validate` before the
-    DQ-008 review (materializing the new target sets, or `xq exp wf-report` on a real run,
-    included);
+    DQ-008 review (materializing the new target sets or `core.v1`, or `xq exp wf-report` on a
+    real run, included);
+  - feature selection, importance or ranking on any data, real or synthetic (owner's instruction
+    for Sprint 7; FEAT-010 reports importance only within folds and only when stable);
   - committing market data (it stays under the git-ignored `data/`);
   - treating Dukascopy's spreads as execution costs (no venue; costs stay placeholders,
     ADR 0057);
@@ -217,10 +229,11 @@ with the repository, the repository wins.
 | C-26 | Owner review of the Dukascopy session's open points (ADR 0057). (1) The `.bi5` endpoint has been reported to time out since 7 July 2026 (dukascopy-node issue #254) and could not be tested: if it is still down, keep the dukascopy-node CSV route, or have Claude add Dukascopy's JSON API to `xq fetch` (hourly JSON files, same guarantees). (2) Files are stored as the vendor's bytes, one per hour, named after the UTC hour; empty hours get no file. (3) Canonical tick sizes stay NaN (volume units undocumented); volumes are kept in the raw mirror. (4) Download pace: one request at a time, 0.5 s apart, 4 attempts with backoff, empty market hours asked twice and recorded only once a later hour has ticks, 24 in a row stop the run. (5) The calendar is unchanged until `xq validate` on real data shows Dukascopy's hours (Dukascopy's hours pages were blocked here); the table in ADR 0057 lists the checks. (6) `ds_base.yaml` keeps its ~4-year window (start 2021-09-26) although Dukascopy goes back to 2003: a longer window is the owner's decision, before results. (7) `--source` now defaults to `data.primary_source` in the pipeline commands | Dukascopy session | Owner, then Claude | decided (ADR 0062): (1) the dukascopy-node CSV route is the working route (the `.bi5` endpoint answered HTTP 503 on 2026-10-04; March 2024 ran end to end), corrected command `-r 3 -re -fr`, the owner's monthly loop in `docs/runbooks/real-data.md`, no JSON API; (2), (3), (4), (5), (7) approved; (6) `ds_base.yaml` from 2015-01-01 (download from 2014-01-01), fixed before any result. Implemented: `fcfa9e1` (README, runbook), `d8da183` (`ds_base` start) |
 | C-27 | Owner review of Sprint 13's open points (ADR 0060). (1) Under the registry's rules a bundle reaches paper only through R1, R2 and R3; the plan's decision point (no bundle passes R2) wants a baseline bundle on the paper infrastructure, which would need a separate, labelled environment (for example `paper_infra`, never evidence) — not built. (2) A failed vault evaluation spends the bundle's one vault access; any exception needs an ADR. (3) R3's risk-limit breaches are read on the screening tier (daily losses against the risk profile's limits), not from the risk engine's refusals, until a candidate runs on the event tier. (4) Enforcement is in the code and SQLite triggers; an administrator with write access to the database file can bypass them (every gate result names its evaluator, evidence and policy hash); the migrations refuse a database without the triggers until PAPER-004 writes PostgreSQL's. (5) Promotion to `paper` reads the same R3 result as `vault_passed`. (6) A signed GATE-003 review is a document, not a database record; whether it must be recorded is GATE-004's question. (7) Only rule bundles can be bundled and vault-evaluated (models wait for ML-009); a forecast-sign board strategy's neighbourhood is not evaluated | Sprint 13 | Owner, then Claude | decided (ADR 0062): (1), (2), (4), (5), (7) approved; (3) approved with a new requirement — promotion to `paper` needs R3 recomputed on the event tier with the real risk engine (enforced in the transition rule and the database); (6) GATE-004 records the SHA-256 of the signed GATE-003 review. Implemented: (3) `0704849` (the rule; the evaluator is C-32); (1) with Sprint 14 if needed; (6) is C-31 |
 | C-28 | Owner review of the C-15 session's readings (ADR 0061). (1) The H-0001 board test (Sharpe p-value, DSR, random-entry null, slices) uses each rule's full history after its warm-up, while `xq validate-strategy` (R1, R2), the registry's `backtest` history (MREG-004) and the vault's walk-forward interval (R3) keep judging a rule on its fold-aligned record (identical days for every strategy and every later candidate; conservative). Confirm, or move validation and the registry to the full history for rules. (2) The first evaluation day counts from the first evaluation decision (the rule is flat before it). (3) Donchian now enters only once its exit channel is known (only `exit > max(entry, atr_window)` changes; no board has one) | C-15 session | Owner | decided (ADR 0062): all three readings confirmed as built; no code change |
-| C-29 | Whether the board's rule warm-ups may read signal bars before the dataset's start | ADR 0062 (C-26 (6)) | Owner | approved (ADR 0064): warm-ups read quality-gated pre-start bars of the same source and build, up to each rule's warm-up length; every rule is evaluated from the dataset's first trading day; missing or gate-failed pre-start bars stop the board — built in `feat(models): C-29` |
-| C-30 | Owner review of Sprint 7 part 1's readings (ADR 0063) | Sprint 7 part 1 | Owner | decided (ADR 0065): (1), (2), (4), (5) approved — every volatility evaluation names its target (TGT-003 includes gap returns, VOL-002's RV excludes them); new payoffs only as new target-set versions; purging by `max(label_end, weight_end)` (the splitters' `weight_end`, tested). (3) fixed: the trade/no-trade label calls the backtester's `CostModel` (multipliers included), `derived.v2`, code version 2 — built in `fix(targets): C-30` |
+| C-29 | Whether the board's rule warm-ups may read signal bars before the dataset's start | ADR 0062 (C-26 (6)) | Owner | approved (ADR 0064): warm-ups read quality-gated pre-start bars of the same source and build, up to each rule's warm-up length; every rule is evaluated from the dataset's first trading day; missing or gate-failed pre-start bars stop the board — `37798f5` |
+| C-30 | Owner review of Sprint 7 part 1's readings (ADR 0063) | Sprint 7 part 1 | Owner | decided (ADR 0065): (1), (2), (4), (5) approved — every volatility evaluation names its target (TGT-003 includes gap returns, VOL-002's RV excludes them); new payoffs only as new target-set versions; purging by `max(label_end, weight_end)` (the splitters' `weight_end`, tested). (3) fixed: the trade/no-trade label calls the backtester's `CostModel` (multipliers included), `derived.v2`, code version 2 — `5826c59` |
 | C-31 | GATE-004 requirement (owner's decision C-27 (6), ADR 0062): the live-readiness record stores the SHA-256 of the signed GATE-003 review document, so the reviewed text is identified | ADR 0062 | Claude, when GATE-004 is built | open |
 | C-32 | The event-tier R3 evaluation (owner's requirement C-27 (3), ADR 0062): R3 recomputed with the event backtester and the real risk engine, recorded with `evidence_tier: event`. The transition rule is enforced (migration 0016); the evaluator is not built, so no subject can reach `paper` | ADR 0062 | Claude, when a candidate runs on the event tier | open |
+| C-33 | Owner review of Sprint 7 part 2's readings (ADR 0066): (1) `core.v1`'s conventional parameter values, fixed before results; (2) sigma units from the timeframe's own trailing EWMA (`bar_sigma`), VOL-006's per-fold sigma-hat kept at model time; (3) features missing until their warm-up, nothing filled — ds_base's 10-day warm-up leaves 20-day 1d features missing for its first weeks; (4) the VWAP's tick weights gated by FEAT-007; (5) calendar features on a calendar DQ-004/DQ-008 must still confirm. Whether a dataset spec should name `core.v1` | Sprint 7 part 2 | Owner | open |
 
 ## Open owner decisions
 
@@ -291,6 +304,11 @@ and the other open points of C-26 and C-27 are approved as they stand. Decided o
 ticks are the primary research feed (superseding ADR 0004's choice), `mt5_primary` stays optional,
 OANDA v20 S5 candles are a later cross-check (DATA-011) and candidate live feed, and costs stay
 placeholders until a venue exists. Claude's choices within it were reviewed in C-26 (ADR 0062).
+Decided on 2026-10-05: rule warm-ups may read quality-gated signal bars before the dataset's start,
+up to each rule's warm-up length, and every rule is evaluated from the dataset's first trading
+day (C-29, ADR 0064); Sprint 7 part 1's readings approved, except the trade/no-trade label, which
+must call the backtester's own cost model (C-30, ADR 0065); Sprint 7 part 2 build-only, with no
+feature selection or importance on any data.
 
 ## Provisional assumptions not yet confirmed
 
@@ -315,6 +333,7 @@ placeholders until a venue exists. Claude's choices within it were reviewed in C
 | Trial clustering | \|ρ\| 0.7 (absolute correlation, C-25), 60 common trading days; frozen with the gates (ADR 0032); Sharpe variance across clusters (ADR 0058) | `config/base.yaml` `experiments` | fixed before results |
 | Sigma-hat | interim EWMA, span 96 base bars | `fwd_returns.v1` | a VOL-006 selection on real data, approved by the owner and recorded in an ADR (C-18) |
 | Sprint 7 targets (TGT-003 … TGT-006) | the forward returns' windows (latency 1 s, fill delay 300 s, sigma-hat span 96); realized volatility on a 5-minute market-time grid of the mid; barriers at 1.0 / 1.0 sigma-hats over the horizon, every tick a path point; big move above 1.0 sigma-hat; trade/no-trade label priced by the backtester's cost model (`placeholder`, session multipliers included; `derived.v2`) | `config/targets.yaml`, ADR 0063, ADR 0065 | fixed before results; changes need a new set version and an ADR |
+| Feature set `core.v1` (FEAT-001 … FEAT-008) | log returns 1–64 bars; sigma units over 96 base bars (20 context bars); extremes and breakouts 20/96; EMA 20/100; RSI 14; MACD 12/26/9; slope t 20/96; ATR 14, ADX 14; VOL-001 estimators over 20; vol ratio 16/96; vol of vol 96 over 16; swing strength 3; z-score 20/96; compression 20 in 96; round numbers 10/50/100 USD; event minutes capped at 1,440; context features on 1h, 4h, 1d | `config/features.yaml`, ADR 0066 | fixed before results; changes need a new set version and an ADR |
 | Retraining schedule | monthly (from the start of the trading day dated the 1st) when no `test_len` is given; the board keeps its fixed 91-day folds | `xq.validation.splitters`, ADR 0063 | fixed before results |
 | Baseline board | fixed parameters (rules on 1d and 1h signal bars, lookbacks in bars of the signal timeframe, MA 20/50 and 50/200, 10 % vol target, 1,000 random-entry seeds); rules evaluated over the full pre-vault history after their warm-up, forecast-sign strategies on the folds; folds: expanding, ≥ 3 years training, 91-day tests, 1-day embargo | `experiments/configs/baselines/board.yaml`, ADR 0033, ADR 0034, ADR 0035, ADR 0061 | fixed before results; changes need an ADR |
 | Random-walk forecast baseline | persistence of the latest completed bar return of the horizon's timeframe (`zero_return` covers the price random walk) | ADR 0033 | owner review of Sprint 4 |
@@ -357,10 +376,16 @@ placeholders until a venue exists. Claude's choices within it were reviewed in C
   one-minute returns one at a time, and the Student-t fit uses the full series.
 - The `SPREAD_OUTLIER` cleaning flag fires on rollover widening, and spread statistics use
   hourly buckets that blur short spikes; to be revisited in the DQ-008 review (ADR 0013).
-- `base.v1` is an interim feature set (bar values, context bars, calendar columns) until FEAT-001
-  (Sprint 7); sigma-hat is the interim EWMA of `fwd_returns.v1` until a VOL-006 selection on real
-  data is approved and promoted (C-18). The Sprint 6 plan's "the selected `VolForecaster` serves
-  sigma-hat to datasets" is therefore not done: `serve_sigma` exists, nothing is wired to datasets.
+- `ds_base` still names `base.v1` (bar values, context bars, calendar columns); `core.v1`
+  (ADR 0066) is materialized only in a synthetic test, and switching a dataset to it is the
+  owner's call (C-33). Sigma-hat is the interim EWMA of `fwd_returns.v1` until a VOL-006
+  selection on real data is approved and promoted (C-18); the per-fold VOL-006 sigma-hat is a
+  model-time quantity (`serve_sigma`), never a dataset column, and nothing wires it in-fold
+  until ML-002.
+- The feature library is tested on synthetic data only. With `ds_base`'s 10-day warm-up, 1d
+  context features with 20-day windows would be missing for the first weeks of a dataset; their
+  speed on ten years of real 15m bars is unmeasured (Wilder recursions in Python loops). The
+  session VWAP weights by tick counts, a quote-activity proxy gated by FEAT-007 (DATA-011).
 - Sprint 6 methods are validated on simulated processes only; none has run on real data, and
   there is no CLI for the statistical verdict report or the volatility board (C-18). Their speed on
   four years of real 1m bars is unmeasured (EGARCH multi-step forecasts are simulated, 1,000 paths

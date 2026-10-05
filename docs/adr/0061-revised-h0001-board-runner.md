@@ -1,6 +1,7 @@
 # ADR 0061 — The revised H-0001 in the board runner (C-15)
 
-- **Status:** accepted (two readings flagged for the owner's review: C-28)
+- **Status:** accepted (two readings flagged for the owner's review: C-28); decision 3's
+  per-rule evaluation start is amended by ADR 0064 (C-29: pre-start warm-ups, one start)
 - **Date:** 2026-10-03
 - **Decided by:** Claude, implementing the owner's H-0001 revision (ADR 0035) with the readings
   the owner approved (ADR 0041), on the owner's instruction for this session

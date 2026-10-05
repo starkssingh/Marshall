@@ -69,8 +69,8 @@ to end on synthetic ticks against a test vault start; the vault has never been o
 The baseline board now runs the revised H-0001 (C-15, ADR 0061): every rule on 1d and 1h signal
 bars (`<name>@<timeframe>`, 36 strategies with the forecast-sign ones), evaluated over the full
 pre-vault history from the dataset's first trading day (warmed up on quality-gated signal bars
-from before the dataset's start, C-29, ADR 0064), with the fold-aligned view (the same returns on the
-walk-forward test days) kept in `returns.parquet` for paired comparisons, validation and the
+from before the dataset's start, C-29, ADR 0064), with the fold-aligned view (the same returns on
+the walk-forward test days) kept in `returns.parquet` for paired comparisons, validation and the
 registry, and descriptive year and session slices. H-0001 is still unregistered: its windows
 are set from the real data's depth at registration. Synthetic data only.
 Sprint 7 part 1 (ADR 0063) adds the remaining targets — future realized volatility, MFE and MAE
@@ -78,7 +78,13 @@ in sigma units, triple-barrier labels (exact hit times on ticks; a bar touching 
 flagged stop), sign, big-move and trade/no-trade labels, label concurrency and average-uniqueness
 weights — each passing the leakage harness, plus the monthly retraining schedule with a stitched
 out-of-sample series checked for overlaps and gaps, and the walk-forward report with its decay
-regression (`xq exp wf-report`). Synthetic data only; the features of Sprint 7 come next.
+regression (`xq exp wf-report`). The trade/no-trade label is priced by the backtester's own cost
+model (C-30, ADR 0065). Sprint 7 part 2 (ADR 0066) adds the feature library: registered,
+versioned features (price structure, momentum, volatility, market structure, time and event
+proximity) and multi-timeframe context joined on availability, in the versioned feature set
+`core.v1` (`config/features.yaml`); the leakage harness runs on every configured feature
+automatically and fails on a registered feature no set uses. Nothing was selected or ranked on
+data, and no feature set has been materialized on real data. Synthetic data only.
 See
 [`CHANGELOG.md`](CHANGELOG.md) for
 completed backlog tasks and [`docs/STATUS.md`](docs/STATUS.md) for the current sprint, open
