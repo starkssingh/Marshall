@@ -13,8 +13,12 @@
   versions (Python, NumPy, pandas, scikit-learn, joblib, Optuna) and the artifact's SHA-256.
 
 `load_model(directory)` reads it back. It refuses an artifact whose bytes no longer match the
-card's hash, and, unless asked otherwise, one written by other library versions (unpickling across
-versions can change behaviour silently). The loaded `PersistedModel` predicts exactly as the
+card's hash, and one written by other library versions (unpickling across versions can change
+behaviour silently). **The explicit override** ``allow_library_drift=True`` (CLI:
+``--allow-library-drift``; C-34 (5)) loads such a model as a **diagnostic**: the model and every
+prediction it makes are labelled ``"diagnostic, library drift"`` (`DIAGNOSTIC_LABEL`; a ``label``
+column and ``attrs["label"]``), and `require_evidence` refuses them as evidence (the trial
+counter, for one, will not record them). The loaded `PersistedModel` predicts exactly as the
 pipeline did: scale with the stored scaler, ``p_raw`` from the forecaster, ``p_cal`` from the
 calibrator. **A reload reproduces the pipeline's test predictions within 1e-9** (tested).
 
@@ -28,7 +32,7 @@ import hashlib
 import json
 import math
 import platform
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from importlib.metadata import version
 from pathlib import Path
 from typing import Any
@@ -51,8 +55,18 @@ CARD = "card.json"
 LIBRARIES = ("numpy", "pandas", "scikit-learn", "joblib", "optuna")
 
 
+#: How a model loaded across library versions, and everything it predicts, is labelled.
+DIAGNOSTIC_LABEL = "diagnostic, library drift"
+#: The prediction column carrying `DIAGNOSTIC_LABEL`.
+LABEL_COLUMN = "label"
+
+
 class PersistenceError(XQError):
     """A stored model whose artifact or library versions do not match its card."""
+
+
+class NotEvidenceError(PersistenceError):
+    """Diagnostic output (a model loaded across library versions) offered as evidence."""
 
 
 class ModelCard(BaseModel):
@@ -95,16 +109,47 @@ class PersistedModel:
     scaler: TrainingFoldScaler
     calibrator: Calibrator | None
     card: ModelCard
+    #: Library versions that differ from the card's: ``{library: (card, current)}``.
+    drift: dict[str, tuple[str, str | None]] = field(default_factory=dict)
+
+    @property
+    def label(self) -> str | None:
+        """`DIAGNOSTIC_LABEL` when loaded across library versions, else None."""
+        return DIAGNOSTIC_LABEL if self.drift else None
 
     def predict(self, x: pd.DataFrame) -> pd.DataFrame:
         """``p_raw`` and ``p_cal`` (classification) or ``y_pred`` (regression) per row of `x`,
-        computed as the pipeline computed them."""
+        computed as the pipeline computed them; labelled when the model is a diagnostic."""
         scaled = scaled_inputs(self.scaler, x.loc[:, self.card.features])
         if self.forecaster.task != "classification":
-            return pd.DataFrame({"y_pred": self.forecaster.predict(scaled)}, index=x.index)
-        p = self.forecaster.predict_proba(scaled)
-        cal = self.calibrator.transform(p) if self.calibrator is not None else p
-        return pd.DataFrame({"p_raw": p, "p_cal": cal}, index=x.index)
+            out = pd.DataFrame({"y_pred": self.forecaster.predict(scaled)}, index=x.index)
+        else:
+            p = self.forecaster.predict_proba(scaled)
+            cal = self.calibrator.transform(p) if self.calibrator is not None else p
+            out = pd.DataFrame({"p_raw": p, "p_cal": cal}, index=x.index)
+        if self.label is not None:
+            out[LABEL_COLUMN] = self.label
+            out.attrs["label"] = self.label
+        return out
+
+
+def require_evidence(output: PersistedModel | pd.DataFrame) -> None:
+    """Refuse a diagnostic model, or predictions it made, as evidence.
+
+    Raises:
+        NotEvidenceError: if `output` carries `DIAGNOSTIC_LABEL` (as the model's label, a
+            ``label`` column value or ``attrs["label"]``).
+    """
+    if isinstance(output, PersistedModel):
+        labelled = output.label is not None
+    else:
+        labelled = output.attrs.get("label") == DIAGNOSTIC_LABEL or bool(
+            LABEL_COLUMN in output.columns and (output[LABEL_COLUMN] == DIAGNOSTIC_LABEL).any()
+        )
+    if labelled:
+        raise NotEvidenceError(
+            f"{DIAGNOSTIC_LABEL}: output of a model loaded across library versions is not evidence"
+        )
 
 
 def library_versions() -> dict[str, str]:
@@ -165,15 +210,16 @@ def save_trained_fold(
     return card
 
 
-def load_model(directory: Path, *, allow_version_drift: bool = False) -> PersistedModel:
+def load_model(directory: Path, *, allow_library_drift: bool = False) -> PersistedModel:
     """Read a model written by `save_trained_fold`.
 
     Args:
-        allow_version_drift: Load even if the library versions differ from the card's.
+        allow_library_drift: Load even if the library versions differ from the card's; the model
+            and its predictions are then labelled `DIAGNOSTIC_LABEL` and refused as evidence.
 
     Raises:
         PersistenceError: if the artifact's hash differs from the card's, or the library versions
-            differ and `allow_version_drift` is False.
+            differ and `allow_library_drift` is False.
     """
     card = ModelCard.model_validate(json.loads((directory / CARD).read_text(encoding="utf-8")))
     artifact = directory / ARTIFACT
@@ -183,10 +229,13 @@ def load_model(directory: Path, *, allow_version_drift: bool = False) -> Persist
     drift = {
         k: (v, current.get(k)) for k, v in card.library_versions.items() if current.get(k) != v
     }
-    if drift and not allow_version_drift:
-        raise PersistenceError(f"the model was written with other library versions: {drift}")
+    if drift and not allow_library_drift:
+        raise PersistenceError(
+            f"the model was written with other library versions: {drift} "
+            "(--allow-library-drift loads it as a diagnostic, never as evidence)"
+        )
     parts = joblib.load(artifact)
-    return PersistedModel(parts["forecaster"], parts["scaler"], parts["calibrator"], card)
+    return PersistedModel(parts["forecaster"], parts["scaler"], parts["calibrator"], card, drift)
 
 
 def _sha256(path: Path) -> str:

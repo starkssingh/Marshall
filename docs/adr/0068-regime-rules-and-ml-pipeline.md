@@ -165,8 +165,9 @@ is evidence.
    inputs, targets and decision times), the library versions (Python, NumPy, pandas,
    scikit-learn, joblib, Optuna) and the artifact's SHA-256.
 2. `load_model(directory)` refuses an artifact whose bytes no longer match the card, and one
-   written with other library versions unless `allow_version_drift=True`; the loaded model
-   predicts as the pipeline did (scaler, forecaster, calibrator).
+   written with other library versions unless `allow_library_drift=True` (C-34 (5): then only
+   as a labelled diagnostic, never evidence); the loaded model predicts as the pipeline did
+   (scaler, forecaster, calibrator, shrinkage).
 3. joblib unpickles: only artifacts this project wrote are loaded; the hash guards their
    integrity, not their origin. Registering model versions in the registry (MREG-001's
    `model_versions`) from these cards waits for the first real candidate.
@@ -376,6 +377,32 @@ trial counter.
    recorded as metrics and an artifact; five distinct specifications count five, a repeat in the
    same run or another run counts nothing, a sixth specification in a second run counts one),
    `tests/unit/models/test_hpo.py` (a search reports its budget, seed and best loss).
+
+### (5) Library drift refuses a load, with an explicit diagnostic override
+
+**Decision.** Approved, plus an explicit `--allow-library-drift` override that labels outputs
+"diagnostic, library drift" and refuses them as evidence.
+
+**Implementation** (`xq.models.persistence`, `xq model` in the CLI):
+
+1. `load_model(directory)` still refuses a model whose card names other library versions; the
+   message names the override. `load_model(directory, allow_library_drift=True)` (the parameter
+   was `allow_version_drift`) loads it with its drift recorded (`PersistedModel.drift`) and the
+   label `DIAGNOSTIC_LABEL = "diagnostic, library drift"`; every prediction frame it returns
+   carries the label as a `label` column (which survives a Parquet round trip) and in
+   `attrs["label"]`.
+2. `require_evidence(model_or_predictions)` raises `NotEvidenceError` for anything so labelled.
+   `record_pipeline_trial(..., predictions=)` calls it, so diagnostic output cannot be counted as
+   a trial on test.
+3. CLI: `xq model check MODEL_DIR` verifies a stored model and prints whether it is evidence;
+   `xq model predict MODEL_DIR INPUTS.parquet OUTPUT.parquet` writes its predictions. Both refuse
+   drift (exit code 2) unless `--allow-library-drift` is given, and then print the label, the
+   drifted libraries and "not evidence"; the written predictions carry the label.
+4. Tests: `tests/unit/models/test_persistence.py` (refusal by default; the override's label,
+   drift and identical numbers; refusal as evidence of the model, its predictions and their
+   Parquet copy), `tests/integration/models/test_model_cli.py` (both commands with and without
+   the flag), `tests/integration/models/test_ml_trials.py` (a trial refused for diagnostic
+   predictions).
 
 ## Consequences
 

@@ -37,6 +37,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from xq.core.config import MlHpoConfig, SearchDimension
 from xq.core.errors import ConfigError
 from xq.core.seeds import derive_seed
+from xq.models.persistence import require_evidence
 from xq.models.pipeline import Objective, PipelineOutput, Search, SearchResult
 from xq.tracking.trials import find_family_trial, trial_config_hash
 
@@ -148,10 +149,18 @@ def record_pipeline_trial(
     *,
     sharpe: float | None = None,
     returns: pd.Series | None = None,
+    predictions: pd.DataFrame | None = None,
 ) -> str:
     """Count `spec`'s evaluation on outer test folds as a trial of `family_id`, once: if the
     family already has a trial of this specification, its id is returned and nothing is
-    recorded."""
+    recorded.
+
+    Raises:
+        NotEvidenceError: if `predictions` (the evaluated outputs) came from a model loaded
+            across library versions (C-34 (5)): a diagnostic is not evidence.
+    """
+    if predictions is not None:
+        require_evidence(predictions)
     config = spec.trial_config()
     existing = find_family_trial(run.engine, family_id, trial_config_hash(config))
     if existing is not None:
