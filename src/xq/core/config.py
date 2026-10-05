@@ -545,6 +545,9 @@ class FeatureSetConfig(FrozenModel):
     #: Also carry the base columns (decision bar, context bars, calendar; ``base.v1``).
     base_columns: bool = True
     features: list[FeatureInstanceConfig] = Field(min_length=1)
+    #: Gated features (C-33 (4)): computed, stored and leakage-checked like the others, but
+    #: refused as model inputs until their gate is admitted (FEAT-007 for tick weights).
+    gated: list[FeatureInstanceConfig] = []
 
 
 class TrialClusteringConfig(FrozenModel):

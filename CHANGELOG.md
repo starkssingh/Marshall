@@ -1017,6 +1017,10 @@ IDs from `docs/specs/development-plan.md`.
 
 ### Changed
 
+- C-33 (4) (owner's decision, ADR 0067), FEAT-001 / FEAT-007: admission gates for features
+  (`GATES`, `Feature.gate`, `FeatureSetConfig.gated`). The session VWAP distance waits for
+  FEAT-007's admission of tick weights: computed, stored and leakage-checked, but
+  `model_inputs` refuses it (`GatedFeatureError`) and leaves it out of the default inputs.
 - C-33 (3) (owner's decision, ADR 0067), FEAT-001 / DS-005: a configured feature set warms up on
   bars from before the dataset's start: per input timeframe, the longest lookback (or warm-up)
   of its specs (`warmup_bars`), read from the same source and build, pre-vault, quality-gated,

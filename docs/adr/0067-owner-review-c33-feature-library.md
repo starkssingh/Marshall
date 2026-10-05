@@ -46,3 +46,23 @@ Synthetic data only. No feature set has been materialized on real data.
   day**; a dataset starting in August (18 daily bars of history for a 77-bar warm-up) is refused;
   without the Labor Day exclusion the quality gate refuses the build, because that day lies inside
   the daily warm-up.
+
+## (4) The VWAP distance is gated out of model inputs until FEAT-007
+
+- A registered feature may declare an **admission gate** (`GATES` in `xq.features.base`):
+  `session_vwap` waits for `tick_volume` — FEAT-007's admission of tick-count weights (cross-feed
+  stability, DATA-011).
+- A feature set lists gated features under `gated:` (`FeatureSetConfig.gated`); a gated feature
+  under `features:`, or an ungated one under `gated:`, is a configuration error. Gated features
+  are computed, stored, warmed up and run through the leakage harness like the others.
+- **Model inputs** come only through `xq.features.registry.model_inputs(features, definition,
+  requested)`: by default every column of the set's ungated features (never base or provenance
+  columns); a request naming a gated feature's column raises `GatedFeatureError`, naming the gate
+  and FEAT-007. No gate is admitted today; FEAT-007 records an admission when it is built.
+  Columns are attributed to the spec with the longest matching output name, so the one-hot
+  `session_*` columns and `session_vwap_96` are told apart.
+- `core.v1` changes in place by this decision (the VWAP instance moves to `gated:`), before any
+  build on real data; its definition hash changes with it.
+- **Known truth** (`tests/unit/features/test_gates.py`, the dataset test): the VWAP distance is
+  `core.v1`'s only gated feature; requesting it as a model input is refused, the default inputs
+  exclude it, and the built dataset still stores it with no missing value.

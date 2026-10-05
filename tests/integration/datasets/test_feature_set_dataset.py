@@ -22,7 +22,9 @@ from xq.features.registry import (
     FEATURES,
     FRAMEWORK_VERSION,
     FeatureSetChangedError,
+    GatedFeatureError,
     feature_specs,
+    model_inputs,
     output_prefix,
     warmup_bars,
 )
@@ -101,11 +103,16 @@ def test_core_v1_has_no_missing_values_from_the_first_trading_day(
     values = features[columns].to_numpy(np.float64)
     missing = [columns[j] for j in np.flatnonzero(np.isnan(values).any(axis=0))]
     assert missing == [], f"missing feature values from the first trading day: {missing}"
+    # the gated VWAP distance is computed and stored, but refused as a model input (C-33 (4))
+    assert features["session_vwap_96"].notna().all()
+    assert "session_vwap_96" not in model_inputs(features, definition).columns
+    with pytest.raises(GatedFeatureError):
+        model_inputs(features, definition, ["session_vwap_96"])
     # the context bars of the base columns are there too
     assert features[["ctx_1h_close", "ctx_4h_close", "ctx_1d_close"]].notna().all().all()
     versions = ref.manifest["code_versions"]
     assert versions["features:core.v1"] == FRAMEWORK_VERSION == 2
-    used = {i.feature for i in definition.features}
+    used = {i.feature for i in [*definition.features, *definition.gated]}
     assert {k for k in versions if k.startswith("feature:")} == {f"feature:{n}" for n in used}
     assert used == set(FEATURES)
     # rebuilt from the same definition: the same id and content
