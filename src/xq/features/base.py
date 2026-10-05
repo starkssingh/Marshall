@@ -135,7 +135,10 @@ class Feature:
 class FeatureSpec:
     """One configured use of a registered feature (module docstring).
 
-    ``timeframe`` is None for the dataset's base timeframe; ``inputs`` names the input frame the
+    ``lookback`` is the bars a value depends on (for exponential weights, the bars carrying 99 %
+    of the weight); ``warmup`` the bars before the first value of any of its columns (no value
+    exists earlier; tested for every configured spec). ``timeframe`` is None for the dataset's
+    base timeframe; ``inputs`` names the input frame the
     feature reads (``base`` or a context timeframe); ``column`` is its output column (a
     multi-column feature adds ``_<sub>`` suffixes; multi-timeframe columns get the prefix
     ``mtf_<timeframe>_``).
@@ -234,6 +237,16 @@ def bar_sigma(bars: pd.DataFrame, span: int) -> pd.Series:
     known at each bar (its own return included), defined from the `span`-th return on."""
     returns = log_returns(column(bars, "close"))
     return ewma_volatility(returns, span=span, min_periods=span)
+
+
+def log_ratio(numerator: pd.Series, denominator: pd.Series) -> pd.Series:
+    """``log(numerator / denominator)`` element by element (missing where either is not
+    positive), on the numerator's index."""
+    a = numerator.to_numpy(np.float64)
+    b = denominator.to_numpy(np.float64)
+    with np.errstate(divide="ignore", invalid="ignore"):
+        values = np.where((a > 0) & (b > 0), np.log(a / b), np.nan)
+    return pd.Series(values, index=numerator.index)
 
 
 def safe_divide(numerator: pd.Series, denominator: pd.Series) -> pd.Series:

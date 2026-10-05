@@ -10,41 +10,13 @@ from collections.abc import Callable
 import pandas as pd
 import pytest
 
+from helpers.features import tick_bars
 from helpers.ticks import dense_ticks
 from xq.core.types import Timeframe
-from xq.data.bars import build_bars
 from xq.datasets.leakage import FeatureFn, Inputs, check_feature_causality
 
 WEEK = ("2024-03-11 00:00", "2024-03-16 00:00")
 AssertCausal = Callable[[FeatureFn, Inputs], None]
-
-
-def _bars(ticks: pd.DataFrame, tf: Timeframe) -> pd.DataFrame:
-    bars = build_bars(
-        ticks,
-        tf,
-        exclude_flags=0,
-        latency_ns=0,
-        coverage_end_ns=int(ticks["ts_utc"].max()) + 1,
-    )
-    frame = pd.DataFrame(
-        {
-            "bar_start_utc": pd.to_datetime(bars["bar_start_utc"], unit="ns", utc=True),
-            "available_at_utc": pd.to_datetime(bars["available_at_utc"], unit="ns", utc=True),
-            "open": bars["mid_open"],
-            "high": bars["mid_high"],
-            "low": bars["mid_low"],
-            "close": bars["mid_close"],
-            "tick_count": bars["tick_count"],
-            "spread_mean": bars["spread_mean"],
-            "spread_max": bars["spread_max"],
-            "spread_close": bars["spread_close"],
-            "n_flagged": bars["n_flagged"],
-            "n_excluded": bars["n_excluded"],
-            "trading_day": bars["trading_day"],
-        }
-    )
-    return frame[bars["is_complete"].to_numpy()].reset_index(drop=True)
 
 
 @pytest.fixture(scope="session")
@@ -56,7 +28,7 @@ def week_ticks() -> pd.DataFrame:
 @pytest.fixture(scope="session")
 def bar_inputs(week_ticks: pd.DataFrame) -> dict[str, pd.DataFrame]:
     """Base (15m) and context (1h) bars of the synthetic week."""
-    return {"base": _bars(week_ticks, Timeframe.M15), "h1": _bars(week_ticks, Timeframe.H1)}
+    return {"base": tick_bars(week_ticks, Timeframe.M15), "h1": tick_bars(week_ticks, Timeframe.H1)}
 
 
 #: Eight trading weeks: enough daily bars for the 1d context features' windows (FEAT-008).
@@ -69,10 +41,10 @@ def feature_inputs() -> dict[str, pd.DataFrame]:
     dataset builder keys a feature set's inputs (``base``, ``1h``, ``4h``, ``1d``)."""
     ticks = dense_ticks(*LONG, seed=37, mean_interval_s=90)
     return {
-        "base": _bars(ticks, Timeframe.M15),
-        "1h": _bars(ticks, Timeframe.H1),
-        "4h": _bars(ticks, Timeframe.H4),
-        "1d": _bars(ticks, Timeframe.D1),
+        "base": tick_bars(ticks, Timeframe.M15),
+        "1h": tick_bars(ticks, Timeframe.H1),
+        "4h": tick_bars(ticks, Timeframe.H4),
+        "1d": tick_bars(ticks, Timeframe.D1),
     }
 
 

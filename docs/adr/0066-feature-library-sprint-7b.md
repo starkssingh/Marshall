@@ -53,3 +53,22 @@ ranked or tuned on data, and nothing here is evidence. FEAT-007 (gated on DATA-0
    statistics only (`bar_sigma`, the timeframe's EWMA volatility of one-bar log returns known at
    the bar; `trailing_zscore`), or at model time by a `TrainingFoldScaler` fitted on one training
    fold's rows and applied to the others (tested: test rows never move the scale).
+
+## FEAT-002 — price structure (`xq.features.price`)
+
+`log_return` (1, 2, 4, 8, 16, 32, 64 bars), `range_sigma` (the bar's log range), `candle` (body,
+upper and lower wick ratios of the range; missing for a bar without range), `gap` (the previous
+close to this open after a break — the daily break and rollover, a weekend, missing bars — in the
+previous bar's sigma; 0 on a contiguous bar), `extreme_distance` (to the rolling high and low in
+sigma units and the position in the range, 96 bars), `session_vwap` (to the trading day's VWAP
+so far, typical price weighted by tick count) and `ema_distance` (EMA 20 and 100).
+
+- **Sigma units** divide by `bar_sigma`: the zero-mean EWMA volatility of the timeframe's own
+  one-bar log returns, span 96 on 15m bars (one trading day, as `fwd_returns.v1`'s interim
+  sigma-hat), defined from the 96th return. It is a trailing statistic, not a fitted scaler.
+- **Tick-volume caveat:** the VWAP weights are tick counts, a measure of quote activity on one
+  feed, not traded volume. FEAT-007's admission rule (cross-feed stability, DATA-011) applies
+  before a model may rely on the weighting.
+- **Known truth** (`tests/unit/features/test_price.py`): every feature against a hand
+  computation (EWMA sigma by its weights; the gap after the 21:00 UTC close; the VWAP's tick
+  weights and its reset at the trading-day roll).

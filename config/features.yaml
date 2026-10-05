@@ -3,5 +3,29 @@
 # of its context timeframes and joined on availability (FEAT-008). Every feature of every set
 # passes the leakage harness automatically (tests/leakage/test_all_features.py), and a registered
 # feature that no set uses fails that suite. A set's definition is locked on first use: a change
-# needs a new version and an ADR. Nothing here was selected on data (build-only, synthetic).
-{}
+# needs a new version and an ADR.
+#
+# core.v1 (ADR 0066): the plan's Phase 8 features with conventional parameter values, fixed
+# before any result. Nothing was selected, ranked or tuned on data (build-only, synthetic data
+# only); sigma units use the EWMA volatility of the timeframe's one-bar log returns, span 96 on
+# the base bars (one trading day of 15m bars, as the interim sigma-hat of fwd_returns.v1).
+core:
+  v1:
+    description: Phase 8 price, momentum, volatility, structure and time features, with context
+    base_columns: true          # base.v1's decision bar, context bars and calendar columns too
+    features:
+      # FEAT-002 price structure
+      - {feature: log_return, params: {bars: 1}}
+      - {feature: log_return, params: {bars: 2}}
+      - {feature: log_return, params: {bars: 4}}
+      - {feature: log_return, params: {bars: 8}}
+      - {feature: log_return, params: {bars: 16}}
+      - {feature: log_return, params: {bars: 32}}
+      - {feature: log_return, params: {bars: 64}}
+      - {feature: range_sigma, params: {sigma_span: 96}}
+      - {feature: candle}
+      - {feature: gap, params: {sigma_span: 96}}
+      - {feature: extreme_distance, params: {window: 96, sigma_span: 96}}
+      - {feature: session_vwap, params: {sigma_span: 96}}
+      - {feature: ema_distance, params: {span: 20, sigma_span: 96}}
+      - {feature: ema_distance, params: {span: 100, sigma_span: 96}}

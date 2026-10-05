@@ -974,6 +974,15 @@ IDs from `docs/specs/development-plan.md`.
   of every configured set and fails on a registered feature no set uses; a planted leak is
   caught. ADR 0066.
 
+- FEAT-002: price-structure features (`xq.features.price`): log returns over 1–64 bars, the
+  range in sigma units, candle body and wick ratios, the gap after a break in sigma units, the
+  distance to the rolling high and low and the position in the range, the distance to the
+  trading day's tick-count-weighted VWAP (tick-volume caveat) and to EMAs. Sigma units use
+  `bar_sigma`, the timeframe's EWMA volatility (span 96 on 15m). Feature set `core.v1` in
+  `config/features.yaml`; each feature against a hand computation; every spec honours its
+  declared warm-up; a dataset built with `core.v1` (base columns included), reproducible, its
+  definition locked. ADR 0066.
+
 ### Changed
 
 - C-29 (owner's decision, ADR 0064), BASE-005: rule warm-ups may read signal bars from before the
