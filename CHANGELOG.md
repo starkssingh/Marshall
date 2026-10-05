@@ -1053,6 +1053,13 @@ IDs from `docs/specs/development-plan.md`.
 
 ### Changed
 
+- C-34 (4) (owner's decision, ADR 0068), ML-003 / EXP-004: the trial count of ML research is the
+  number of distinct pipeline specifications (model family x feature set x target x target-set
+  version) evaluated on outer test folds (`PipelineSpec`, `record_pipeline_trial`, deduplicated
+  per family across runs by `find_family_trial`). Inner search configurations are recorded per
+  fold (`SearchResult`, `TrainedFold.hpo`, `record_hpo`: count, sampler seed, chosen parameters
+  and inner loss, as run metrics and an artifact) and no longer count as trials;
+  `trial_recorder` is removed.
 - C-34 (2) (owner's decision, ADR 0068), ML-002: every fold reports what it left out
   (`TrainedFold.dropped`: missing inputs, unknown targets, purged rows, unpredicted test rows,
   constant columns), listed by `PipelineOutput.fold_table()` and on the model card.

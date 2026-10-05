@@ -29,6 +29,10 @@ configuration.
   about ``-s``), which broke the DSR's benchmark (ADR 0056). A trial without returns is its own
   cluster, with its own Sharpe ratio.
 
+In ML research a trial is a distinct pipeline specification evaluated on outer test folds, not
+an inner search configuration (C-34 (4), `xq.models.hpo.record_pipeline_trial`, which finds an
+existing trial of the same specification with `find_family_trial`).
+
 Forecasting models evaluated on test folds are trials too, but of their own families
 (`LINEAR_FORECAST_FAMILY` for STAT-006, `VOLATILITY_MODEL_FAMILY` for VOL-005, both in
 `xq.tracking.registry`), never of a trading-strategy family such as ``baselines``: a strategy's
@@ -153,6 +157,15 @@ def find_trial(engine: Engine, run_id: str, family_id: str, config_hash: str) ->
             Trial.run_id == run_id, Trial.family_id == family_id, Trial.config_hash == config_hash
         )
         return session.scalars(query.order_by(Trial.created_at)).first()
+
+
+def find_family_trial(engine: Engine, family_id: str, config_hash: str) -> str | None:
+    """The id of the first trial of `family_id` with this configuration hash, in any run."""
+    with session_factory(engine)() as session:
+        query = select(Trial.trial_id).where(
+            Trial.family_id == family_id, Trial.config_hash == config_hash
+        )
+        return session.scalars(query.order_by(Trial.created_at, Trial.trial_id)).first()
 
 
 def trial_count(cfg: AppConfig, engine: Engine, family_id: str | None = None) -> TrialStats:
