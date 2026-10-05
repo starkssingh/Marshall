@@ -17,7 +17,23 @@
 6. **Calibration** on the validation rows only (`fit_calibrator`: isotonic above
    ``isotonic_min_samples`` rows, Platt otherwise), weighted, with ``uniqueness`` weights, by the
    validation labels' raw average uniqueness among themselves: overlapping validation labels
-   count as the few independent outcomes they are.
+   count as the few independent outcomes they are. Then (C-34 (1), ADR 0068):
+
+   - **Shrinkage.** The calibrated probabilities keep ``n_eff / (n_eff + k0)`` of their distance
+     from the fold's **training base rate** (the fitting rows' mean label), where ``n_eff`` is
+     the validation labels' summed uniqueness (their effective number of independent outcomes)
+     and ``k0`` is ``shrinkage_prior``.
+   - **No-skill fallback.** The calibrated, shrunk model's validation log loss is estimated
+     honestly by **cross-fitting** over a purged k-fold with embargo of the validation rows
+     (``k = inner_splits``, the inner search's splitter): each block is scored by the map
+     (calibration and shrinkage, with its own ``n_eff``) fitted on the other blocks' rows purged
+     against it. Losses are weighted as the calibration is. If that loss is not below the
+     training base rate's loss on the same rows, or cannot be estimated (no block whose fitting
+     rows hold both classes, or validation rows of one class only), the fold **predicts the base
+     rate** (``fallback``). Scoring the map on the
+     rows it was fitted on would almost never show "no skill"; cross-fitting avoids that.
+
+   ``base_rate``, ``n_eff``, ``shrinkage`` and ``fallback`` are recorded per fold.
 7. **Test.** The fold's test rows with finite inputs get ``p_raw`` and ``p_cal`` (classification)
    or ``y_pred``; others stay missing. ``train_end`` is the latest purge end of any row used.
 
@@ -34,7 +50,7 @@ from __future__ import annotations
 import math
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Literal
 
 import numpy as np
 import numpy.typing as npt
@@ -45,7 +61,7 @@ from xq.core.seeds import derive_seed
 from xq.data.calendar import regular_trading_day
 from xq.features.base import TrainingFoldScaler
 from xq.models.base import SklearnForecaster, Task, build_forecaster, forecaster_spec
-from xq.models.calibration import Calibrator, fit_calibrator
+from xq.models.calibration import Calibrator, base_rate_map, fit_calibrator
 from xq.targets.weights import label_uniqueness, uniqueness_weights
 from xq.validation.forecast_eval import ece, log_loss, mse
 from xq.validation.splitters import Fold, PurgedKFold, Split
@@ -92,6 +108,14 @@ class TrainedFold:
     fit_index: pd.DatetimeIndex
     val_index: pd.DatetimeIndex
     inner_losses: dict[str, float] = field(default_factory=dict)
+    #: The fitting rows' mean label (classification), which the calibrated map shrinks towards.
+    base_rate: float | None = None
+    #: The validation labels' summed uniqueness (their effective number of independent outcomes).
+    n_eff: float | None = None
+    #: The share of the calibrated distance from the base rate kept (0 under the fallback).
+    shrinkage: float | None = None
+    #: True when the fold predicts its base rate (no skill shown on validation, C-34 (1)).
+    fallback: bool = False
 
 
 @dataclass(frozen=True)
@@ -235,7 +259,9 @@ def train_fold(
     model = build_forecaster(family, chosen, seed).fit(
         scaled.iloc[fit], y_fit, sample_weight=weights
     )
-    calibrator, val_metrics = _calibrate(spec.task, model, scaled, data, val, cfg, times)
+    calibrator, val_metrics = _calibrate(
+        spec.task, model, scaled, data, _Rows(fit, val, times, label_end), cfg, embargo
+    )
     test = fold.test_idx[usable_rows_inputs(data)[fold.test_idx]]
     predictions = _predict(spec.task, model, calibrator, scaled, data, fold, test)
     used = np.concatenate([fit, val])
@@ -256,6 +282,10 @@ def train_fold(
         fit_index=times[fit],
         val_index=times[val],
         inner_losses=inner,
+        base_rate=val_metrics.get("base_rate"),
+        n_eff=val_metrics.get("n_eff"),
+        shrinkage=val_metrics.get("shrinkage"),
+        fallback=bool(val_metrics.get("fallback", 0.0)),
     )
 
 
@@ -336,15 +366,26 @@ def _loss(task: Task, model: SklearnForecaster, x: pd.DataFrame, y: pd.Series) -
     return mse(actual, model.predict(x))
 
 
+@dataclass(frozen=True)
+class _Rows:
+    """A fold's fitting and validation rows (positions), with the sample's times and label ends."""
+
+    fit: IntArray
+    val: IntArray
+    times: pd.DatetimeIndex
+    label_end: npt.NDArray[np.int64]
+
+
 def _calibrate(
     task: Task,
     model: SklearnForecaster,
     scaled: pd.DataFrame,
     data: FoldData,
-    val: IntArray,
+    rows: _Rows,
     cfg: MlPipelineConfig,
-    times: pd.DatetimeIndex,
+    embargo: pd.Timedelta,
 ) -> tuple[Calibrator | None, dict[str, float]]:
+    val = rows.val
     if task != "classification" or not len(val):
         return None, {}
     y_val = data.y.iloc[val].to_numpy(np.float64)
@@ -354,25 +395,111 @@ def _calibrate(
         "log_loss_raw": log_loss(y_val, p_val),
         "ece_raw": ece(y_val, p_val),
     }
-    if cfg.calibration == "none" or len(np.unique(y_val)) < 2:
+    if cfg.calibration == "none":
         return None, metrics
-    weight = None
-    if cfg.sample_weights == "uniqueness":
-        rows = times[val]
-        unique = label_uniqueness(
-            pd.Series(rows, index=rows), pd.Series(data.label_end.iloc[val].to_numpy(), index=rows)
-        )
-        weight = unique["uniqueness"].to_numpy(np.float64)
+    base = float(data.y.iloc[rows.fit].to_numpy(np.float64).mean())
+    if len(np.unique(y_val)) < 2:  # nothing to calibrate on, so no skill shown: the base rate
+        calibrator = base_rate_map(base)
+        p_cal = calibrator.transform(p_val)
+        return calibrator, metrics | {
+            "log_loss_cal": log_loss(y_val, p_cal),
+            "ece_cal": ece(y_val, p_cal),
+            "base_rate": base,
+            "n_eff": float(_uniqueness(rows.times[val], rows.label_end[val]).sum()),
+            "shrinkage": 0.0,
+            "fallback": 1.0,
+            "log_loss_crossfit": math.nan,
+            "log_loss_crossfit_base_rate": math.nan,
+        }
+    unique = _uniqueness(rows.times[val], rows.label_end[val])
+    weight = unique if cfg.sample_weights == "uniqueness" else None
+    n_eff = float(unique.sum())
+    method: Literal["isotonic", "platt"] = "isotonic"
+    if cfg.calibration == "platt" or (
+        cfg.calibration == "auto" and len(val) <= cfg.isotonic_min_samples
+    ):
+        method = "platt"
     calibrator = fit_calibrator(
-        p_val,
-        y_val,
-        cfg.calibration,
-        isotonic_min_samples=cfg.isotonic_min_samples,
-        sample_weight=weight,
+        p_val, y_val, method, isotonic_min_samples=cfg.isotonic_min_samples, sample_weight=weight
     )
+    shrinkage = n_eff / (n_eff + cfg.shrinkage_prior)
+    calibrator.shrink(base, shrinkage)
+    honest = _crossfit_loss(
+        p_val, y_val, unique, weight is not None, rows, method, base, cfg, embargo
+    )
+    fallback = honest is None or honest[0] >= honest[1]
+    if fallback:
+        calibrator.shrink(base, 0.0)
     p_cal = calibrator.transform(p_val)
-    metrics |= {"log_loss_cal": log_loss(y_val, p_cal), "ece_cal": ece(y_val, p_cal)}
+    metrics |= {
+        "log_loss_cal": log_loss(y_val, p_cal),
+        "ece_cal": ece(y_val, p_cal),
+        "base_rate": base,
+        "n_eff": n_eff,
+        "shrinkage": calibrator.weight,
+        "fallback": float(fallback),
+        "log_loss_crossfit": math.nan if honest is None else honest[0],
+        "log_loss_crossfit_base_rate": math.nan if honest is None else honest[1],
+    }
     return calibrator, metrics
+
+
+def _crossfit_loss(
+    p_val: FloatArray,
+    y_val: FloatArray,
+    unique: FloatArray,
+    weighted: bool,
+    rows: _Rows,
+    method: Literal["isotonic", "platt"],
+    base: float,
+    cfg: MlPipelineConfig,
+    embargo: pd.Timedelta,
+) -> tuple[float, float] | None:
+    """The calibrated, shrunk map's validation log loss and the base rate's, cross-fitted over a
+    purged k-fold with embargo of the validation rows (module docstring); None if no fold can be
+    scored."""
+    times = rows.times[rows.val]
+    ends = pd.Series(
+        pd.DatetimeIndex(rows.label_end[rows.val].astype("datetime64[ns]")), index=times
+    )
+    weight_end = None
+    if weighted:
+        unique_frame = label_uniqueness(pd.Series(times, index=times), ends.dt.tz_localize("UTC"))
+        weight_end = unique_frame["weight_end"]
+    splits = PurgedKFold(min(cfg.inner_splits, len(times)), embargo).split(
+        times, ends.dt.tz_localize("UTC"), weight_end=weight_end
+    )
+    pairs = [(split.train_idx, split.test_idx) for split in splits]
+    loss_model = loss_base = total = 0.0
+    for train, score in pairs:
+        if len(np.unique(y_val[train])) < 2:
+            continue
+        fitted = Calibrator(method).fit(
+            p_val[train], y_val[train], unique[train] if weighted else None
+        )
+        n_eff = float(unique[train].sum())
+        fitted.shrink(base, n_eff / (n_eff + cfg.shrinkage_prior))
+        w = unique[score] if weighted else np.ones(len(score))
+        loss_model += float(w @ _row_log_loss(y_val[score], fitted.transform(p_val[score])))
+        loss_base += float(w @ _row_log_loss(y_val[score], np.full(len(score), base)))
+        total += float(w.sum())
+    if total <= 0:
+        return None
+    return loss_model / total, loss_base / total
+
+
+def _uniqueness(times: pd.DatetimeIndex, label_end: npt.NDArray[np.int64]) -> FloatArray:
+    """The raw average uniqueness of labels starting at `times` and ending at `label_end`."""
+    ends = pd.DatetimeIndex(label_end.astype("datetime64[ns]")).tz_localize("UTC")
+    unique = label_uniqueness(pd.Series(times, index=times), pd.Series(ends, index=times))
+    values: FloatArray = unique["uniqueness"].to_numpy(np.float64)
+    return values
+
+
+def _row_log_loss(y: FloatArray, p: FloatArray) -> FloatArray:
+    clipped = np.clip(p, 1e-15, 1 - 1e-15)
+    out: FloatArray = -(y * np.log(clipped) + (1 - y) * np.log(1 - clipped))
+    return out
 
 
 def _predict(

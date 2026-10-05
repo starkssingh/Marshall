@@ -1053,6 +1053,17 @@ IDs from `docs/specs/development-plan.md`.
 
 ### Changed
 
+- C-34 (1) (owner's decision, ADR 0068), ML-002: calibrated probabilities shrink towards the
+  fold's training base rate, keeping `n_eff / (n_eff + k0)` of their distance (`n_eff` the
+  validation labels' summed uniqueness, `k0 = shrinkage_prior = 50` in `config/ml.yaml`), and a
+  fold whose calibrated, shrunk map does not beat the base rate on a purged k-fold cross-fit of
+  its validation rows (or whose validation rows hold one class) predicts the base rate; folds
+  and model cards record `base_rate`, `n_eff`, `shrinkage` and `fallback`. Training with
+  uniqueness weights is now tested. On the null process the test log loss is within
+  climatology + 0.01 in 19 of 20 seeds (it was 0.75–1.30 against ~0.66); on a planted signal
+  the pipeline beats climatology in every run, with 4 of 100 folds falling back. The purging
+  demonstration's single-seed pipeline AUC check moved to the mean over the 20 null seeds.
+  Fixed: a model card whose validation metrics hold NaN now reloads (written as null).
 - C-33 (owner's decision, ADR 0067), DS-001: `experiments/configs/ds_core.yaml`, `ds_base`'s
   window, source, bars and targets with the feature set `core.v1`; a spec only, not built until
   the DQ-008 review. `ds_base` stays on `base.v1`.

@@ -8,6 +8,8 @@ import numpy as np
 import pandas as pd
 import pytest
 
+from helpers.ml_processes import FOREST as NULL_FOREST
+from helpers.ml_processes import HORIZON, no_signal, walk_forward_folds
 from helpers.pipeline import REPO
 from xq.core.config import load_config
 from xq.core.seeds import make_rng
@@ -21,7 +23,7 @@ from xq.models.persistence import (
     save_trained_fold,
     training_data_hash,
 )
-from xq.models.pipeline import FoldData, TrainedFold, train_fold
+from xq.models.pipeline import FoldData, TrainedFold, run_pipeline, train_fold
 from xq.validation.splitters import WalkForwardConfig, WalkForwardSplitter
 
 PIPELINE = load_config("research", config_dir=REPO / "config").ml_config().pipeline
@@ -110,3 +112,24 @@ def test_tampered_artifacts_and_library_drift_are_refused(tmp_path: Path) -> Non
         load_model(tmp_path, allow_version_drift=True)
     assert library_versions()["scikit-learn"] != "0.0.1"
     assert max_abs_difference([1.0, np.nan], [1.0, 2.0]) == float("inf")
+
+
+def test_a_fold_that_fell_back_reloads_to_its_base_rate_and_its_card_says_so(
+    tmp_path: Path,
+) -> None:
+    null = no_signal(seed=4)
+    out = run_pipeline(
+        "random_forest", null, walk_forward_folds(null), PIPELINE,
+        embargo=pd.Timedelta(hours=HORIZON), seed=1, params=NULL_FOREST,
+    )  # fmt: skip
+    fold = next(f for f in out.folds if f.fallback)
+    card = save_trained_fold(tmp_path, fold, null, dataset_id="ds-null", feature_set="core.v1")
+    assert card.fallback
+    assert (card.base_rate, card.shrinkage) == (fold.base_rate, 0.0)
+    again = load_model(tmp_path).predict(null.x.loc[fold.predictions.index])
+    np.testing.assert_allclose(again["p_cal"], fold.base_rate)
+    assert max_abs_difference(again["p_cal"], fold.predictions["p_cal"]) <= 1e-9
+    _, kept = trained("logistic", {"C": 0.5})
+    assert not kept.fallback
+    assert kept.shrinkage is not None
+    assert 0 < kept.shrinkage < 1
