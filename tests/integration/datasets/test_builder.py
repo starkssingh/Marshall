@@ -14,7 +14,7 @@ from typer.testing import CliRunner
 from helpers.datasets import QUALITY_RUN, dataset_spec, validated_pipeline
 from helpers.pipeline import REPO, config, run_pipeline
 from xq.cli.main import app
-from xq.core.config import AppConfig
+from xq.core.config import AppConfig, load_config
 from xq.core.errors import ConfigError, VaultAccessError
 from xq.core.time import trading_day, trading_day_bounds
 from xq.core.types import Timeframe
@@ -29,6 +29,7 @@ from xq.datasets.builder import (
     verify_dataset,
 )
 from xq.datasets.spec import dataset_id, load_spec
+from xq.features.registry import warmup_bars
 from xq.tracking.db import session_factory
 from xq.tracking.models import DatasetVersion
 
@@ -246,3 +247,18 @@ def test_base_spec_is_valid() -> None:
     assert trading_day(start) == date(2015, 1, 2)
     assert trading_day_bounds(date(2015, 1, 2))[0] == start
     assert [tf.value for tf in spec.context_timeframes] == ["1h", "4h", "1d"]
+
+
+def test_core_spec_is_ds_base_with_the_feature_set_core_v1() -> None:
+    # C-33 (ADR 0067): a spec only, not built until DQ-008; ds_base stays on base.v1
+    base = load_spec(REPO / "experiments" / "configs" / "ds_base.yaml")
+    core = load_spec(REPO / "experiments" / "configs" / "ds_core.yaml")
+    assert core.name == "ds_core"
+    assert str(core.feature_set) == "core.v1"
+    assert str(base.feature_set) == "base.v1"
+    same = base.model_dump(exclude={"name", "feature_set"})
+    assert core.model_dump(exclude={"name", "feature_set"}) == same
+    # its feature set exists and every timeframe it reads is a context timeframe of the spec
+    cfg = load_config("research", config_dir=REPO / "config")
+    needs = warmup_bars(cfg, core.feature_set)
+    assert set(needs) - {"base"} == {tf.value for tf in core.context_timeframes}

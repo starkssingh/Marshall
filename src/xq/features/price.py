@@ -18,8 +18,9 @@ the bar):
 - ``session_vwap``: ``log(close / VWAP)`` in sigma units, with the VWAP of the trading day so far
   (17:00 New York roll): the typical price ``(high + low + close) / 3`` weighted by each bar's tick
   count. **Tick-volume caveat:** tick counts measure quote activity on one feed, not traded
-  volume; FEAT-007's admission rule (cross-feed stability, DATA-011) applies before any model
-  relies on this weighting;
+  volume, so the feature is **gated** (``tick_volume``, C-33 (4)): it is computed and checked,
+  but refused as a model input until FEAT-007 admits tick weights (cross-feed stability,
+  DATA-011);
 - ``ema_distance``: ``log(close / EMA_span(close))`` in sigma units.
 """
 
@@ -154,6 +155,7 @@ def extreme_distance(bars: pd.DataFrame, params: Window, context: BarContext) ->
     name="session_vwap",
     version=1,
     family="price",
+    gate="tick_volume",
     params=Sigma,
     lookback=lambda p: ewma_reach(p.sigma_span),
     warmup=lambda p: p.sigma_span + 1,

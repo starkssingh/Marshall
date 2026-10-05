@@ -50,6 +50,14 @@ AVAILABLE_AT = "available_at_utc"
 BAR_START = "bar_start_utc"
 #: Feature families of the plan (Phase 8); FEAT-008 reuses them on other timeframes.
 FAMILIES = ("price", "momentum", "volatility", "structure", "time")
+#: Admission gates (C-33 (4), ADR 0067): a gated feature is computed and leakage-checked, but no
+#: model may take it as an input until its gate is admitted by the task named here.
+GATES = {
+    "tick_volume": (
+        "FEAT-007: tick-count weights are a quote-activity proxy on one feed, admitted only if "
+        "DATA-011 shows cross-feed stability or research and execution use the same feed"
+    ),
+}
 #: Prefixes reserved for targets (TGT-001's schema guard refuses them in a feature matrix).
 RESERVED_PREFIXES = ("tgt_", "fwd_")
 FloatArray = npt.NDArray[np.float64]
@@ -86,6 +94,8 @@ class Feature:
     lookback: BarsFn
     warmup: BarsFn
     description: str
+    #: The admission gate the feature waits for (a key of `GATES`), or None.
+    gate: str | None = None
 
     def validate(self, params: Mapping[str, Any]) -> FeatureParams:
         """The validated parameters.
@@ -114,6 +124,7 @@ class Feature:
             warmup=int(self.warmup(params)),
             inputs=(timeframe.value if timeframe is not None else "base",),
             column=column,
+            gate=self.gate,
         )
 
     def on_bars(self, spec: FeatureSpec, bars: pd.DataFrame, context: BarContext) -> pd.DataFrame:
@@ -153,6 +164,8 @@ class FeatureSpec:
     warmup: int
     inputs: tuple[str, ...]
     column: str
+    #: The gate this spec waits for before it may be a model input (C-33 (4)), or None.
+    gate: str | None = None
 
 
 def register_feature(
@@ -163,6 +176,7 @@ def register_feature(
     params: type[FeatureParams],
     lookback: BarsFn,
     warmup: BarsFn,
+    gate: str | None = None,
 ) -> Callable[[FeatureFn], Feature]:
     """Decorator turning a compute function into a `Feature` (an immutable value; the registry
     collects features explicitly).
@@ -179,6 +193,8 @@ def register_feature(
         raise ConfigError(f"feature {name!r} needs a code version of at least 1")
     if family not in FAMILIES:
         raise ConfigError(f"feature {name!r}: unknown family {family!r} (one of {FAMILIES})")
+    if gate is not None and gate not in GATES:
+        raise ConfigError(f"feature {name!r}: unknown gate {gate!r} (one of {sorted(GATES)})")
 
     def wrap(fn: FeatureFn) -> Feature:
         return Feature(
@@ -190,6 +206,7 @@ def register_feature(
             lookback=lookback,
             warmup=warmup,
             description=(fn.__doc__ or "").strip().split("\n")[0],
+            gate=gate,
         )
 
     return wrap

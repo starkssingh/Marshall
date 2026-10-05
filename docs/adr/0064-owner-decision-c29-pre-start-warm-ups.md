@@ -34,7 +34,8 @@ after it, and every rule over a different period (ADR 0062, C-26 (6)).
   complete bars only, without the trading days the spec excludes, available before the dataset's
   first signal bar, and keeps the last `count`. It loads from the start of the open trading day
   that the warm-up needs (`count` divided by the bars in a regular trading day, plus
-  `PRE_START_MARGIN_DAYS` = 5 open days for early closes and gaps), never more than it keeps.
+  `WARMUP_MARGIN_DAYS` = 5 open days for early closes and gaps, `xq.datasets.builder`), never
+  more than it keeps.
   - Every trading day those bars touch goes through the quality gate (`gate_partitions`, DQ-007)
     with the dataset's pinned quality run: a FAIL day or a day the run never graded stops the
     board, naming the rule and the days.

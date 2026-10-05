@@ -1,0 +1,24 @@
+# The feature research dataset (C-33, ADR 0067): ds_base's window, source, bars and targets with
+# the engineered feature set core.v1 (config/features.yaml) instead of base.v1.
+#
+# NOT BUILT until the DQ-008 review of the real data (C-8): building it reads real Dukascopy bars.
+# ds_base stays on base.v1 for the baseline board (H-0001).
+#
+# core.v1 carries base.v1's columns too (decision bar, context bars, calendar). Its features warm
+# up on bars from before `start` (C-33 (3)): per timeframe, the set's longest lookback — 231 15m
+# bars, 77 1h, 91 4h and 77 daily bars — read from the same source and build, quality-gated, from
+# the 2014 download; nothing is filled, and missing warm-up bars refuse the build. The session
+# VWAP distance is computed but gated out of model inputs until FEAT-007 (C-33 (4)). Changing the
+# window or the feature set needs an ADR.
+name: ds_core
+source: dukascopy
+instrument: xauusd
+base_timeframe: 15m
+price_basis: mid
+start: "2015-01-01T22:00:00Z"   # start of trading day 2015-01-02, as ds_base (ADR 0062)
+end: "2025-09-25T21:00:00Z"     # vault.start
+warmup: 10D
+context_timeframes: [1h, 4h, 1d]
+feature_set: {name: core, version: v1}
+target_set: {name: fwd_returns, version: v1}
+exclusions: []

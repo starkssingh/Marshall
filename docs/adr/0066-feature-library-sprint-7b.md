@@ -1,6 +1,7 @@
 # ADR 0066 — Sprint 7, part 2: the feature library (FEAT-001 … FEAT-006, FEAT-008)
 
-- **Status:** accepted (build-only; readings flagged for the owner's review: C-33)
+- **Status:** accepted (build-only; readings flagged for the owner's review: C-33, decided in
+  ADR 0067: features warm up on pre-start bars, the VWAP distance is gated)
 - **Date:** 2026-10-05
 - **Decided by:** Claude, within the plan (Phase 8, Sprint 7) and the owner's instruction for
   this session: FEAT-001 (spec, registry, the leakage harness auto-applied to every registered

@@ -36,6 +36,7 @@ from xq.core.config import AppConfig, FeatureSetConfig
 from xq.core.errors import ConfigError
 from xq.core.time import utc_now
 from xq.core.types import Timeframe
+from xq.datasets.asof import PROVENANCE_SUFFIX
 from xq.datasets.base_features import (
     BASE_INPUT,
     FEATURE_SETS,
@@ -46,7 +47,7 @@ from xq.datasets.base_features import (
 )
 from xq.datasets.leakage import Inputs
 from xq.datasets.spec import SetRef
-from xq.features.base import BarContext, Feature, FeatureSpec
+from xq.features.base import GATES, BarContext, Feature, FeatureSpec
 from xq.features.momentum import MOMENTUM
 from xq.features.mtf import context_prefix, join_on_availability
 from xq.features.price import PRICE
@@ -56,10 +57,15 @@ from xq.features.volatility import VOLATILITY
 from xq.tracking.db import session_factory
 from xq.tracking.models import FeatureSetRecord
 
-#: Code version of the feature-set machinery (the joins and naming); part of every dataset id
-#: of a configured feature set, next to each feature's own version.
-FRAMEWORK_VERSION = 1
+#: Code version of the feature-set machinery (the joins, naming and dataset warm-up); part of
+#: every dataset id of a configured feature set, next to each feature's own version.
+#: 2: the builder reads each timeframe's warm-up bars before the start (C-33 (3), ADR 0067).
+FRAMEWORK_VERSION = 2
 _FAMILY_FEATURES: tuple[Feature, ...] = (*PRICE, *MOMENTUM, *VOLATILITY, *STRUCTURE, *TIME)
+
+
+class GatedFeatureError(ConfigError):
+    """A model asked for a gated feature whose gate is not admitted (C-33 (4))."""
 
 
 class FeatureSetChangedError(ConfigError):
@@ -99,18 +105,81 @@ def feature(name: str, registry: Mapping[str, Feature] = FEATURES) -> Feature:
 def feature_specs(
     definition: FeatureSetConfig, registry: Mapping[str, Feature] = FEATURES
 ) -> list[FeatureSpec]:
-    """The specs of a feature set definition, in its order.
+    """The specs of a feature set definition: its features, then its gated features.
 
     Raises:
-        ConfigError: for an unknown feature, invalid parameters or two specs writing the same
-            column.
+        ConfigError: for an unknown feature, invalid parameters, two specs writing the same
+            column, a gated feature listed among the features, or an ungated one among the gated.
     """
-    specs = [feature(i.feature, registry).spec(i) for i in definition.features]
+    specs = []
+    for instance in definition.features:
+        registered = feature(instance.feature, registry)
+        if registered.gate is not None:
+            raise ConfigError(
+                f"feature {registered.name!r} waits for gate {registered.gate!r} "
+                f"({GATES[registered.gate]}); list it under `gated`"
+            )
+        specs.append(registered.spec(instance))
+    for instance in definition.gated:
+        registered = feature(instance.feature, registry)
+        if registered.gate is None:
+            raise ConfigError(f"feature {registered.name!r} has no gate; list it under `features`")
+        specs.append(registered.spec(instance))
     columns = [output_prefix(s) + s.column for s in specs]
     duplicates = sorted({c for c in columns if columns.count(c) > 1})
     if duplicates:
         raise ConfigError(f"feature set writes columns {duplicates} more than once")
     return specs
+
+
+def column_owners(specs: Sequence[FeatureSpec], columns: Sequence[str]) -> dict[str, FeatureSpec]:
+    """The spec that wrote each of `columns`: the one whose output name equals it, or else the
+    longest output name it extends with ``_<sub>`` (so ``session_vwap_96`` belongs to
+    ``session_vwap_96``, not to the multi-column ``session``). Columns no spec wrote are left
+    out."""
+    named = [(output_prefix(s) + s.column, s) for s in specs]
+    owners: dict[str, FeatureSpec] = {}
+    for column in columns:
+        matches = [(n, s) for n, s in named if column == n or column.startswith(f"{n}_")]
+        if matches:
+            owners[column] = max(matches, key=lambda m: len(m[0]))[1]
+    return owners
+
+
+def model_inputs(
+    features: pd.DataFrame,
+    definition: FeatureSetConfig,
+    requested: Sequence[str] | None = None,
+    *,
+    registry: Mapping[str, Feature] = FEATURES,
+) -> pd.DataFrame:
+    """The columns of a dataset's `features` a model may take as inputs (C-33 (4)).
+
+    By default every column the set's ungated features write; with `requested`, exactly those
+    columns. Provenance columns are never inputs, and a gated feature's columns are refused until
+    its gate is admitted (none is today).
+
+    Raises:
+        GatedFeatureError: if a requested column belongs to a gated feature.
+        ConfigError: if a requested column is not in `features` or is a provenance column.
+    """
+    specs = feature_specs(definition, registry)
+    columns = [str(c) for c in features.columns]
+    owners = column_owners(specs, [c for c in columns if not c.endswith(PROVENANCE_SUFFIX)])
+    gated = {c: s for c, s in owners.items() if s.gate is not None}
+    if requested is None:
+        return features[[c for c, s in owners.items() if s.gate is None]]
+    for column in requested:
+        if column in gated:
+            gate = gated[column].gate
+            assert gate is not None
+            raise GatedFeatureError(
+                f"{column!r} is gated ({gate}: {GATES[gate]}); it is not a model input until "
+                "the gate is admitted"
+            )
+        if column not in columns or column.endswith(PROVENANCE_SUFFIX):
+            raise ConfigError(f"{column!r} is not a feature column of this dataset")
+    return features[list(requested)]
 
 
 def output_prefix(spec: FeatureSpec) -> str:
@@ -171,7 +240,7 @@ def definition_payload(
 ) -> dict[str, Any]:
     """What identifies a configured feature set: its definition and the code versions of the
     framework and of every feature it uses."""
-    used = sorted({i.feature for i in definition.features})
+    used = sorted({i.feature for i in [*definition.features, *definition.gated]})
     return {
         "definition": definition.model_dump(mode="json"),
         "framework": FRAMEWORK_VERSION,
@@ -234,7 +303,7 @@ def unchecked_features(cfg: AppConfig, registry: Mapping[str, Feature] = FEATURE
         i.feature
         for versions in cfg.features.values()
         for d in versions.values()
-        for i in d.features
+        for i in [*d.features, *d.gated]
     }
     return sorted(set(registry) - used)
 
@@ -268,6 +337,21 @@ def resolve_feature_set(cfg: AppConfig, ref: SetRef) -> FeatureSetDef:
         compute=compute,
         description=definition.description,
     )
+
+
+def warmup_bars(cfg: AppConfig, ref: SetRef) -> dict[str, int]:
+    """Bars of history each input frame (``base`` or a context timeframe) needs available by a
+    dataset's first decision for every feature of set `ref` to be defined there: the longest of
+    its features' lookbacks and warm-ups on that frame (C-33 (3), ADR 0067). Empty for a built-in
+    set."""
+    definition = configured(cfg, ref)
+    if definition is None:
+        return {}
+    needs: dict[str, int] = {}
+    for spec in feature_specs(definition):
+        name = spec.inputs[0]
+        needs[name] = max(needs.get(name, 0), spec.lookback, spec.warmup)
+    return needs
 
 
 def code_versions(cfg: AppConfig, ref: SetRef) -> dict[str, int]:

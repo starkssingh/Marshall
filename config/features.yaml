@@ -26,7 +26,6 @@ core:
       - {feature: candle}
       - {feature: gap, params: {sigma_span: 96}}
       - {feature: extreme_distance, params: {window: 96, sigma_span: 96}}
-      - {feature: session_vwap, params: {sigma_span: 96}}
       - {feature: ema_distance, params: {span: 20, sigma_span: 96}}
       - {feature: ema_distance, params: {span: 100, sigma_span: 96}}
       # FEAT-003 momentum
@@ -91,3 +90,7 @@ core:
       - {feature: range_vol, params: {estimator: yang_zhang, window: 20}, timeframe: 1d}
       - {feature: extreme_distance, params: {window: 20, sigma_span: 20}, timeframe: 1d}
       - {feature: mean_reversion_z, params: {window: 20}, timeframe: 1d}
+    gated:
+      # C-33 (4): tick-count weights are a quote-activity proxy on one feed; computed and
+      # leakage-checked, refused as a model input until FEAT-007 admits them (DATA-011)
+      - {feature: session_vwap, params: {sigma_span: 96}}

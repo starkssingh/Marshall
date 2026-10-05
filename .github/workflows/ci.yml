@@ -18,7 +18,9 @@ jobs:
   checks:
     name: lint, types, tests
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    # The suite with coverage passed 20 minutes when the C-33 warm-up and ML-002 tests joined it
+    # (it was cut at 90 %, every test so far passing); the docker job already allows 30.
+    timeout-minutes: 30
     env:
       # A non-UTC local timezone exposes any hidden dependency on the machine's clock settings.
       TZ: Asia/Tokyo

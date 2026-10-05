@@ -100,9 +100,8 @@ from xq.core.time import trading_day, trading_day_bounds, trading_days
 from xq.core.types import Timeframe
 from xq.data.calendar import NAT_NS, MarketClock, regular_trading_day
 from xq.data.catalog import Catalog
-from xq.data.sessions import build_session_table
 from xq.datasets.base_features import AVAILABLE_AT
-from xq.datasets.builder import load_dataset, read_manifest, usable_quotes
+from xq.datasets.builder import load_dataset, read_manifest, usable_quotes, warmup_load_start
 from xq.datasets.spec import DatasetSpec
 from xq.models.base import ModelConfig
 from xq.models.baselines import (
@@ -159,8 +158,6 @@ SLICES_LABEL = "descriptive (not tested: no p-values, no trials)"
 RETURNS_ARTIFACT = "baseline_returns"
 EVALUATION_RETURNS_ARTIFACT = "baseline_returns_evaluation"
 _BPS = 1e4
-#: Open trading days loaded beyond a warm-up's estimate, for early closes and missing bars.
-PRE_START_MARGIN_DAYS = 5
 
 
 class BoardError(XQError):
@@ -803,17 +800,7 @@ def pre_start_bars(
         BoardError: naming rule `name`, if fewer than `count` such bars exist or one of their days
             fails the quality gate (a FAIL result, or no result in the quality run).
     """
-    sessions = cfg.sessions_config()
-    per_day = max(1, math.floor(regular_trading_day(sessions) / timeframe.duration))
-    open_days = math.ceil(count / per_day) + PRE_START_MARGIN_DAYS
-    last = trading_day(before)
-    table = build_session_table(sessions, last - timedelta(days=2 * open_days + 31), last)
-    opened = sorted(
-        pd.Timestamp(d).date()
-        for d in table.loc[table["is_open"].astype(bool), "trading_day"]
-        if pd.Timestamp(d).date() <= last
-    )
-    load_start = trading_day_bounds(opened[-min(open_days, len(opened))])[0]
+    load_start = warmup_load_start(cfg, before, timeframe, count)
     loaded = Catalog(cfg).load_bars(
         spec.source,
         spec.instrument,

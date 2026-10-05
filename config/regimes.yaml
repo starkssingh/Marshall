@@ -1,0 +1,23 @@
+# Regime research settings (Phase 7). Fixed before any result; changes need an ADR.
+#
+# REG-001 rule regimes (ADR 0068): every cut-off is a quantile of the TRAINING FOLD's own rows of
+# a causal feature column of core.v1 (config/features.yaml), recomputed for every fold; test rows
+# are labelled with the cut-offs of the fold they belong to. No cut-off is ever computed on the
+# full sample or on test rows.
+rules:
+  min_training_rows: 100             # fewer labelled training rows: the fold gets no regime
+  volatility:
+    column: ewma_sigma_96            # the EWMA sigma-hat of 15m returns (the interim sigma-hat)
+    quantiles: [0.3333, 0.6667]      # low < first, high >= second, mid between
+  trend:
+    efficiency_column: efficiency_ratio_20
+    adx_column: adx_14_adx
+    slope_column: ma_slope_t_20      # its sign gives the trend's direction
+    efficiency_quantile: 0.6667      # trend: efficiency, ADX and |slope t| all at or above
+    adx_quantile: 0.6667             # their training-fold quantiles
+    slope_abs_quantile: 0.5
+  compression:
+    ratio_column: vol_ratio_16_96    # short over long volatility
+    bandwidth_column: compression_20_96   # percentile of the 20-bar range among its last 96
+    low_quantile: 0.25               # compression: both at or below their low quantiles
+    high_quantile: 0.75              # expansion: both at or above their high quantiles

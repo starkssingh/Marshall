@@ -1015,8 +1015,58 @@ IDs from `docs/specs/development-plan.md`.
   higher-timeframe value appears only from its bar's `available_at` on, unpublished bars change
   nothing earlier, a daily bar is read only after the trading-day roll. ADR 0066.
 
+- REG-001: rule regimes (`xq.research.regimes.rules`): volatility (sigma-hat terciles), trend
+  (efficiency ratio, ADX and the slope t-statistic, with its direction) and compression/expansion
+  (short/long volatility ratio and band-width percentile) on `core.v1` columns, with cut-offs from
+  the training fold's own rows only (`fit`, `fit_per_fold`) and causal labels in REG-007's columns
+  (`state`, `label`, `p_<state>`, `regime_age`). Settings in `config/regimes.yaml`. Tested: hand
+  labels, truncation invariance, per-fold cut-offs blind to their own test rows. ADR 0068.
+
+- ML-001: the `Forecaster` protocol (`fit` with sample weights and an eval set, `predict`,
+  `predict_proba`, `save`/`load`, `model_card`) and `SklearnForecaster` wrappers of registered
+  families: `logistic` and `ridge` (`xq.models.linear`), `random_forest` (`xq.models.trees`);
+  seeded, refusing missing inputs and reordered columns. Dependencies scikit-learn and joblib.
+  Tested: protocol conformance of every family, determinism under a fixed seed. ADR 0068.
+
+- ML-002: the in-fold pipeline (`xq.models.pipeline`): per walk-forward fold, usable rows only
+  (no filling), the last 20 % of the training window for validation after purging, uniqueness
+  sample weights, hyperparameters from a purged k-fold with embargo inside the fitting rows,
+  a refit on training-fold-scaled inputs, calibration on validation rows only
+  (`xq.models.calibration`: isotonic above 1,000 rows, Platt otherwise, weighted by the
+  validation labels' raw uniqueness), test predictions stitched out of sample. Settings in
+  `config/ml.yaml` (with ML-003's search spaces). Tested: the purging demonstration (chance on
+  purged CV and the pipeline, spurious skill on shuffled CV), transforms and calibration blind to
+  test rows, ECE improved by calibration, determinism. ADR 0068.
+
+- ML-003: seeded hyperparameter search (`xq.models.hpo`): Optuna TPE seeded per family and fold,
+  a fixed budget (50) over the search spaces of `config/ml.yaml`, scored by the pipeline's inner
+  purged CV on the fitting rows only; `trial_recorder` counts every evaluated configuration as a
+  trial (not on test). Dependency Optuna. Tested: reproducible under a seed, the exact budget
+  inside the space, every configuration counted by the trial counter in a run. ADR 0068.
+
+- ML-009: persistence and model cards (`xq.models.persistence`): a fold's forecaster, scaler and
+  calibrator in `model.joblib` and a `card.json` with family, code version, hyperparameters,
+  seed, inputs, feature-set version, dataset id, fold id, training cutoff, validation metrics,
+  calibration, training-data SHA-256, library versions and the artifact's SHA-256; loads refuse a
+  tampered artifact or library drift. Tested: a reload reproduces the pipeline's test
+  predictions within 1e-9. ADR 0068.
+
 ### Changed
 
+- C-33 (owner's decision, ADR 0067), DS-001: `experiments/configs/ds_core.yaml`, `ds_base`'s
+  window, source, bars and targets with the feature set `core.v1`; a spec only, not built until
+  the DQ-008 review. `ds_base` stays on `base.v1`.
+- C-33 (4) (owner's decision, ADR 0067), FEAT-001 / FEAT-007: admission gates for features
+  (`GATES`, `Feature.gate`, `FeatureSetConfig.gated`). The session VWAP distance waits for
+  FEAT-007's admission of tick weights: computed, stored and leakage-checked, but
+  `model_inputs` refuses it (`GatedFeatureError`) and leaves it out of the default inputs.
+- C-33 (3) (owner's decision, ADR 0067), FEAT-001 / DS-005: a configured feature set warms up on
+  bars from before the dataset's start: per input timeframe, the longest lookback (or warm-up)
+  of its specs (`warmup_bars`), read from the same source and build, pre-vault, quality-gated,
+  and available by the first decision; nothing is filled, and missing warm-up bars refuse the
+  build (`FeatureWarmupError`). `FRAMEWORK_VERSION` 1 -> 2. `warmup_load_start` is shared with
+  the board's rule warm-ups. Tested on seventeen synthetic weeks: `core.v1` has no missing value
+  from the first trading day; missing and gate-failed warm-up bars refuse the build.
 - C-29 (owner's decision, ADR 0064), BASE-005: rule warm-ups may read signal bars from before the
   dataset's start, up to each rule's warm-up length: the same source, bar build and price basis,
   complete bars only, before the vault, without the spec's excluded days, every day gated by the
