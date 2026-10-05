@@ -999,6 +999,14 @@ IDs from `docs/specs/development-plan.md`.
   the LBMA auctions, US releases and the rollover (capped), added to `core.v1`. The session flags
   match the session table across DST changes. ADR 0066.
 
+- FEAT-005: market-structure features (`xq.features.structure`): channel breakout distances,
+  efficiency ratio, Wilder's ADX with +DI and -DI, swing highs and lows used only after their
+  confirmation lag (strength bars after the swing), the trailing z-score, the compression
+  percentile, distances to the prior trading day's and the latest completed session's high and
+  low, and to round-number levels, added to `core.v1`. Tested: the swing lag (a swing on bar i
+  appears on bar i + strength, unknown on data cut before), ADX by hand, the rest on hand cases.
+  ADR 0066.
+
 ### Changed
 
 - C-29 (owner's decision, ADR 0064), BASE-005: rule warm-ups may read signal bars from before the

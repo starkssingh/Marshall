@@ -126,3 +126,32 @@ since the last LBMA AM, LBMA PM, US data release and rollover, capped at 1,440).
   time, both in summer time; London opens at 08:00 UTC in March and 07:00 UTC in April); hand
   values for the clock circle, the trading day's weekday across the roll and the minutes to and
   since events.
+
+## FEAT-005 — market structure (`xq.features.structure`)
+
+`breakout` (the close beyond the previous 20 and 96 bars' high and low channel, in sigma units;
+the current bar is excluded from the channel), `efficiency_ratio` (Kaufman, 20), `adx` (Wilder,
+14, with +DI and -DI), `swing` (the latest confirmed swing high and low, strength 3: distances in
+sigma units and ages in bars), `mean_reversion_z` (the trailing z-score of the close, 20 and 96),
+`compression` (the percentile rank of the 20-bar range among its last 96 values), `prior_day` and
+`prior_session` (Tokyo, London, New York: the latest *completed* occurrence's high and low) and
+`round_distance` (to the nearest multiple of 10, 50 and 100 USD, in sigma units — a price level,
+not a threshold).
+
+- **Swing confirmation lag.** Bar i is a swing high when its high is strictly above those of the
+  `strength` bars on each side; that is known only once those later bars have closed, so the swing
+  is confirmed at bar i + strength and used from that bar's availability on. It is computed on a
+  *trailing* window of 2 · strength + 1 bars ending at the confirming bar (never a centered
+  window); a tie is no swing.
+- **ADX:** the true range, +DM and -DM are smoothed by Wilder's average seeded with the mean of
+  their first `window` values from the second bar; ADX is Wilder's average of DX, defined from bar
+  2 · window − 1. The spec's warm-up is the directional indicators' (window + 1); ADX's own
+  starts later.
+- **Prior levels** use only completed periods: a trading day's high and low from its last bar on,
+  a session occurrence's (bars starting inside it on the same trading day) once a later bar
+  outside it exists — computing on data cut inside a session gives the same values.
+- **Known truth** (`tests/unit/features/test_structure.py`): the swing high of bar 2 appears on
+  bar 4 with age 2 and is unknown on data cut at bars 3 and 4's predecessors; a newer swing
+  replaces an older one; ties are no swing; ADX, +DI and -DI step by step by hand; the breakout,
+  efficiency ratio, z-score, compression rank, prior day (across the 21:00 UTC roll), prior
+  London session (unknown while it runs) and round-number distance by hand.

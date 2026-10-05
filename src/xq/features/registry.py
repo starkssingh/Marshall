@@ -29,6 +29,7 @@ from collections.abc import Mapping, Sequence
 from types import MappingProxyType
 from typing import Any
 
+import numpy as np
 import pandas as pd
 from sqlalchemy import Engine
 
@@ -36,6 +37,7 @@ from xq.core.config import AppConfig, FeatureSetConfig
 from xq.core.errors import ConfigError
 from xq.core.time import utc_now
 from xq.core.types import Timeframe
+from xq.datasets.asof import PROVENANCE_SUFFIX as PROVENANCE
 from xq.datasets.asof import asof_join
 from xq.datasets.base_features import (
     BASE_INPUT,
@@ -51,6 +53,7 @@ from xq.datasets.spec import SetRef
 from xq.features.base import AVAILABLE_AT, BarContext, Feature, FeatureSpec
 from xq.features.momentum import MOMENTUM
 from xq.features.price import PRICE
+from xq.features.structure import STRUCTURE
 from xq.features.time import TIME
 from xq.features.volatility import VOLATILITY
 from xq.tracking.db import session_factory
@@ -60,7 +63,7 @@ from xq.tracking.models import FeatureSetRecord
 #: of a configured feature set, next to each feature's own version.
 FRAMEWORK_VERSION = 1
 MTF_PREFIX = "mtf_"
-_FAMILY_FEATURES: tuple[Feature, ...] = (*PRICE, *MOMENTUM, *VOLATILITY, *TIME)
+_FAMILY_FEATURES: tuple[Feature, ...] = (*PRICE, *MOMENTUM, *VOLATILITY, *STRUCTURE, *TIME)
 
 
 class FeatureSetChangedError(ConfigError):
@@ -135,7 +138,7 @@ def compute_feature_set(
     """
     base = inputs[BASE_INPUT]
     index = decision_index(base)
-    out = base_v1(inputs, context) if base_columns else pd.DataFrame(index=index)
+    parts = [base_v1(inputs, context)] if base_columns else []
     by_timeframe: dict[Timeframe | None, list[FeatureSpec]] = {}
     for spec in specs:
         timeframe = None if spec.timeframe == context.base_timeframe else spec.timeframe
@@ -145,7 +148,7 @@ def compute_feature_set(
             bar_context = BarContext(context.base_timeframe, context.sessions)
             for spec in group:
                 computed = feature(spec.name, registry).on_bars(spec, base, bar_context)
-                _add(out, computed.set_axis(index, axis=0))
+                parts.append(computed.set_axis(index, axis=0))
             continue
         if timeframe.value not in inputs:
             raise ConfigError(
@@ -154,25 +157,44 @@ def compute_feature_set(
             )
         bars = inputs[timeframe.value]
         bar_context = BarContext(timeframe, context.sessions)
-        parts = [feature(s.name, registry).on_bars(s, bars, bar_context) for s in group]
-        right = pd.concat(parts, axis=1) if parts else pd.DataFrame(index=bars.index)
-        right[AVAILABLE_AT] = right.index
-        joined = asof_join(
-            pd.DataFrame({DECISION_TIME: index}),
-            right.reset_index(drop=True),
-            on_right=AVAILABLE_AT,
-            prefix=f"{MTF_PREFIX}{timeframe.value}_",
+        computed = pd.concat(
+            [feature(s.name, registry).on_bars(s, bars, bar_context) for s in group], axis=1
         )
-        _add(out, joined.drop(columns=DECISION_TIME).set_axis(index, axis=0))
+        parts.append(_join_on_availability(index, computed, f"{MTF_PREFIX}{timeframe.value}_"))
+    if not parts:
+        return pd.DataFrame(index=index)
+    out = pd.concat(parts, axis=1)
+    duplicated = sorted({str(c) for c in out.columns[out.columns.duplicated()]})
+    if duplicated:
+        raise ValueError(f"feature columns {duplicated} are written twice")
     return out
 
 
-def _add(out: pd.DataFrame, columns: pd.DataFrame) -> None:
-    clashes = sorted(set(out.columns) & set(columns.columns))
-    if clashes:
-        raise ValueError(f"feature columns {clashes} are written twice")
-    for name in columns.columns:
-        out[name] = columns[name].to_numpy()
+def _join_on_availability(
+    decisions: pd.DatetimeIndex, computed: pd.DataFrame, prefix: str
+) -> pd.DataFrame:
+    """`computed` (indexed by its bars' availability) at each decision: the row of the latest bar
+    available by then, found by `asof_join` on ``available_at``, with the provenance column
+    ``<prefix>available_at``."""
+    rows = pd.DataFrame({"row": np.arange(len(computed)), AVAILABLE_AT: computed.index})
+    joined = asof_join(
+        pd.DataFrame({DECISION_TIME: decisions}),
+        rows,
+        on_right=AVAILABLE_AT,
+        prefix=prefix,
+        columns=["row"],
+    )
+    matched = joined[f"{prefix}row"].to_numpy(dtype=np.float64)
+    known = ~np.isnan(matched)
+    take = np.where(known, matched, 0).astype(np.int64)
+    if len(computed):
+        values = computed.to_numpy(np.float64)[take]
+        values[~known] = np.nan
+    else:  # no bar of the timeframe available yet
+        values = np.full((len(take), computed.shape[1]), np.nan)
+    out = pd.DataFrame(values, index=decisions, columns=[f"{prefix}{c}" for c in computed.columns])
+    out[f"{prefix}{PROVENANCE}"] = joined[f"{prefix}{PROVENANCE}"].to_numpy()
+    return out
 
 
 def definition_payload(

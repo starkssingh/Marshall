@@ -47,6 +47,22 @@ core:
       - {feature: vol_of_vol, params: {window: 96, inner: 16}}
       - {feature: ewma_sigma, params: {span: 96}}
       - {feature: range_expansion, params: {window: 20}}
+      # FEAT-005 market structure
+      - {feature: breakout, params: {window: 20, sigma_span: 96}}
+      - {feature: breakout, params: {window: 96, sigma_span: 96}}
+      - {feature: efficiency_ratio, params: {window: 20}}
+      - {feature: adx, params: {window: 14}}
+      - {feature: swing, params: {strength: 3, sigma_span: 96}}
+      - {feature: mean_reversion_z, params: {window: 20}}
+      - {feature: mean_reversion_z, params: {window: 96}}
+      - {feature: compression, params: {window: 20, history: 96}}
+      - {feature: prior_day, params: {sigma_span: 96}}
+      - {feature: prior_session, params: {session: tokyo, sigma_span: 96}}
+      - {feature: prior_session, params: {session: london, sigma_span: 96}}
+      - {feature: prior_session, params: {session: new_york, sigma_span: 96}}
+      - {feature: round_distance, params: {step: 10.0, sigma_span: 96}}
+      - {feature: round_distance, params: {step: 50.0, sigma_span: 96}}
+      - {feature: round_distance, params: {step: 100.0, sigma_span: 96}}
       # FEAT-006 time and event proximity (the calendar of config/sessions.yaml)
       - {feature: time_of_day, params: {tz: America/New_York}}
       - {feature: day_of_week}
