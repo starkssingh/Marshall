@@ -1038,6 +1038,12 @@ IDs from `docs/specs/development-plan.md`.
   purged CV and the pipeline, spurious skill on shuffled CV), transforms and calibration blind to
   test rows, ECE improved by calibration, determinism. ADR 0068.
 
+- ML-003: seeded hyperparameter search (`xq.models.hpo`): Optuna TPE seeded per family and fold,
+  a fixed budget (50) over the search spaces of `config/ml.yaml`, scored by the pipeline's inner
+  purged CV on the fitting rows only; `trial_recorder` counts every evaluated configuration as a
+  trial (not on test). Dependency Optuna. Tested: reproducible under a seed, the exact budget
+  inside the space, every configuration counted by the trial counter in a run. ADR 0068.
+
 ### Changed
 
 - C-33 (owner's decision, ADR 0067), DS-001: `experiments/configs/ds_core.yaml`, `ds_base`'s

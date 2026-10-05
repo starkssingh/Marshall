@@ -112,3 +112,25 @@ is evidence.
    span plus the embargo) and at chance on no signal; calibration on validation rows cuts ECE on
    three-times-overconfident scores by more than two thirds (Platt below 1,000 rows, isotonic
    above); weights shrink Platt's map.
+
+## ML-003 — seeded Optuna search, every configuration a trial (`xq.models.hpo`)
+
+1. `optuna_search(family, cfg, seed=, record=)` is a `Search` for the pipeline: Optuna's TPE
+   sampler seeded by `derive_seed(seed, "hpo", family, fold_id)`, exactly `n_trials`
+   configurations per family and fold (50 by default, the plan's fixed budget), drawn from the
+   family's space in `config/ml.yaml` (intervals, log-scaled or integer, or lists of choices) on
+   top of its fixed parameters; the objective is the inner purged CV loss on the fitting rows
+   (ML-002), so no configuration is scored on validation or test rows. The best evaluated
+   configuration is returned; an unusable one (no usable inner split) is reported to the sampler
+   as a very large loss and does not stop the search.
+2. **Every evaluated configuration is a trial.** `trial_recorder(run, family_id, context)`
+   records each as a trial of the hypothesis family with `evaluated_on_test=False` and its inner
+   loss, so the trial counter, the effective trial count and the deflated Sharpe ratio see the
+   whole search; the chosen model's out-of-sample evaluation is recorded by its caller, on test.
+3. **Dependency:** Optuna (the TPE sampler), added in this sprint.
+4. **Known truth** (`tests/unit/models/test_hpo.py`, `tests/integration/models/test_ml_trials.py`):
+   a seed reproduces every configuration in order and the choice, another seed does not; the
+   budget is spent exactly, inside the space (integer, log and choice dimensions honoured, fixed
+   parameters carried); the best evaluated configuration is returned; inside a run with three
+   walk-forward folds and a budget of 6, the trial counter holds 6 × 3 search trials plus the one
+   out-of-sample trial, of which one is on test, and the planted signal is found out of sample.
