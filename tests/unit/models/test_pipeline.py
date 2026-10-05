@@ -1,6 +1,9 @@
 """ML-002: the in-fold pipeline. The purging demonstration (the plan's test): on synthetic data
-with overlapping labels and no signal, the purged walk-forward pipeline and purged k-fold give
-chance-level log loss, while unpurged shuffled cross-validation shows spurious skill."""
+with overlapping labels and no signal, unpurged shuffled cross-validation shows spurious skill,
+while purged k-fold and the purged walk-forward pipeline rank at chance (AUC near 0.5) and the
+pipeline shows no out-of-sample skill. Its log loss is worse than chance, not at chance: see
+ADR 0068, ML-002 item 4, for that and for how the thresholds were set (lowered after a
+three-seed exploratory run)."""
 
 import math
 from datetime import date
