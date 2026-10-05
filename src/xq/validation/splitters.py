@@ -30,6 +30,12 @@ groups. A training sample is dropped when its label interval ``[t, label_end]`` 
 group's span ``[first test time, last test label_end + embargo]``: purging removes labels that
 overlap the test group, the embargo removes the samples right after it.
 
+**Sample weights that read other labels** (C-30 (4), ADR 0065). Every splitter's `split` takes an
+optional ``weight_end``: when sample weights (TGT-006's average uniqueness) are computed over
+labels that reach into a later window, a sample's weight is known only at its ``weight_end``, so
+every purge, embargo and cutoff above uses ``max(label_end, weight_end)`` instead of
+``label_end``.
+
 Shuffled splits do not exist here: financial samples are serially dependent (CLAUDE.md).
 """
 
@@ -155,14 +161,24 @@ class WalkForwardSplitter:
             start += step
         return windows
 
-    def split(self, times: pd.DatetimeIndex, label_end: pd.Series | pd.DatetimeIndex) -> list[Fold]:
+    def split(
+        self,
+        times: pd.DatetimeIndex,
+        label_end: pd.Series | pd.DatetimeIndex,
+        *,
+        weight_end: pd.Series | pd.DatetimeIndex | None = None,
+    ) -> list[Fold]:
         """All folds with at least one training and one test sample, in time order.
 
+        Args:
+            weight_end: When sample weights read other labels, when each sample's weight is known;
+                samples are then purged by ``max(label_end, weight_end)`` (module docstring).
+
         Raises:
-            NaiveTimestampError: if `times` or `label_end` is not tz-aware.
+            NaiveTimestampError: if `times`, `label_end` or `weight_end` is not tz-aware.
             ValueError: if the inputs are misaligned, unsorted, or a label ends before its time.
         """
-        t, e = _samples(times, label_end)
+        t, e = _samples(times, label_end, weight_end)
         if len(t) == 0:
             return []
         labelled = e != _NAT
@@ -220,10 +236,14 @@ class PurgedKFold:
         self.embargo = embargo.value
 
     def split(
-        self, times: pd.DatetimeIndex, label_end: pd.Series | pd.DatetimeIndex
+        self,
+        times: pd.DatetimeIndex,
+        label_end: pd.Series | pd.DatetimeIndex,
+        *,
+        weight_end: pd.Series | pd.DatetimeIndex | None = None,
     ) -> list[Split]:
         """One split per group, in time order (see the module docstring)."""
-        t, e = _samples(times, label_end)
+        t, e = _samples(times, label_end, weight_end)
         groups = _groups(len(t), self.n_splits)
         return [
             _purged_split(f"k{g:02d}", t, e, groups, (g,), self.embargo)
@@ -244,10 +264,14 @@ class CombinatorialPurgedCV:
         self.embargo = embargo.value
 
     def split(
-        self, times: pd.DatetimeIndex, label_end: pd.Series | pd.DatetimeIndex
+        self,
+        times: pd.DatetimeIndex,
+        label_end: pd.Series | pd.DatetimeIndex,
+        *,
+        weight_end: pd.Series | pd.DatetimeIndex | None = None,
     ) -> list[Split]:
         """``C(n_groups, k_test)`` splits in lexicographic order of their test groups."""
-        t, e = _samples(times, label_end)
+        t, e = _samples(times, label_end, weight_end)
         groups = _groups(len(t), self.n_groups)
         return [
             _purged_split(
@@ -284,9 +308,12 @@ def _groups(n: int, n_groups: int) -> list[IntArray]:
 
 
 def _samples(
-    times: pd.DatetimeIndex, label_end: pd.Series | pd.DatetimeIndex
+    times: pd.DatetimeIndex,
+    label_end: pd.Series | pd.DatetimeIndex,
+    weight_end: pd.Series | pd.DatetimeIndex | None = None,
 ) -> tuple[IntArray, IntArray]:
-    """Decision times and label ends as int64 UTC nanoseconds (`_NAT` where no label)."""
+    """Decision times and purge ends as int64 UTC nanoseconds (`_NAT` where no label): each
+    ``label_end``, or ``max(label_end, weight_end)`` when weights are given."""
     index = pd.DatetimeIndex(times)
     ends = pd.DatetimeIndex(label_end)
     if index.tz is None or ends.tz is None:
@@ -295,6 +322,14 @@ def _samples(
         raise ValueError(f"{len(index)} decision times but {len(ends)} label ends")
     t = _ns(index)
     e = _ns(ends)
+    if weight_end is not None:
+        weights = pd.DatetimeIndex(weight_end)
+        if weights.tz is None:
+            raise NaiveTimestampError("weight_end must be tz-aware")
+        if len(weights) != len(ends):
+            raise ValueError(f"{len(ends)} label ends but {len(weights)} weight ends")
+        w = _ns(weights)
+        e = np.where(e == _NAT, _NAT, np.maximum(e, w))
     if len(t) > 1 and np.any(np.diff(t) <= 0):
         raise ValueError("decision times must be unique and increasing")
     labelled = e != _NAT

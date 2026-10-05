@@ -1243,6 +1243,20 @@ IDs from `docs/specs/development-plan.md`.
 
 ### Fixed
 
+- C-30 (3) (owner's decision, ADR 0065), TGT-006: the trade/no-trade label calls the backtester's
+  own `CostModel` instead of mirroring it: the target set names a cost model (`cost_model:
+  placeholder`); `xq.targets.kinds.target_specs` binds it to the specs (`TargetSpec.costs`,
+  `TargetKind.cost_model`), refusing a model whose latency or fill delay differs from the set's;
+  `round_trip_pnl` prices a one-lot round trip as the screener does (slippage with its session
+  and event multipliers, commission per fill, financing at the rollovers held). The kind's code
+  version goes from 1 to 2; `derived.v2` replaces `derived.v1` (never materialized outside
+  tests); the dataset config digest covers the named cost model. Tested: a trade inside the
+  rollover window pays 3x slippage in the label and in `run_vectorized`, with the same per-lot
+  net P&L; hand-computed round trips and triple-Wednesday financing; the binding refusals.
+- C-30 (4) (owner's decision, ADR 0065), WF-001: the splitters take an optional `weight_end` and
+  purge by `max(label_end, weight_end)` when sample weights read other labels. Tested on
+  overlapping labels in walk-forward and purged k-fold.
+
 - TGT-002 forward returns: a quote while the market is closed (a stray quote in the daily break,
   within the fill delay) is never an entry or exit fill; the fill is the first quote at or after
   the intended time that lies in market hours, or there is no label, as in both backtest tiers.

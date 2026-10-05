@@ -6,15 +6,17 @@ windows: entry and exit fills after the latency, market time, ``label_end`` at t
 - ``tgt_sign_<h>``: the sign of the mid return (-1, 0 or +1);
 - ``tgt_big_<h>``: 1 when ``|mid return| > big_move_sigmas * s``, else 0, where
   ``s = sigma_t * sqrt(h in market minutes)`` is the interim sigma-hat known at t over the horizon;
-- ``tgt_trade_<ref>_<h>`` (``long``, ``short``): 1 when the side's execution-aware return (the
-  spread already paid by filling at the ask and the bid) exceeds the rest of the round trip's
-  costs, else 0 — the trade/no-trade label. Those costs, in basis points of the price, mirror the
-  provisional placeholder cost model (``config/costs/placeholder.yaml``, BT-001):
-  commission ``2 * commission_usd_per_oz_per_side / entry mid``; slippage
-  ``2 * (slippage_fixed_bps + slippage_sigma_multiple * sigma_1m)`` with ``sigma_1m`` the
-  sigma-hat known at t over one market minute (the session multipliers around the rollover and
-  releases are left out); financing for every market close the label holds over,
-  ``rate / day_count`` per night on the side's rate, three nights on ``triple_weekday``.
+- ``tgt_trade_<ref>_<h>`` (``long``, ``short``): 1 when a one-lot round trip on that side, entered
+  at the window's entry fill and left at its exit fill, makes money net of every cost, else 0 —
+  the trade/no-trade label. The costs are **the backtester's own** `CostModel` (the target set's
+  ``cost_model``, bound by `xq.targets.kinds.target_specs`; C-30 (3), ADR 0065), applied as the
+  vectorized screener applies them: the fill prices are the ask and the bid moved by the model's
+  slippage (`CostModel.slippage_bps`, its session and event multipliers included — three times in
+  the rollover window, twice around US releases — on the sigma-hat known at t over one market
+  minute), the commission is `CostModel.commission_usd` of each fill at its mid, and financing is
+  `CostModel.financing_usd` at every rollover after the entry fill up to the exit fill
+  (`CostModel.rollovers`, three times on the triple weekday), marked at the mid of the last quote
+  before it. "Expected net P&L" is read as the trade's realized net P&L with the model's costs.
 
 The price references choose the labels: ``mid`` gives the sign and big-move labels, ``long`` and
 ``short`` the trade labels.
@@ -26,21 +28,23 @@ uniqueness** is the time-average of ``1 / concurrency`` over its interval: 1 for
 overlaps no other, ``1/k`` for k identical labels. Average-uniqueness **sample weights**
 (`uniqueness_weights`) scale it to a mean of 1 over the labels passed, so they are computed within
 a training set, never across folds. A label's uniqueness depends on every label overlapping it,
-so it is known only at ``weight_end``, the latest ``label_end`` among them; that is the end to
-purge by when weights are computed over labels that reach into a later window.
+so it is known only at ``weight_end``, the latest ``label_end`` among them. When weights are
+computed over labels that reach into a later window, the splitters purge by
+``max(label_end, weight_end)`` (their ``weight_end`` argument; C-30 (4), ADR 0065).
 """
 
 from __future__ import annotations
 
 from collections.abc import Mapping
-from typing import Any, Literal
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
 import numpy.typing as npt
 import pandas as pd
 from pydantic import Field
 
-from xq.core.config import WEEKDAYS, TargetSetConfig
+from xq.core.config import TargetSetConfig
+from xq.core.errors import ConfigError
 from xq.data.calendar import NAT_NS, MarketClock
 from xq.targets.base import Lookahead, TargetKind, TargetSpec, market_horizon
 from xq.targets.returns import (
@@ -54,23 +58,23 @@ from xq.targets.returns import (
     side_return,
 )
 
+if TYPE_CHECKING:
+    from xq.backtest.costs import CostModel
+
 KIND = "derived_label"
 _BPS = 1e-4
 _MINUTE = pd.Timedelta(minutes=1)
-NY = "America/New_York"
 
 
 class DerivedLabelParams(ExecutionParams):
-    """Parameters of a ``derived_label`` target set (module docstring)."""
+    """Parameters of a ``derived_label`` target set (module docstring).
+
+    ``cost_model`` names the backtester's cost model (``config/costs/<name>.yaml``) the trade
+    labels are priced with; its latency and fill delay must equal the execution parameters.
+    """
 
     big_move_sigmas: float = Field(gt=0)
-    commission_usd_per_oz_per_side: float = Field(ge=0)
-    slippage_fixed_bps: float = Field(ge=0)
-    slippage_sigma_multiple: float = Field(ge=0)
-    financing_long_annual_pct: float
-    financing_short_annual_pct: float
-    financing_day_count: int = Field(gt=0)
-    triple_weekday: Literal["mon", "tue", "wed", "thu", "fri"]
+    cost_model: str = Field(min_length=1)
 
 
 def derived_label_params(params: Mapping[str, Any]) -> DerivedLabelParams:
@@ -106,6 +110,11 @@ def sigma_rate(close: pd.Series, definition: TargetSetConfig, bar: pd.Timedelta)
     return interim_sigma_rate(close, derived_label_params(definition.params).sigma_span_bars, bar)
 
 
+def cost_model(definition: TargetSetConfig) -> str:
+    """The cost model the trade labels are priced with."""
+    return derived_label_params(definition.params).cost_model
+
+
 def lookahead(definition: TargetSetConfig, trading_day: pd.Timedelta) -> Lookahead:
     """The longest horizon plus latency in market time, then the allowed fill delay."""
     return execution_lookahead(derived_label_params(definition.params), definition, trading_day)
@@ -114,7 +123,11 @@ def lookahead(definition: TargetSetConfig, trading_day: pd.Timedelta) -> Lookahe
 def compute(
     spec: TargetSpec, quotes: pd.DataFrame, sigma: pd.Series, clock: MarketClock
 ) -> pd.DataFrame:
-    """The derived label of `spec` at every decision time of `sigma` (module docstring)."""
+    """The derived label of `spec` at every decision time of `sigma` (module docstring).
+
+    Raises:
+        ConfigError: for a trade label whose spec carries no cost model (see `target_specs`).
+    """
     windows = label_windows(spec, quotes, sigma, clock)
     scale = horizon_scale(sigma, spec.horizon)
     derive = spec.params["derive"]
@@ -122,66 +135,95 @@ def compute(
     if derive == "big":
         ok &= np.isfinite(scale)
     elif derive == "trade":
+        if spec.costs is None:
+            raise ConfigError(
+                f"trade label {spec.name} needs the backtester's cost model: build its specs with "
+                "xq.targets.kinds.target_specs"
+            )
         ok &= np.isfinite(sigma.to_numpy(np.float64))
     value = np.full(len(ok), np.nan)
     if ok.any():
         bid = quotes["bid"].to_numpy(np.float64)
         ask = quotes["ask"].to_numpy(np.float64)
         e, x = windows.entry[ok], windows.exit[ok]
-        r = side_return(spec.price_ref, bid, ask, e, x)
         if derive == "sign":
-            value[ok] = np.sign(r)
+            value[ok] = np.sign(side_return(spec.price_ref, bid, ask, e, x))
         elif derive == "big":
+            r = side_return(spec.price_ref, bid, ask, e, x)
             value[ok] = (np.abs(r) > float(spec.params["big_move_sigmas"]) * scale[ok]).astype(
                 float
             )
         else:
-            costs = round_trip_costs(
-                spec, (bid[e] + ask[e]) / 2, sigma.to_numpy(np.float64)[ok],
-                windows.ts[e], windows.ts[x], clock,
-            )  # fmt: skip
-            value[ok] = (r - costs > 0).astype(np.float64)
+            assert spec.costs is not None  # checked above
+            sigma_1m_bps = sigma.to_numpy(np.float64)[ok] / _BPS
+            pnl = round_trip_pnl(
+                spec.costs, spec.price_ref, windows.ts, bid, ask, e, x, sigma_1m_bps
+            )
+            value[ok] = (pnl["net_usd"].to_numpy(np.float64) > 0).astype(np.float64)
     return windows.frame(value, scale, clock, ok=ok)
 
 
-def round_trip_costs(
-    spec: TargetSpec,
-    entry_mid: npt.NDArray[np.float64],
-    sigma_rate_t: npt.NDArray[np.float64],
-    start: npt.NDArray[np.int64],
-    end: npt.NDArray[np.int64],
-    clock: MarketClock,
-) -> npt.NDArray[np.float64]:
-    """Commission, slippage and financing of a round trip, as a log-return (module docstring)."""
-    p = spec.params
-    commission = 2 * float(p["commission_usd_per_oz_per_side"]) / entry_mid
-    sigma_1m_bps = sigma_rate_t / _BPS  # sigma-hat per square-root minute = over one minute
-    slippage = 2 * (
-        float(p["slippage_fixed_bps"]) + float(p["slippage_sigma_multiple"]) * sigma_1m_bps
-    )
-    rate = (
-        p["financing_long_annual_pct"]
-        if spec.price_ref == "long"
-        else p["financing_short_annual_pct"]
-    )
-    per_night = float(rate) / 100 / int(p["financing_day_count"])
-    nights = financing_nights(clock, start, end, str(p["triple_weekday"]))
-    out: npt.NDArray[np.float64] = commission + slippage * _BPS + nights * per_night
-    return out
+def round_trip_pnl(
+    costs: CostModel,
+    side: str,
+    ts: npt.NDArray[np.int64],
+    bid: npt.NDArray[np.float64],
+    ask: npt.NDArray[np.float64],
+    entry: npt.NDArray[np.int64],
+    exit_: npt.NDArray[np.int64],
+    sigma_1m_bps: npt.NDArray[np.float64],
+) -> pd.DataFrame:
+    """P&L in USD of one-lot round trips on `side` (``long`` or ``short``), entered at quote rows
+    `entry` and left at rows `exit_` of (`ts`, `bid`, `ask`), with the costs of `costs` applied
+    as the vectorized screener applies them (module docstring).
 
-
-def financing_nights(
-    clock: MarketClock, start: npt.NDArray[np.int64], end: npt.NDArray[np.int64], triple: str
-) -> npt.NDArray[np.float64]:
-    """Nights of financing between each start and end: one per market close c with
-    ``start <= c < end`` (as `MarketClock.crosses_close`), three for a close on `triple`."""
-    weekdays = pd.DatetimeIndex(pd.to_datetime(clock.closes, unit="ns", utc=True)).tz_convert(NY)
-    weight = np.where(weekdays.weekday == WEEKDAYS.index(triple), 3.0, 1.0)
-    cumulative = np.concatenate([[0.0], np.cumsum(weight)])
-    before_end = np.searchsorted(clock.closes, end, side="left")
-    before_start = np.searchsorted(clock.closes, start, side="left")
-    nights: npt.NDArray[np.float64] = cumulative[before_end] - cumulative[before_start]
-    return nights
+    Returns:
+        One row per round trip: ``entry_slippage_bps`` and ``exit_slippage_bps`` (the model's,
+        multipliers included), ``gross_usd`` (at the quotes' ask and bid, spread paid),
+        ``slippage_usd``, ``commission_usd``, ``financing_usd`` and ``net_usd``.
+    """
+    contract = float(costs.instrument.contract_size)
+    times = pd.DatetimeIndex(pd.to_datetime(np.concatenate([ts[entry], ts[exit_]]), utc=True))
+    slip = costs.slippage_bps(times, np.concatenate([sigma_1m_bps, sigma_1m_bps]))
+    slip_in, slip_out = slip[: len(entry)], slip[len(entry) :]
+    long = side == "long"
+    paid_in = np.where(long, ask[entry], bid[entry])  # buy at the ask, sell at the bid
+    paid_out = np.where(long, bid[exit_], ask[exit_])
+    direction = 1.0 if long else -1.0
+    gross = direction * contract * (paid_out - paid_in)
+    slippage = contract * _BPS * (paid_in * slip_in + paid_out * slip_out)
+    one = np.ones(len(entry))
+    commission = costs.commission_usd(one, (bid[entry] + ask[entry]) / 2) + costs.commission_usd(
+        one, (bid[exit_] + ask[exit_]) / 2
+    )
+    financing = np.zeros(len(entry))
+    if len(entry):
+        start = pd.Timestamp(int(ts[entry].min()), tz="UTC")
+        end = pd.Timestamp(int(ts[exit_].max()), tz="UTC") + pd.Timedelta(1, "ns")
+        rolls = costs.rollovers(start, end)
+        r = ns_values(pd.DatetimeIndex(rolls.index))
+        if len(r):
+            # held over a rollover after its entry fill, up to and including its exit fill (the
+            # screener's position after the last fill strictly before the rollover)
+            last = np.searchsorted(ts, r, side="left") - 1
+            mark = (bid[last] + ask[last]) / 2
+            charge = costs.financing_usd(direction * np.ones(len(r)), mark, rolls.to_numpy())
+            cumulative = np.concatenate([[0.0], np.cumsum(charge)])
+            after_entry = np.searchsorted(r, ts[entry], side="right")
+            through_exit = np.searchsorted(r, ts[exit_], side="right")
+            financing = cumulative[through_exit] - cumulative[after_entry]
+    net = gross - slippage - commission - financing
+    return pd.DataFrame(
+        {
+            "entry_slippage_bps": slip_in,
+            "exit_slippage_bps": slip_out,
+            "gross_usd": gross,
+            "slippage_usd": slippage,
+            "commission_usd": commission,
+            "financing_usd": financing,
+            "net_usd": net,
+        }
+    )
 
 
 def label_uniqueness(
@@ -276,9 +318,11 @@ def _average_concurrency(
 
 DERIVED_LABEL = TargetKind(
     name=KIND,
-    code_version=1,
+    # 2: trade labels priced by the backtester's cost model, multipliers included (C-30 (3))
+    code_version=2,
     expand=expand,
     sigma=sigma_rate,
     compute=compute,
     lookahead=lookahead,
+    cost_model=cost_model,
 )

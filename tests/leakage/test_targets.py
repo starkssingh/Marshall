@@ -18,7 +18,7 @@ from xq.core.types import Timeframe
 from xq.data.calendar import MarketClock, regular_trading_day
 from xq.datasets.leakage import FeatureFn, Inputs, check_target_bounds
 from xq.targets.base import TargetSpec
-from xq.targets.kinds import target_kind
+from xq.targets.kinds import target_kind, target_specs
 from xq.targets.weights import label_uniqueness
 
 AssertCausal = Callable[[FeatureFn, Inputs], None]
@@ -33,7 +33,7 @@ TRADING_DAY = regular_trading_day(CFG.sessions_config())
 SPECS = [
     (f"{name}.{version}:{spec.name}", definition, spec)
     for name, version, definition in DEFINITIONS
-    for spec in target_kind(definition.kind).expand(definition, TRADING_DAY)
+    for spec in target_specs(CFG, definition, "xauusd")
 ]
 
 

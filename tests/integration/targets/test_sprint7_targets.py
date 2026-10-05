@@ -17,7 +17,14 @@ from xq.datasets.builder import build_dataset, load_dataset
 from xq.targets.base import market_horizon
 from xq.targets.weights import label_uniqueness
 
-SETS = ["realized_vol", "excursions", "barriers", "derived"]
+#: Each set's version and its kind's code version (the derived labels' trade label is priced by
+#: the backtester's cost model from code version 2, C-30 (3)).
+SETS = {
+    "realized_vol": ("v1", 1),
+    "excursions": ("v1", 1),
+    "barriers": ("v1", 1),
+    "derived": ("v2", 2),
+}
 DAY = pd.Timedelta(hours=23)
 
 
@@ -33,17 +40,18 @@ def engine(cfg: AppConfig, clean_week_dir: Path) -> Iterator[Engine]:
     engine.dispose()
 
 
-@pytest.mark.parametrize("name", SETS)
+@pytest.mark.parametrize("name", list(SETS))
 def test_a_dataset_stores_every_target_of_the_set(
     cfg: AppConfig, engine: Engine, name: str
 ) -> None:
+    version, code_version = SETS[name]
     ref = build_dataset(
-        cfg, engine, dataset_spec(target_set={"name": name, "version": "v1"}), git_sha="t"
+        cfg, engine, dataset_spec(target_set={"name": name, "version": version}), git_sha="t"
     )
     targets = load_dataset(cfg, ref.dataset_id, "targets")
     features = load_dataset(cfg, ref.dataset_id)
-    definition = cfg.target_set(name, "v1")
-    assert ref.manifest["code_versions"][f"targets:{name}.v1"] == 1
+    definition = cfg.target_set(name, version)
+    assert ref.manifest["code_versions"][f"targets:{name}.{version}"] == code_version
     assert all(str(t).startswith("tgt_") for t in targets["target"].unique())  # never features
     for target, one in targets.groupby("target"):
         assert len(one) == len(features), target

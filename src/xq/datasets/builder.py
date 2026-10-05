@@ -75,7 +75,7 @@ from xq.targets.base import (
     fill_delay_report,
     lock_target_set,
 )
-from xq.targets.kinds import target_kind
+from xq.targets.kinds import target_kind, target_specs
 from xq.tracking.db import session_factory
 from xq.tracking.models import DatasetVersion, QualityRunRecord
 
@@ -117,7 +117,7 @@ def config_digest(cfg: AppConfig, spec: DatasetSpec) -> str:
     """Hash of the configuration the builder reads besides the stores.
 
     Covers the calendar, the instrument, the bar exclusion flags (which ticks targets may fill
-    at) and the target set definition, if any.
+    at), the target set definition, if any, and the cost model its kind prices trades with.
     """
     payload: dict[str, Any] = {
         "sessions": cfg.sessions_config().model_dump(mode="json"),
@@ -127,6 +127,9 @@ def config_digest(cfg: AppConfig, spec: DatasetSpec) -> str:
         definition = cfg.target_set(spec.target_set.name, spec.target_set.version)
         payload["target_set"] = definition_hash(definition)
         payload["fill_exclusions"] = cfg.bars_config().exclude_flags
+        costs = target_kind(definition.kind).cost_model(definition)
+        if costs is not None:
+            payload["cost_model"] = cfg.cost_model_config(costs).model_dump(mode="json")
     canonical = json.dumps(payload, sort_keys=True, separators=(",", ":"))
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()[:16]
 
@@ -215,7 +218,7 @@ def build_dataset(cfg: AppConfig, engine: Engine, spec: DatasetSpec, *, git_sha:
         definition = cfg.target_set(spec.target_set.name, spec.target_set.version)
         kind = target_kind(definition.kind)
         trading_day = regular_trading_day(cfg.sessions_config())
-        targets_def = (kind, kind.expand(definition, trading_day))
+        targets_def = (kind, target_specs(cfg, definition, spec.instrument))
         reach = kind.lookahead(definition, trading_day)
     resolved = resolve_spec(cfg, engine, spec)
     ds_id = dataset_id(resolved, code_versions_for(cfg, resolved))
