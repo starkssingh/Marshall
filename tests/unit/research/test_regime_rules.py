@@ -27,8 +27,8 @@ def frame(**columns: object) -> pd.DataFrame:
     return pd.DataFrame(columns, index=INDEX[:n])
 
 
-def test_the_configured_columns_are_core_v1_feature_columns() -> None:
-    specs = feature_specs(CFG.feature_set_config("core", "v1"))
+def test_the_configured_columns_are_core_v2_feature_columns() -> None:
+    specs = feature_specs(CFG.feature_set_config("core", "v2"))
     names = {output_prefix(s) + s.column for s in specs}
     columns = {
         RULES.volatility.column,

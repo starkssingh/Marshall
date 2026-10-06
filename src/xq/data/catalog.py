@@ -29,7 +29,7 @@ from xq.core.time import TimestampLike, ensure_utc, to_ns
 from xq.core.types import PriceBasis, Timeframe
 from xq.data.adapters.base import TICK_SCHEMA
 from xq.data.bars import BAR_SCHEMA, BASES, OHLC, bar_set_dir, build_version
-from xq.data.clean import CLEAN_DIR, rules_version
+from xq.data.clean import CLEAN_DIR, clean_rules_version
 from xq.datasets.vault import GateToken, check_window
 
 TICK_TIME_COLUMNS = ("ts_utc",)
@@ -71,7 +71,7 @@ class Catalog:
         start_ns, end_ns, limit_ns = self._check_request(
             source, instrument, start, end, vault_token, "load_ticks"
         )
-        version = rules or rules_version(self.cfg.cleaning_config())
+        version = rules or clean_rules_version(self.cfg)
         root = self._data_dir / CLEAN_DIR / source / instrument / f"rules={version}"
         columns = ", ".join(TICK_SCHEMA)
         query = (
@@ -106,9 +106,7 @@ class Catalog:
         )
         timeframe = Timeframe(tf)
         chosen = PriceBasis(basis).value
-        version = build or build_version(
-            self.cfg.bars_config(), rules_version(self.cfg.cleaning_config())
-        )
+        version = build or build_version(self.cfg.bars_config(), clean_rules_version(self.cfg))
         root = bar_set_dir(self.cfg, source, timeframe, version)
         prices = [f"{chosen}_{part} AS {part}" for part in OHLC]
         others = [c for c in BAR_SCHEMA if not c.startswith(tuple(f"{b}_" for b in BASES))]

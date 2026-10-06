@@ -16,7 +16,7 @@ from xq.core.config import AppConfig, load_config
 from xq.core.errors import MirrorVersionError
 from xq.core.time import from_ns, trading_day
 from xq.data.adapters import RawFileRef, build_adapter, validate_tick_frame
-from xq.data.clean import build_clean, clean_partition_path, rules_version
+from xq.data.clean import build_clean, clean_partition_path, clean_rules_version
 from xq.data.raw_store import ingest, rebuild_mirror, sha256_file
 from xq.tracking.db import create_db_engine, session_factory, upgrade_to_head
 from xq.tracking.models import CleaningAction, CleanPartition, RawFile
@@ -76,7 +76,7 @@ def test_mirror_carries_the_canonical_view(cfg: AppConfig, engine: Engine) -> No
 def test_build_writes_one_partition_per_trading_day(cfg: AppConfig, engine: Engine) -> None:
     ingest_dir(cfg, engine, FIXTURE_DIR, "01RUNA0000000000000000000A")
     result = build_clean(cfg, engine, "mt5_primary")
-    version = rules_version(cfg.cleaning_config())
+    version = clean_rules_version(cfg)
     assert result.rules_version == version
     assert result.rows == 9248
     assert result.dropped == 0

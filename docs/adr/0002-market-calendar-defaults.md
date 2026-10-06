@@ -1,6 +1,7 @@
 # ADR 0002 — Market calendar and session defaults
 
-- **Status:** accepted (defaults to be confirmed against the execution broker)
+- **Status:** accepted (defaults to be confirmed against the execution broker); decision 3's
+  early-close rules and the "one schedule for every year" assumption **superseded by ADR 0070**
 - **Date:** 2026-09-26
 - **Tasks:** DATA-002
 
@@ -47,3 +48,11 @@ resume after the break.
   data while open, weekly gap at the expected UTC hour.
 - NYSE one-off closures (for example national days of mourning) are treated as early closes, not
   full closures; DQ-004 will show whether the broker agrees.
+
+## Note (2026-10-06)
+
+The DQ-008 review checked this calendar against 3,028 trading days of Dukascopy ticks. Decisions 1,
+2 and the full-close list are confirmed. The early-close rules of decision 3 are superseded by
+ADR 0070 (calendar version `s2`): holiday early closes at 13:00 New York through 2021 and 14:30
+from 2022, 12-31 a full day, 12-24 at 13:45, the day after Thanksgiving at 13:45, and the National
+Days of Mourning full trading days.

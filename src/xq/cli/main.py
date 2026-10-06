@@ -232,18 +232,40 @@ def ingest_command(
     ctx: typer.Context,
     path: Annotated[Path, typer.Option("--path", help="File or directory of source files.")],
     source: SourceOption = None,
+    supersedes: Annotated[
+        list[str] | None,
+        typer.Option(
+            "--supersedes",
+            help="Raw file id this re-exported file replaces (repeatable; needs --reason).",
+        ),
+    ] = None,
+    reason: Annotated[
+        str | None, typer.Option("--reason", help="Why the re-export supersedes those files.")
+    ] = None,
 ) -> None:
     """Copy source files into the immutable raw store with a Parquet mirror and manifest rows.
 
-    Files already in the raw store (same SHA-256) are skipped, so re-running is a no-op.
+    Files already in the raw store (same SHA-256) are skipped, so re-running is a no-op. With
+    --supersedes, --path is one re-exported file that replaces the named raw files of the same
+    source and period from now on; both stay in the raw store (ADR 0071).
     """
+    if reason is not None and not supersedes:
+        raise typer.BadParameter("--reason goes with --supersedes", param_hint="--reason")
     with pipeline_run(ctx.obj, source=source, reads_source=True) as run:
         result = ingest(
-            run.cfg, run.source, path, engine=run.engine, run_id=run.run_id, git_sha=run.git_sha
+            run.cfg,
+            run.source,
+            path,
+            engine=run.engine,
+            run_id=run.run_id,
+            git_sha=run.git_sha,
+            supersedes=supersedes or (),
+            reason=reason,
         )
     typer.echo(
         f"run {result.run_id}: ingested {len(result.ingested)} file(s) with {result.rows} rows; "
         f"skipped {len(result.skipped)} already in the raw store"
+        + (f"; superseded {', '.join(supersedes)}" if supersedes else "")
     )
 
 

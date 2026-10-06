@@ -1,5 +1,6 @@
 """DQ-002: tick-level checks detect exactly the injected defects; a clean day passes."""
 
+from dataclasses import replace
 from datetime import date
 from typing import Any
 
@@ -22,6 +23,7 @@ from helpers.ticks import (
 from xq.core.config import AppConfig
 from xq.data.flags import TickFlag
 from xq.data.spreads import SpreadHistogram
+from xq.quality.checks.common import UNUSABLE
 from xq.quality.checks.ticks import hourly_tick_counts
 from xq.quality.registry import (
     CheckResult,
@@ -31,6 +33,7 @@ from xq.quality.registry import (
     load_builtin_checks,
 )
 
+SECOND = 1_000_000_000
 DAY = date(2024, 3, 12)  # Tuesday: market 2024-03-11 22:00 UTC to 2024-03-12 21:00 UTC (EDT)
 TICK_CHECKS = [
     "tick.ordering",
@@ -154,12 +157,42 @@ def test_spread_outliers(base: pd.DataFrame, context: dict[str, Any], cfg: AppCo
     )
 
 
-def test_spikes_count_events(base: pd.DataFrame, context: dict[str, Any], cfg: AppConfig) -> None:
-    spikes = [price_spike(base, i) for i in (1000, 2500, 4000, 5500, 7000, 7500)]
-    frame, _ = inject(base, spikes)
-    result = run("tick.spikes", build(frame, context), cfg)
-    assert result.metric == 6
-    assert result.status is Status.WARN  # more than 5 per day
+def usable_ticks(data: PartitionData) -> int:
+    return int((data.ticks["flags"].to_numpy() & np.uint32(UNUSABLE) == 0).sum())
+
+
+def test_spikes_are_graded_per_million_usable_ticks(
+    base: pd.DataFrame, context: dict[str, Any], cfg: AppConfig
+) -> None:
+    # ADR 0069 item 1: events per million usable ticks; warn 2000 (0.2 %), fail 4000 (0.4 %).
+    threshold = cfg.quality_config().checks["tick.spikes"]
+    assert (threshold.unit, threshold.warn, threshold.fail) == (
+        "events per million usable ticks",
+        2000,
+        4000,
+    )
+    rows = {6: Status.PASS, 24: Status.WARN, 48: Status.FAIL}  # ~8,300 usable ticks a day
+    for count, status in rows.items():
+        spikes = [price_spike(base, i) for i in np.linspace(500, 7500, count, dtype=int)]
+        frame, _ = inject(base, spikes)
+        data = build(frame, context)
+        result = run("tick.spikes", data, cfg)
+        assert result.details["events"] == count
+        assert result.details["usable_ticks"] == usable_ticks(data)
+        assert result.metric == pytest.approx(count * 1e6 / usable_ticks(data))
+        assert result.status is status
+
+
+def test_spikes_rate_ignores_unusable_ticks(
+    base: pd.DataFrame, context: dict[str, Any], cfg: AppConfig
+) -> None:
+    frame, _ = inject(base, [price_spike(base, 1000)])
+    data = build(frame, context)
+    flags = data.ticks["flags"].to_numpy().copy()
+    flags[:1000] |= np.uint32(TickFlag.MISSING_QUOTE)
+    unusable = replace(data, ticks=data.ticks.assign(flags=flags))
+    result = run("tick.spikes", unusable, cfg)
+    assert result.metric == pytest.approx(1e6 / (len(data.ticks) - 1000))
 
 
 def test_stale_quotes_in_active_sessions(
@@ -171,7 +204,14 @@ def test_stale_quotes_in_active_sessions(
     result = run("tick.stale_quotes", build(frame, context), cfg)
     assert 300 <= result.metric < 340  # the frozen 300 s plus the wait for the next change
     assert result.status is Status.WARN
+    (anomaly,) = result.anomalies
+    assert anomaly.ts_utc == pd.Timestamp(int(base["ts_utc"].iloc[start]), unit="ns", tz="UTC")
 
+
+def test_a_silence_is_missing_data_not_a_stale_quote(
+    base: pd.DataFrame, context: dict[str, Any], cfg: AppConfig
+) -> None:
+    # ADR 0069 item 3: an interval with no ticks at all is not counted, however long.
     silent = base[
         ~base["ts_utc"].between(
             pd.Timestamp("2024-03-12 15:00", tz="UTC").value,
@@ -179,20 +219,40 @@ def test_stale_quotes_in_active_sessions(
         )
     ]
     result = run("tick.stale_quotes", build(silent, context), cfg)
-    assert 2400 <= result.metric < 2440  # a 40-minute silence is more than 30 minutes
+    assert result.metric == 0
+    assert result.status is Status.PASS
+
+
+def test_a_silence_inside_a_frozen_quote_is_not_counted(
+    base: pd.DataFrame, context: dict[str, Any], cfg: AppConfig
+) -> None:
+    # A quote frozen for 35 minutes, of which 30 minutes have no tick at all: only the 5 minutes
+    # in which ticks repeated the quote are stale.
+    start = int(np.searchsorted(base["ts_utc"], pd.Timestamp("2024-03-12 13:00", tz="UTC").value))
+    frozen, _ = frozen_quote(base, start, seconds=2100, every=10)
+    t0 = int(base["ts_utc"].iloc[start])
+    hole = frozen["ts_utc"].between(t0 + 61 * SECOND, t0 + 1859 * SECOND)
+    result = run("tick.stale_quotes", build(frozen.loc[~hole], context), cfg)
+    assert 300 <= result.metric < 340  # 60 s before the silence, 240 s after, then the change
+    assert result.status is Status.WARN
+
+
+def test_a_frozen_feed_still_fails(
+    base: pd.DataFrame, context: dict[str, Any], cfg: AppConfig
+) -> None:
+    start = int(np.searchsorted(base["ts_utc"], pd.Timestamp("2024-03-12 13:00", tz="UTC").value))
+    frame, _ = frozen_quote(base, start, seconds=2400, every=30)
+    result = run("tick.stale_quotes", build(frame, context), cfg)
+    assert 2400 <= result.metric < 2440
     assert result.status is Status.FAIL
 
 
 def test_stale_quotes_outside_sessions_do_not_count(
     base: pd.DataFrame, context: dict[str, Any], cfg: AppConfig
 ) -> None:
-    quiet = base[
-        ~base["ts_utc"].between(
-            pd.Timestamp("2024-03-12 01:00", tz="UTC").value,
-            pd.Timestamp("2024-03-12 02:00", tz="UTC").value,
-        )
-    ]
-    assert run("tick.stale_quotes", build(quiet, context), cfg).metric == 0
+    start = int(np.searchsorted(base["ts_utc"], pd.Timestamp("2024-03-12 01:00", tz="UTC").value))
+    frame, _ = frozen_quote(base, start, seconds=1800, every=10)
+    assert run("tick.stale_quotes", build(frame, context), cfg).metric == 0
 
 
 def test_tick_rate_anomalies(base: pd.DataFrame, context: dict[str, Any], cfg: AppConfig) -> None:

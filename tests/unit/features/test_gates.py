@@ -17,7 +17,7 @@ from xq.features.registry import (
     output_prefix,
 )
 
-CORE = CFG.feature_set_config("core", "v1")
+CORE = CFG.feature_set_config("core", "v2")
 
 
 def feature_frame(definition: FeatureSetConfig) -> pd.DataFrame:
@@ -33,7 +33,7 @@ def feature_frame(definition: FeatureSetConfig) -> pd.DataFrame:
     return pd.DataFrame(np.zeros((3, len(columns))), columns=columns)
 
 
-def test_the_vwap_distance_is_the_only_gated_feature_of_core_v1() -> None:
+def test_the_vwap_distance_is_the_only_gated_feature_of_core_v2() -> None:
     gated = [s for s in feature_specs(CORE) if s.gate is not None]
     assert [(s.column, s.gate) for s in gated] == [("session_vwap_96", "tick_volume")]
     assert session_vwap.gate == "tick_volume"

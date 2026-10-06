@@ -12,7 +12,7 @@ from xq.core.errors import ConfigError, NaiveTimestampError, VaultAccessError
 from xq.core.types import Timeframe
 from xq.data.bars import bar_set_dir, build_bar_sets, build_version
 from xq.data.catalog import Catalog
-from xq.data.clean import build_clean, rules_version
+from xq.data.clean import build_clean, clean_rules_version
 from xq.data.raw_store import ingest
 from xq.tracking.db import create_db_engine, upgrade_to_head
 
@@ -186,4 +186,4 @@ def test_empty_results_keep_their_schema(catalog: Catalog) -> None:
 
 
 def _build(cfg: AppConfig) -> str:
-    return build_version(cfg.bars_config(), rules_version(cfg.cleaning_config()))
+    return build_version(cfg.bars_config(), clean_rules_version(cfg))

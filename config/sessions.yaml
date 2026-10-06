@@ -1,9 +1,14 @@
 # Trading calendar, sessions and event anchors (DATA-002). Local times are quoted "HH:MM" strings
 # in the stated IANA time zone and are converted to UTC per date, so DST is handled by construction.
-# Market hours and holiday rules are CME-style retail defaults: confirm them against the chosen
-# broker's calendar (ADR 0002). DQ-004 checks them against real data.
+# Market hours are confirmed on real Dukascopy ticks, 2014-2025 (DQ-008 review section 4); the
+# holiday rules are the owner's decisions C1-C8 on that review (ADR 0070, amending ADR 0002).
 
-market:
+# Calendar version (ADR 0070). Any change to `market` or `holidays` needs a new version, and every
+# feature set computed on the calendar a new version too (ADR 0067 (5)). s1: ADR 0002's defaults
+# (13:30 early closes, 12-24 and 12-31), retired before any build on real data. s2: C-35.
+version: s2
+
+market:                  # C1: confirmed on 3,028 days and 595 weekends, both DST regimes
   tz: America/New_York
   open: "18:00"          # quotes resume after the 17:00-18:00 daily break (on the previous day)
   close: "17:00"         # daily close; the trading day rolls at 17:00 New York
@@ -14,12 +19,21 @@ holidays:
   us_calendar: NYSE      # `holidays` package financial calendar, observed dates included
   uk_country: GB
   uk_subdiv: ENG         # English bank holidays: no LBMA auctions
-  closed:                # US-calendar holidays with no trading at all (prefix match on the name)
+  closed:                # C2: no trading at all (prefix match on the name; zero ticks, 34 dates)
     - New Year's Day
     - Good Friday
     - Christmas Day
-  early_close_time: "13:30"   # every other US-calendar holiday trades until this New York time
-  early_close_dates: ["12-24", "12-31"]
+  full_days:             # C7: named exceptions, traded in full (2018-12-05 and 2025-01-09)
+    - National Day of Mourning
+  early_close_time:      # C3: every other US-calendar holiday trades until this New York time
+    - time: "13:00"                    # through 2021-12-31
+    - {since: "2022-01-01", time: "14:30"}
+  early_close_dates:     # fixed dates closing early (C4: 12-31 is a full day; C5: 12-24 at 13:45)
+    "12-24": "13:45"
+  early_close_after:     # C6: the day after this holiday closes early (prefix match on the name)
+    Thanksgiving Day: "13:45"
+  # C8: the irregular closes (2019-07-04, 2019-09-02, 2024-07-04, MLK Day 2014 and 2017) are left
+  # unmodelled; the calendar checks keep flagging them.
 
 sessions:
   tokyo:

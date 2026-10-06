@@ -72,6 +72,10 @@ class FeatureSetChangedError(ConfigError):
     """A feature set version is used with a definition different from the locked one."""
 
 
+class FeatureSetCalendarError(ConfigError):
+    """A configured feature set is used on a calendar other than the one it names (ADR 0070)."""
+
+
 def build_registry(features: Sequence[Feature]) -> Mapping[str, Feature]:
     """An immutable mapping of `features` by name.
 
@@ -315,6 +319,22 @@ def configured(cfg: AppConfig, ref: SetRef) -> FeatureSetConfig | None:
     return cfg.feature_set_config(ref.name, ref.version)
 
 
+def check_calendar(cfg: AppConfig, ref: SetRef, definition: FeatureSetConfig) -> None:
+    """Refuse a configured set whose calendar is not the configured one (ADR 0067 (5)): a set is
+    never recomputed on a changed calendar; the change needs a new version of the set.
+
+    Raises:
+        FeatureSetCalendarError: if the set names no calendar or another one.
+    """
+    calendar = cfg.sessions_config().version
+    if definition.calendar != calendar:
+        raise FeatureSetCalendarError(
+            f"feature set {ref} is computed on calendar {definition.calendar!r}, but the "
+            f"configured calendar is {calendar!r}; a set is never recomputed on another calendar "
+            "(retired sets stay retired) — use or add a version of the set for this calendar"
+        )
+
+
 def resolve_feature_set(cfg: AppConfig, ref: SetRef) -> FeatureSetDef:
     """The `FeatureSetDef` the dataset builder computes for `ref`: a built-in set, or a set of
     ``config/features.yaml`` (module docstring).
@@ -325,6 +345,7 @@ def resolve_feature_set(cfg: AppConfig, ref: SetRef) -> FeatureSetDef:
     definition = configured(cfg, ref)
     if definition is None:
         return FEATURE_SETS[(ref.name, ref.version)]
+    check_calendar(cfg, ref, definition)
     specs = feature_specs(definition)
 
     def compute(inputs: Inputs, context: FeatureContext) -> pd.DataFrame:

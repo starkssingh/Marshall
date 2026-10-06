@@ -234,12 +234,13 @@ def test_only_duplicates_non_positive_and_crossed_may_be_dropped(cfg: CleaningCo
 
 
 def test_rules_version_tracks_parameters(cfg: CleaningConfig) -> None:
-    version = rules_version(cfg)
+    version = rules_version(cfg, "s2")
     assert version.startswith(f"{cfg.version}-")
-    assert rules_version(CleaningConfig.model_validate(cfg.model_dump())) == version
+    assert rules_version(CleaningConfig.model_validate(cfg.model_dump()), "s2") == version
     changed = cfg.model_dump()
     changed["spike"]["z_threshold"] = 9.0
-    assert rules_version(CleaningConfig.model_validate(changed)) != version
+    assert rules_version(CleaningConfig.model_validate(changed), "s2") != version
+    assert rules_version(cfg, "s3") != version  # a new calendar is a new clean store (ADR 0070)
 
 
 def test_rollover_spread_widening_is_not_a_spike(cfg: CleaningConfig) -> None:
@@ -271,3 +272,26 @@ def test_move_across_a_gap_is_judged_on_the_gap_length(
     frame.loc[gap_at:, ["bid", "ask"]] += 3.00
     frame.loc[gap_at + 2 :, ["bid", "ask"]] -= 1.50
     assert not flagged_ids(clean_ticks(frame, cfg, MARKET).ticks, TickFlag.SPIKE)
+
+
+def test_spike_floor_is_one_basis_point_in_a_quiet_market(
+    base: pd.DataFrame, cfg: CleaningConfig
+) -> None:
+    # ADR 0069 item 2: min_scale_bps 0.125 with z 8 means no move under 1 bp is a spike. In a
+    # quiet market (the mid moves 0.01 a tick, ~0.05 bp at 2,150) the floor, not the robust scale,
+    # sets the bar: a reverting 0.7 bp move was a spike under the old 0.05 bp floor, not now.
+    assert (cfg.spike.min_scale_bps, cfg.spike.z_threshold) == (0.125, 8.0)
+    steps = np.random.default_rng(5).choice([-0.01, 0.01], len(base))
+    mid = 2150.0 + np.cumsum(steps)
+    quiet = base.assign(bid=mid - 0.15, ask=mid + 0.15)
+    old_floor = CleaningConfig.model_validate(
+        {**cfg.model_dump(), "spike": {**cfg.spike.model_dump(), "min_scale_bps": 0.05}}
+    )
+    small, small_ids = inject(quiet, [price_spike(quiet, 2000, jump=0.15)])  # 0.70 bp
+    large, large_ids = inject(quiet, [price_spike(quiet, 2000, jump=0.30)])  # 1.40 bp
+    assert flagged_ids(clean_ticks(small, old_floor, MARKET).ticks, TickFlag.SPIKE) == set(
+        small_ids
+    )
+    assert not flagged_ids(clean_ticks(small, cfg, MARKET).ticks, TickFlag.SPIKE)
+    assert flagged_ids(clean_ticks(large, cfg, MARKET).ticks, TickFlag.SPIKE) == set(large_ids)
+    assert rules_version(old_floor, "s2") != rules_version(cfg, "s2")

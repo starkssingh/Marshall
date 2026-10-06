@@ -1,15 +1,65 @@
 # ADR 0069 — DQ-008: the one allowed change to the data-quality thresholds
 
-- **Status:** **proposed** — a draft for the owner's decision. Nothing in `config/quality.yaml` or
-  `config/base.yaml` has been changed. This ADR is not accepted and must not be cited as a decision.
-- **Date:** 2026-10-06
+- **Status:** **accepted** (2026-10-06, the owner's decision C-35 on the DQ-008 review), with the
+  changes recorded under "Decision" below. Implemented on synthetic data; the repeated quality run
+  on real data is the owner's local session's step.
+- **Date:** 2026-10-06 (proposed and accepted)
 - **Proposed by:** Claude, from the DQ-008 review in
   [`docs/data/quality-review-2026-10.md`](../data/quality-review-2026-10.md)
-- **Decided by:** the project owner (pending)
-- **Tasks:** DQ-008
+- **Decided by:** the project owner (C-35)
+- **Tasks:** DQ-008, DQ-002, DATA-007
 - **Refines:** ADR 0011 (check definitions and thresholds), ADR 0013 item 1 (the thresholds may
   change **once**, through an ADR, after the DQ-008 human review of a quality report on real broker
   data, and **never** after any strategy result exists), ADR 0013 item 2 (spread buckets)
+- **Related:** ADR 0070 (the calendar decisions of C-35), ADR 0071 (re-export supersession and the
+  exclusion list)
+
+## Decision
+
+The owner approved items 1–5 below **all together, as the one change ADR 0013 item 1 allows**
+(T1–T6 of review §7.2), with these terms:
+
+1. **T1 approved and fixed now.** `tick.spikes` is graded in **reverting spike events per million
+   usable ticks** of the day, **warn 2000, fail 4000** (0.2 % and 0.4 % of ticks). These levels
+   are **not** re-calibrated after T2's clean-store rebuild: they were set on the `c1` flag counts
+   and stay as they are whatever the `c2` counts turn out to be. "Usable" ticks are those a bar
+   may use: not missing a side, non-positive, crossed or an exact duplicate (`UNUSABLE`).
+2. **T2 approved.** `cleaning.spike.min_scale_bps` 0.05 → **0.125** bp, with `z_threshold`
+   unchanged at 8, so no move under 1 bp is a spike. It is a new clean rules version: the label
+   goes from `c1` to **`c2`** (`config/base.yaml`); `xq clean` and `xq build-bars` are re-run over
+   the whole history before the next quality run.
+3. **T3 approved in the recommended form (a).** Intervals with **no ticks** are excluded from
+   `tick.stale_quotes`; thresholds unchanged (warn any, fail 1,800 s). Precisely: the interval
+   between two consecutive usable ticks belongs to the quote of the first unless the ticks are
+   more than `stale_seconds` (120 s) apart — then nothing arrived at all, which is missing data
+   that `bar.missing_minutes` and `cal.missing_open_data` report. A run of one quote counts when
+   the time its ticks cover inside an active session exceeds `stale_seconds`. A feed that keeps
+   sending an unchanged quote is still caught; a silence, however long, is not counted here.
+   Option (b) (demoting the check to `minor`) is not adopted.
+4. **T4, T5, T6 approved: unchanged.** `bar.missing_minutes`, `cal.missing_open_data`,
+   `cal.gap_location`, `tick.rate_anomalies`, `bar.extreme_returns`, `tick.spread_outliers`, the
+   eight checks that never fire, `cal.closed_market_ticks` and `cal.holiday_behaviour` keep their
+   thresholds; spread buckets stay hourly (ADR 0013 item 2), and the known issue "the
+   `SPREAD_OUTLIER` flag fires on rollover widening" is closed as not observed.
+5. **The allowance in ADR 0013 item 1 is now spent.** No quality threshold changes again without
+   superseding ADR 0013, and never once a strategy result exists.
+
+**Implemented** (synthetic data only): `config/quality.yaml` (`tick.spikes` unit and levels),
+`config/base.yaml` (`cleaning.version: c2`, `min_scale_bps: 0.125`),
+`src/xq/quality/checks/ticks.py` (`RevertingSpikes` grades the rate and reports
+`usable_ticks`; `StaleQuotes` counts only tick-covered time). Known truth:
+`tests/unit/quality/test_tick_checks.py` (6, 24 and 48 injected spikes on ~8,300 usable ticks pass,
+warn and fail; unusable ticks do not count; a 40-minute silence scores 0; a frozen quote of 35
+minutes with a 30-minute silence inside scores only its 5 tick-covered minutes; a 40-minute frozen
+feed still fails) and `tests/unit/data/test_clean.py` (in a quiet market a reverting 0.7 bp move
+was a spike under the 0.05 bp floor and is not under 0.125 bp; a 1.4 bp move still is).
+
+**Not done here:** nothing ran on real data in this session. The owner's local session rebuilds
+the clean store and bars under `c2` and the new calendar (ADR 0070), and repeats the quality run;
+that run, not `01M47ZDA2E631VVD7703MXWMQN`, becomes the one DQ-007 gates datasets on.
+
+The sections below are the proposal as reviewed; where they differ from "Decision", the decision
+wins.
 
 ## Context
 
@@ -40,7 +90,7 @@ Two checks do not discriminate on this feed:
 This ADR is the one change ADR 0013 item 1 allows. Because it is the only one, it should cover
 every threshold that needs to move, together.
 
-## Proposed decision
+## Proposal as reviewed
 
 ### 1. `tick.spikes`: grade per million ticks, not per day
 

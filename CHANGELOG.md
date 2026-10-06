@@ -1370,6 +1370,55 @@ IDs from `docs/specs/development-plan.md`.
   stays declared as an optional source. The README's quick start runs on the synthetic Dukascopy
   fixtures.
 
+- DQ-008 / DQ-002 / DATA-007 (owner's decision C-35, ADR 0069 **accepted**): the one threshold
+  change ADR 0013 item 1 allows, T1–T6 together. `tick.spikes` is graded in reverting spike
+  events **per million usable ticks**, warn 2000, fail 4000 (fixed now, not re-calibrated after
+  the clean-store rebuild); `cleaning.spike.min_scale_bps` 0.05 → 0.125 bp (no spike under 1 bp
+  with `z_threshold` 8), a new clean rules version `c2`; `tick.stale_quotes` counts only time
+  covered by ticks repeating an unchanged quote — an interval of more than `stale_seconds` with no
+  tick at all is missing data, not staleness — thresholds unchanged; every other threshold and
+  the hourly spread buckets unchanged. The allowance of ADR 0013 item 1 is spent. Tested on
+  synthetic ticks only; the clean store, bars and quality run are rebuilt on real data in the
+  owner's local session.
+
+- DQ-008 / DQ-004 / DATA-002 (owner's decision C-35, ADR 0070): the calendar decisions C1–C8,
+  calendar version `s2` (`config/sessions.yaml` `version`, required). Market hours and the three
+  full-close holidays unchanged (C1, C2); holiday early closes are date-dependent — 13:00 New York
+  through 2021-12-31, 14:30 from 2022-01-01 (C3, a schema change: `TimeSchedule`, a bare `"HH:MM"`
+  or `{since, time}` entries, and `time_on`; ADR 0002's one schedule for every year superseded);
+  12-31 a full day (C4); 12-24 at 13:45 (C5, `early_close_dates` now maps `MM-DD` to a schedule);
+  the day after Thanksgiving at 13:45 (C6, `early_close_after`); the National Days of Mourning full
+  trading days as named exceptions (C7, `full_days`); the irregular dates unmodelled (C8).
+  `MarketCalendar.early_close` takes the earliest applicable close. The clean rules version now
+  includes the calendar version (`rules_version(cleaning, calendar)`, `clean_rules_version`), so a
+  new calendar is a new clean store. Feature sets name their calendar (`FeatureSetConfig.calendar`)
+  and are refused on another (`FeatureSetCalendarError`): `core.v1` (calendar `s1`) is retired
+  before any build on real data, `core.v2` repeats its features on `s2`, and `ds_core` and the
+  regime rules name `core.v2` (ADR 0067 (5)). Synthetic data only.
+
+- DQ-008 / DATA-004 / DATA-007 (owner's decision C-35, ADR 0071): re-export support with raw data
+  kept immutable. A re-exported file is ingested as a new raw file that **supersedes** the earlier
+  raw file(s) of the same source and period, with a reason: `xq ingest --path <file> --supersedes
+  <raw_file_id> --reason "..."` (`ingest(..., supersedes=, reason=)`). The supersession is recorded
+  in the manifest table `raw_file_supersessions` (migration 0018: both ids, source, the superseded
+  file's period, reason, ingest run, time) in the same transaction as the new `raw_files` row.
+  Clean, the bar build's coverage and the quality run's coverage read only active files
+  (`active_raw_files`), so a trading day is built from the superseding file and never from both;
+  `xq verify-raw` still re-hashes both. Refused with nothing stored (`SupersessionError`): no
+  reason, not exactly one file, an unknown, other-source or already superseded raw file, identical
+  bytes, or a period that does not overlap. Runbook section "Re-exporting a damaged month".
+
+- DQ-007 / DQ-008 (owner's decision C-35, ADR 0071): a config-driven, documented exclusion list,
+  `config/exclusions.yaml` (`ExclusionsConfig`, `AppConfig.excluded_days`; file-only like the
+  gates). The approved rule: exclude a trading day only if more than 20 % of its calendar market
+  minutes are still missing after the re-export (`cal.missing_open_data`), so one-hour holes stay
+  warnings; every entry carries a reason, its missing share (which must exceed the rule) and the
+  quality run that measured it. The dataset builder adds the listed days a dataset reads to its
+  exclusions and manifest, checks each against its own gating run (`check_exclusion_evidence`;
+  a day graded at or below the rule refuses the build) and puts a non-empty list in the config
+  digest. **The list is empty**: the owner's local session fills it from the evidence of the run
+  after the re-export. Runbook section "Filling the exclusion list".
+
 ### Fixed
 
 - DQ-004 / DQ-008: the observation recorded in ADR 0062, `docs/STATUS.md` and

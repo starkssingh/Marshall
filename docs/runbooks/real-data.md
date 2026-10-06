@@ -112,16 +112,67 @@ SHA-256; every deletion is logged with size and digest in `data/deleted_csvs.log
 not backed up by this repository (`data/` is git-ignored) — **backing it up is the owner's step**.
 `xq verify-raw` re-hashes the whole store in about 17 s and should be run before relying on it.
 
+### Re-exporting a damaged month (ADR 0071)
+
+A month the downloader left whole-hour holes in is re-exported with the same command as in step 1
+and ingested as a **new raw file that supersedes the old one**. Nothing in the raw store is
+deleted or rewritten; the manifest records which file replaced which, when and why, and clean,
+bars and `xq validate` read only the replacement from then on.
+
+```bash
+# The old file's raw_file_id is the prefix of its stored name (data/raw/<source>/<instrument>/...).
+ls data/raw/dukascopy/xauusd/2014/10/        # e.g. 0123456789abcdef__XAUUSD_ticks_2014-10.csv
+uv run xq ingest --source dukascopy --path data/downloads/reexport/XAUUSD_ticks_2014-10.csv \
+  --supersedes 0123456789abcdef \
+  --reason "re-export of 2014-10: the first export skipped 205 whole UTC hours (DQ-008 review 5.3)"
+uv run xq verify-raw                          # both files are still checked
+uv run xq clean --source dukascopy            # the affected trading days are rebuilt
+uv run xq build-bars --source dukascopy
+uv run xq spread-stats --source dukascopy
+uv run xq validate --source dukascopy
+```
+
+`--path` must be the one re-exported file. The ingest is refused, with nothing stored, without a
+reason, for an unknown or already superseded raw file id, for a file of another source, for a
+byte-identical file, or for a file whose ticks do not overlap the old file's period. Back up
+`data/raw` again afterwards: it now holds both versions of the month.
+
+### Filling the exclusion list (ADR 0071)
+
+After the damaged months are re-exported and the quality run is repeated, a trading day may be
+excluded from datasets **only if more than 20 % of its calendar market minutes are still missing**:
+the `cal.missing_open_data` metric of that day in the new run. One-hour holes stay warnings.
+
+1. List the candidates from the run's results (`quality_results`, check `cal.missing_open_data`,
+   `metric_value > 0.2`), and set aside any day where the calendar, not the data, is at fault.
+2. Add each day to `config/exclusions.yaml` under its source with `trading_day`, a `reason` naming
+   the defect, its `missing_market_share` (the metric) and the run's `quality_run_id`. The file is
+   the only place the list can be set; an entry at or below 20 % does not load.
+3. Commit the change with the run id in the message. Every dataset build checks each listed day
+   against its own gating run and refuses an entry the run does not support.
+
 ## 3. What a real-data session may do now
 
-Until the DQ-008 review is signed off, nothing runs on real data beyond the pipeline above and
+Until the quality run repeated under the DQ-008 decisions exists and the exclusion list is filled
+from it (C-36), nothing runs on real data beyond the pipeline above, re-exports and
 `xq validate` (see "Not allowed yet" in `docs/STATUS.md`).
 
 The C-8 session has run: the whole 2014-01 … 2025-11 download was ingested, cleaned, barred and
 graded, and the review is in [`docs/data/quality-review-2026-10.md`](../data/quality-review-2026-10.md).
-It found the trading boundaries correct and the holiday early closes wrong; its calendar and
-threshold proposals wait for the owner (ADR 0069, status "proposed"). The calendar is not changed
-before the owner decides.
+The owner decided its proposals (C-35): ADR 0069 (thresholds, clean rules `c2`), ADR 0070 (the
+calendar, version `s2`) and ADR 0071 (re-export supersession, the exclusion list).
+
+**The C-36 session** applies them, in this order:
+
+1. `uv sync`, then rebuild the whole history under `c2` and `s2` — `xq clean`, `xq build-bars`,
+   `xq spread-stats` (step 2's commands). The rules version changes, so these write a new clean
+   store and new bar builds next to the old ones (about 21 minutes for clean and bars, measured
+   under `c1`); budget the disk space.
+2. Re-export the damaged months (review §7.3; 2014-10 first) and ingest each with `--supersedes`
+   ("Re-exporting a damaged month" above); `xq clean` and `xq build-bars` again.
+3. `xq validate`, and compare the new run with `01M47ZDA2E631VVD7703MXWMQN` check by check.
+4. Fill `config/exclusions.yaml` from the new run ("Filling the exclusion list" above).
+5. Back up `data/raw`.
 
 The March 2024 observation this session was told to start from — "the last Friday tick on
 2024-03-01 was at 20:59:59 UTC, an hour before the calendar's weekly close" — was **wrong**: the

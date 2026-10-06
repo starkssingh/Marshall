@@ -28,7 +28,7 @@ from xq.core.errors import XQError
 from xq.core.logging import get_logger
 from xq.core.time import NEW_YORK, from_ns, to_ns, trading_day_bounds
 from xq.data.bars import exclude_mask
-from xq.data.clean import clean_partition_path, rules_version
+from xq.data.clean import clean_partition_path, clean_rules_version
 from xq.tracking.db import session_factory
 from xq.tracking.models import CleanPartition, SpreadStat
 
@@ -112,7 +112,7 @@ def build_spread_stats(
     """
     source = cfg.source(source_id)
     instrument = cfg.instrument(source.instrument, source.venue)
-    version = rules_version(cfg.cleaning_config())
+    version = clean_rules_version(cfg)
     vault_start = to_ns(pd.Timestamp(cfg.vault.start))
     mask = np.uint32(exclude_mask(cfg.bars_config()))
     histogram = SpreadHistogram(float(instrument.tick_size))

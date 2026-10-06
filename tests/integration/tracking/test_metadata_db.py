@@ -29,6 +29,7 @@ TABLES = {
     "instruments",
     "ingest_runs",
     "raw_files",
+    "raw_file_supersessions",
     "clean_partitions",
     "cleaning_actions",
     "bar_sets",
@@ -60,7 +61,7 @@ TABLES = {
     "stat_tests",
     "robustness_results",
 }
-LATEST = "0017"
+LATEST = "0018"
 NOW = pd.Timestamp("2026-09-26 01:00:00.123456789", tz="UTC")
 
 

@@ -1,6 +1,6 @@
 """Rule-based regimes (REG-001): volatility, trend and compression/expansion.
 
-Each regime reads causal feature columns of ``core.v1`` (``config/regimes.yaml``) and cuts them at
+Each regime reads causal feature columns of ``core.v2`` (``config/regimes.yaml``) and cuts them at
 **quantiles of a training fold's own rows** (`fit`), never of the full sample or of test rows. A
 fitted model labels any rows with those fixed cut-offs (`filter`), row by row, so its output at t
 uses only the features at t: it is causal whenever its inputs are. `fit_per_fold` refits the

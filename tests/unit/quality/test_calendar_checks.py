@@ -94,9 +94,9 @@ def test_trading_on_a_full_close_holiday(cfg: AppConfig) -> None:
 
 
 def test_trading_after_an_early_close(cfg: AppConfig) -> None:
-    # Thanksgiving 2024-11-28 closes at 13:30 New York (18:30 UTC); these ticks run to 19:00.
-    day = dense_ticks("2024-11-28 17:00", "2024-11-28 19:00", seed=5, mean_interval_s=60)
-    after_close = int((day["ts_utc"] >= ns("2024-11-28 18:30")).sum())
+    # Thanksgiving 2024-11-28 closes at 14:30 New York (19:30 UTC); these ticks run to 20:00.
+    day = dense_ticks("2024-11-28 18:00", "2024-11-28 20:00", seed=5, mean_interval_s=60)
+    after_close = int((day["ts_utc"] >= ns("2024-11-28 19:30")).sum())
     result = run("cal.holiday_behaviour", partition(day, date(2024, 11, 28)), cfg)
     assert result.metric == after_close > 0
     assert result.details["early_close"] is True

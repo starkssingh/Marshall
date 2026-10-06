@@ -1,4 +1,4 @@
-"""FEAT-001 and C-33 (3) end to end: a dataset built with the configured feature set ``core.v1``
+"""FEAT-001 and C-33 (3) end to end: a dataset built with the configured feature set ``core.v2``
 on seventeen synthetic weeks. The builder reads each timeframe's warm-up bars from before the
 dataset's start (the longest lookback of the set, computed from its specs), so every feature is
 defined from the first trading day; nothing is filled. Missing or gate-failed warm-up bars stop
@@ -32,7 +32,7 @@ from xq.quality.gate import QualityGateError
 from xq.tracking.db import session_factory
 from xq.tracking.models import FeatureSetRecord, QualityResultRecord
 
-CORE = {"name": "core", "version": "v1"}
+CORE = {"name": "core", "version": "v2"}
 #: Labor Day 2024: the synthetic ticks run through it, so the quality run fails it (closed market).
 LABOR_DAY = {"trading_day": "2024-09-02", "reason": "US holiday, synthetic ticks"}
 
@@ -65,9 +65,9 @@ def spec(**changes: Any) -> DatasetSpec:
 
 
 def core_columns(cfg: AppConfig, columns: list[str]) -> list[str]:
-    """The columns `core.v1`'s features write (not the base columns, not provenance)."""
+    """The columns `core.v2`'s features write (not the base columns, not provenance)."""
     expected = [
-        output_prefix(s) + s.column for s in feature_specs(cfg.feature_set_config("core", "v1"))
+        output_prefix(s) + s.column for s in feature_specs(cfg.feature_set_config("core", "v2"))
     ]
     return [
         c
@@ -77,8 +77,8 @@ def core_columns(cfg: AppConfig, columns: list[str]) -> list[str]:
 
 
 def test_the_warm_up_is_the_longest_lookback_of_each_timeframe(cfg: AppConfig) -> None:
-    needs = warmup_bars(cfg, SetRef(name="core", version="v1"))
-    specs = feature_specs(cfg.feature_set_config("core", "v1"))
+    needs = warmup_bars(cfg, SetRef(name="core", version="v2"))
+    specs = feature_specs(cfg.feature_set_config("core", "v2"))
     assert set(needs) == {"base", "1h", "4h", "1d"}
     for name, need in needs.items():
         own = [max(s.lookback, s.warmup) for s in specs if s.inputs[0] == name]
@@ -87,13 +87,13 @@ def test_the_warm_up_is_the_longest_lookback_of_each_timeframe(cfg: AppConfig) -
     assert warmup_bars(cfg, SetRef(name="base", version="v1")) == {}
 
 
-def test_core_v1_has_no_missing_values_from_the_first_trading_day(
+def test_core_v2_has_no_missing_values_from_the_first_trading_day(
     cfg: AppConfig, engine: Engine
 ) -> None:
     ref = build_dataset(cfg, engine, spec(), git_sha="t")
     features = load_dataset(cfg, ref.dataset_id)
     columns = core_columns(cfg, list(features.columns))
-    definition = cfg.feature_set_config("core", "v1")
+    definition = cfg.feature_set_config("core", "v2")
     expected = {output_prefix(s) + s.column for s in feature_specs(definition)}
     assert {
         e for e in expected if not any(c == e or c.startswith(f"{e}_") for c in columns)
@@ -111,7 +111,7 @@ def test_core_v1_has_no_missing_values_from_the_first_trading_day(
     # the context bars of the base columns are there too
     assert features[["ctx_1h_close", "ctx_4h_close", "ctx_1d_close"]].notna().all().all()
     versions = ref.manifest["code_versions"]
-    assert versions["features:core.v1"] == FRAMEWORK_VERSION == 2
+    assert versions["features:core.v2"] == FRAMEWORK_VERSION == 2
     used = {i.feature for i in [*definition.features, *definition.gated]}
     assert {k for k in versions if k.startswith("feature:")} == {f"feature:{n}" for n in used}
     assert used == set(FEATURES)
@@ -119,7 +119,7 @@ def test_core_v1_has_no_missing_values_from_the_first_trading_day(
     again = build_dataset(cfg, engine, spec(), git_sha="t")
     assert (again.dataset_id, again.reproduced) == (ref.dataset_id, True)
     with session_factory(engine)() as session:
-        assert session.get(FeatureSetRecord, ("core", "v1")) is not None
+        assert session.get(FeatureSetRecord, ("core", "v2")) is not None
 
 
 def test_missing_warm_up_bars_stop_the_build(cfg: AppConfig, engine: Engine) -> None:
@@ -140,9 +140,9 @@ def test_a_changed_definition_under_the_same_version_is_refused(
     cfg: AppConfig, engine: Engine
 ) -> None:
     build_dataset(cfg, engine, spec(), git_sha="t")
-    definition = cfg.feature_set_config("core", "v1")
+    definition = cfg.feature_set_config("core", "v2")
     changed = definition.model_copy(update={"features": definition.features[:-1]})
-    altered = cfg.model_copy(update={"features": {"core": {"v1": changed}}})
+    altered = cfg.model_copy(update={"features": {"core": {"v2": changed}}})
     with pytest.raises(FeatureSetChangedError, match="new version"):
         build_dataset(altered, engine, spec(), git_sha="t")
 
