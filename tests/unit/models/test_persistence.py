@@ -8,20 +8,25 @@ import numpy as np
 import pandas as pd
 import pytest
 
+from helpers.ml_processes import FOREST as NULL_FOREST
+from helpers.ml_processes import HORIZON, no_signal, walk_forward_folds
 from helpers.pipeline import REPO
 from xq.core.config import load_config
 from xq.core.seeds import make_rng
 from xq.models.persistence import (
     ARTIFACT,
     CARD,
+    DIAGNOSTIC_LABEL,
+    NotEvidenceError,
     PersistenceError,
     library_versions,
     load_model,
     max_abs_difference,
+    require_evidence,
     save_trained_fold,
     training_data_hash,
 )
-from xq.models.pipeline import FoldData, TrainedFold, train_fold
+from xq.models.pipeline import FoldData, TrainedFold, run_pipeline, train_fold
 from xq.validation.splitters import WalkForwardConfig, WalkForwardSplitter
 
 PIPELINE = load_config("research", config_dir=REPO / "config").ml_config().pipeline
@@ -101,12 +106,70 @@ def test_tampered_artifacts_and_library_drift_are_refused(tmp_path: Path) -> Non
     with pytest.raises(PersistenceError, match="other library versions"):
         load_model(tmp_path)
     assert (
-        load_model(tmp_path, allow_version_drift=True).card.library_versions["scikit-learn"]
+        load_model(tmp_path, allow_library_drift=True).card.library_versions["scikit-learn"]
         == "0.0.1"
     )
     with (tmp_path / ARTIFACT).open("ab") as handle:
         handle.write(b"\0")
     with pytest.raises(PersistenceError, match="SHA-256"):
-        load_model(tmp_path, allow_version_drift=True)
+        load_model(tmp_path, allow_library_drift=True)
     assert library_versions()["scikit-learn"] != "0.0.1"
     assert max_abs_difference([1.0, np.nan], [1.0, 2.0]) == float("inf")
+
+
+def test_a_fold_that_fell_back_reloads_to_its_base_rate_and_its_card_says_so(
+    tmp_path: Path,
+) -> None:
+    null = no_signal(seed=4)
+    out = run_pipeline(
+        "random_forest", null, walk_forward_folds(null), PIPELINE,
+        embargo=pd.Timedelta(hours=HORIZON), seed=1, params=NULL_FOREST,
+    )  # fmt: skip
+    fold = next(f for f in out.folds if f.fallback)
+    card = save_trained_fold(tmp_path, fold, null, dataset_id="ds-null", feature_set="core.v1")
+    assert card.fallback
+    assert (card.base_rate, card.shrinkage) == (fold.base_rate, 0.0)
+    assert card.dropped == fold.dropped
+    assert card.dropped["purged"] > 0
+    again = load_model(tmp_path).predict(null.x.loc[fold.predictions.index])
+    np.testing.assert_allclose(again["p_cal"], fold.base_rate)
+    assert max_abs_difference(again["p_cal"], fold.predictions["p_cal"]) <= 1e-9
+    _, kept = trained("logistic", {"C": 0.5})
+    assert not kept.fallback
+    assert kept.shrinkage is not None
+    assert 0 < kept.shrinkage < 1
+
+
+def test_library_drift_loads_only_as_a_labelled_diagnostic_never_as_evidence(
+    tmp_path: Path,
+) -> None:
+    sample, fold = trained("logistic", {"C": 0.5})
+    save_trained_fold(tmp_path, fold, sample, dataset_id="ds-synthetic", feature_set="core.v1")
+    test = sample.x.loc[fold.predictions.index]
+    matching = load_model(tmp_path)
+    assert matching.label is None
+    assert matching.drift == {}
+    clean = matching.predict(test)
+    assert "label" not in clean.columns
+    require_evidence(matching)
+    require_evidence(clean)  # matching versions: evidence
+    card = json.loads((tmp_path / CARD).read_text())
+    card["library_versions"]["numpy"] = "0.0.1"
+    (tmp_path / CARD).write_text(json.dumps(card))
+    with pytest.raises(PersistenceError, match="--allow-library-drift"):
+        load_model(tmp_path)
+    drifted = load_model(tmp_path, allow_library_drift=True)
+    assert drifted.label == DIAGNOSTIC_LABEL == "diagnostic, library drift"
+    assert drifted.drift == {"numpy": ("0.0.1", library_versions()["numpy"])}
+    output = drifted.predict(test)
+    assert (output["label"] == DIAGNOSTIC_LABEL).all()
+    assert output.attrs["label"] == DIAGNOSTIC_LABEL
+    pd.testing.assert_frame_equal(output.drop(columns="label"), clean)  # same numbers, labelled
+    with pytest.raises(NotEvidenceError, match="diagnostic, library drift"):
+        require_evidence(drifted)
+    with pytest.raises(NotEvidenceError):
+        require_evidence(output)
+    stored = tmp_path / "predictions.parquet"
+    output.to_parquet(stored)
+    with pytest.raises(NotEvidenceError):
+        require_evidence(pd.read_parquet(stored))  # the label survives a round trip

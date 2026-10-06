@@ -15,6 +15,13 @@ instead of extrapolating a spurious validation pattern to the test rows.
 
 ``auto`` chooses between them by that count; ``none`` leaves the probabilities as they are.
 Calibrated probabilities are clipped to ``[1e-6, 1 - 1e-6]`` so log loss stays finite.
+
+**Shrinkage and the no-skill fallback** (C-34 (1), ADR 0068): `Calibrator.shrink` makes the map
+return ``base + weight * (calibrated - base)``: the calibrated probability pulled towards a base
+rate (the fold's training base rate) by a weight in ``[0, 1]``. The pipeline sets the weight from
+the validation rows' effective number of independent labels and sets it to 0 (the base rate,
+whatever the input) when the model shows no skill on validation. The shrinkage is part of the
+fitted map, so a stored model reproduces it.
 """
 
 from __future__ import annotations
@@ -45,6 +52,20 @@ class Calibrator:
         self._isotonic: IsotonicRegression | None = None
         self._platt: LogisticRegression | None = None
         self.fitted = False
+        #: Shrinkage towards `base_rate` (1: none; 0: the base rate whatever the input).
+        self.base_rate: float | None = None
+        self.weight = 1.0
+
+    def shrink(self, base_rate: float, weight: float) -> Calibrator:
+        """Pull every calibrated probability towards `base_rate` by `weight` (module docstring).
+
+        Raises:
+            CalibrationError: for a base rate outside ``(0, 1)`` or a weight outside ``[0, 1]``.
+        """
+        if not 0 < base_rate < 1 or not 0 <= weight <= 1:
+            raise CalibrationError("shrinkage needs a base rate in (0, 1) and a weight in [0, 1]")
+        self.base_rate, self.weight = float(base_rate), float(weight)
+        return self
 
     def fit(
         self, p_raw: npt.ArrayLike, y: npt.ArrayLike, sample_weight: npt.ArrayLike | None = None
@@ -89,6 +110,8 @@ class Calibrator:
             out[known] = self._platt.predict_proba(_logit(p[known]).reshape(-1, 1))[:, 1]
         else:
             out[known] = p[known]
+        if self.base_rate is not None:
+            out[known] = self.base_rate + self.weight * (out[known] - self.base_rate)
         clipped: FloatArray = np.where(known, np.clip(out, EPS, 1 - EPS), np.nan)
         return clipped
 
@@ -107,6 +130,13 @@ def fit_calibrator(
     automatic: Literal["isotonic", "platt"] = "isotonic" if n > isotonic_min_samples else "platt"
     chosen: Literal["isotonic", "platt", "none"] = automatic if method == "auto" else method
     return Calibrator(chosen).fit(p_raw, y, sample_weight)
+
+
+def base_rate_map(base_rate: float) -> Calibrator:
+    """A map predicting `base_rate` whatever the input (a fold without skill shown, C-34 (1))."""
+    calibrator = Calibrator("none").shrink(base_rate, 0.0)
+    calibrator.fitted = True
+    return calibrator
 
 
 def _checked(p_raw: npt.ArrayLike, y: npt.ArrayLike) -> tuple[FloatArray, FloatArray]:

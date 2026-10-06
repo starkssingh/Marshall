@@ -8,6 +8,10 @@ pipeline:                       # ML-002, the in-fold pipeline
   isotonic_min_samples: 1000    # plan
   min_training_rows: 200
   sample_weights: uniqueness    # average uniqueness of the fitting rows' labels (TGT-006)
+  # C-34 (1): calibrated probabilities keep n_eff / (n_eff + k0) of their distance from the
+  # training base rate (n_eff: the validation labels' summed uniqueness). k0 = 50 independent
+  # labels, written down before the acceptance runs (ADR 0068) and not changed after them.
+  shrinkage_prior: 50
 
 hpo:                            # ML-003, Optuna TPE with a seeded sampler
   n_trials: 50                  # plan: a fixed budget per family

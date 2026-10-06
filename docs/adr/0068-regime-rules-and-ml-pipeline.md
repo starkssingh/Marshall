@@ -1,6 +1,7 @@
 # ADR 0068 — The last data-independent tasks: REG-001, ML-001, ML-002, ML-003, ML-009
 
-- **Status:** accepted (build-only; readings flagged for the owner's review: C-34)
+- **Status:** accepted (build-only); the owner decided the C-34 readings (section "C-34 owner
+  decisions")
 - **Date:** 2026-10-05
 - **Decided by:** Claude, within the plan (Phase 7, Phase 11) and the owner's instruction for this
   session: REG-001 (rule-based volatility, trend and compression regimes, cut-offs from training
@@ -118,6 +119,9 @@ is evidence.
      four independent validation outcomes is still overconfident. The weighted calibration of
      item 3 was introduced after the first runs showed up to 1.98; it reduced, but did not remove,
      that excess. Chance-level *ranking* (AUC) holds; chance-level *log loss* does not.
+   - **Superseded by C-34 (1)** (below): the shrinkage and no-skill fallback bring the null
+     process to within climatology + 0.01 in 19 of 20 seeds, and the pipeline's AUC check moved
+     to the mean over those 20 seeds.
 5. **Known truth** (the same files and `tests/unit/models/test_calibration.py`): the validation
    split's purge by hand; the embargo default; the scaler, the validation metrics and the
    calibrator unchanged when every test row's inputs and labels change; fitting rows before the
@@ -141,6 +145,8 @@ is evidence.
    records each as a trial of the hypothesis family with `evaluated_on_test=False` and its inner
    loss, so the trial counter, the effective trial count and the deflated Sharpe ratio see the
    whole search; the chosen model's out-of-sample evaluation is recorded by its caller, on test.
+   **Superseded by C-34 (4)** (below): a trial is a distinct pipeline specification evaluated on
+   outer test folds; search configurations are recorded per fold but are not trials.
 3. **Dependency:** Optuna (the TPE sampler), added in this sprint.
 4. **Known truth** (`tests/unit/models/test_hpo.py`, `tests/integration/models/test_ml_trials.py`):
    a seed reproduces every configuration in order and the choice, another seed does not; the
@@ -159,8 +165,9 @@ is evidence.
    inputs, targets and decision times), the library versions (Python, NumPy, pandas,
    scikit-learn, joblib, Optuna) and the artifact's SHA-256.
 2. `load_model(directory)` refuses an artifact whose bytes no longer match the card, and one
-   written with other library versions unless `allow_version_drift=True`; the loaded model
-   predicts as the pipeline did (scaler, forecaster, calibrator).
+   written with other library versions unless `allow_library_drift=True` (C-34 (5): then only
+   as a labelled diagnostic, never evidence); the loaded model predicts as the pipeline did
+   (scaler, forecaster, calibrator, shrinkage).
 3. joblib unpickles: only artifacts this project wrote are loaded; the hash guards their
    integrity, not their origin. Registering model versions in the registry (MREG-001's
    `model_versions`) from these cards waits for the first real candidate.
@@ -187,6 +194,215 @@ is evidence.
    the family, which the deflated Sharpe ratio then charges for. The plan's "fixed budget per
    family" could also be read as per family overall.
 5. **Version drift refuses a load** unless explicitly allowed (ML-009).
+
+## C-34 owner decisions (PR #21 review)
+
+The owner reviewed the readings above after PR #21 merged and decided them. Each is implemented in
+its own commit with tests, on the same branch.
+
+### (1) No-skill fallback, shrinkage and weighted training (blocking)
+
+**Decision.** On no-signal data the pipeline's test log loss (0.75–1.30) was worse than
+climatology (~0.66): overconfident probabilities would oversize trades. Fix: (a) a **no-skill
+fallback**: if the calibrated model's validation log loss is not below the fold's climatology
+(its training base rate), the fold predicts the base rate, recorded per fold; (b) **shrink** the
+calibrated probabilities towards the base rate in proportion to the effective number of
+independent validation labels (the sum of their uniqueness weights); (c) uniqueness weights in
+model training as well as calibration. Acceptance, fixed by the owner before any run: on the null
+process, test log loss <= climatology + 0.01 in at least 18 of 20 seeds; on a planted-signal
+process the pipeline still beats climatology (fallback not triggered). The purged-vs-shuffled
+AUC demonstration stays.
+
+**Implementation** (`xq.models.pipeline`, `xq.models.calibration`, `config/ml.yaml`):
+
+1. **Base rate.** The fold's training base rate is the fitting rows' mean label (unweighted). It
+   is what the map shrinks towards, what a fallback fold predicts, and the climatology the
+   acceptance compares against (on each fold's test rows).
+2. **Shrinkage.** `p = base + lambda * (p_cal - base)` with `lambda = n_eff / (n_eff + k0)`,
+   `n_eff` the validation labels' summed raw uniqueness and `k0 = shrinkage_prior = 50`
+   independent labels (`config/ml.yaml`), written before the first acceptance run and not changed
+   after it. With 200 hourly validation rows of 48-hour labels (`n_eff` about 4) the map keeps
+   about 7 % of its distance from the base rate; with 1,000 independent validation labels, 95 %.
+   The shrinkage is part of the stored map (`Calibrator.shrink`), so a reload reproduces it.
+3. **Fallback.** The calibrated, shrunk map's validation log loss is estimated by
+   **cross-fitting**, since a map scored on the rows it was fitted on almost never shows "no
+   skill": a purged k-fold with embargo over the validation rows (`k = inner_splits` = 5, the
+   inner search's splitter, purged by `max(label_end, weight_end)`), each block scored by the map
+   (calibration and shrinkage, with its own `n_eff`) fitted on the other blocks' purged rows,
+   losses weighted as the calibration is. If that loss is not below the base rate's on the same
+   rows, or cannot be estimated (no block whose fitting rows hold both classes, or validation
+   rows of one class only), the fold predicts its base rate. Each fold records `base_rate`,
+   `n_eff`, `shrinkage` (0 under the fallback) and `fallback`, with the cross-fitted losses in its
+   validation metrics; the model card records them too (a metric that could not be computed is
+   written as null). Because log loss is convex, shrinkage never turns a cross-fitted improvement
+   over the base rate into a deterioration; it only changes its size.
+4. **Weighted training.** The model was already fitted with the fitting rows' uniqueness weights
+   (mean 1) and the inner CV used them; this is now tested: the trained model equals a refit with
+   those weights and differs from an unweighted one, and `sample_weights: none` gives the
+   unweighted fit.
+5. With `calibration: none` there is no map, so no shrinkage or fallback; the configured value is
+   `auto`.
+
+**What changed during the acceptance runs (disclosed).** The processes
+(`tests/helpers/ml_processes.py`: the null process of the purging demonstration with its deep
+forest, 2,400 hours, embargo 48 hours; a planted-signal process with two iid normal inputs and the
+label the sign of `1.0 * x_a` plus the next six iid normal hourly returns, 3,000 hours, embargo one
+day, logistic `C = 1` and the same deep forest, seeds 0–4) and `k0` were fixed before the first
+run.
+
+- The first run, which cross-fitted over **two purged halves** of the validation rows, crashed at
+  null seed 14: a fold's validation rows held one class, so calibration was skipped and the
+  forest's raw probabilities went to the test rows with no base rate, shrinkage or fallback.
+  Such a fold now predicts its base rate (seeds 0–13 had no such fold, so their numbers were
+  unchanged).
+- With that fix the first run met the null acceptance (19 of 20) and beat climatology on every
+  planted run, but 11 of 100 planted folds fell back. Inspection showed the halves' label rates
+  differing widely (0.64 and 0.39 in one fold, about 18 independent labels each), so each half's
+  map learned a level that did not carry over to the other: a noisy, pessimistic estimate of the
+  full map's loss. The halves were replaced by the purged k-fold above (the pipeline's own
+  splitter, k = `inner_splits`), **after seeing the first run**. Nothing else changed; no further
+  iteration was made, and `k0`, the processes and the thresholds were not touched.
+- The purging demonstration's single-seed check of the pipeline's AUC (`p_cal` within 0.1 of
+  0.5) failed after the change (0.39): with the fallback, `p_cal` is a per-fold constant in most
+  null folds, so a pooled AUC ranks the folds' base rates instead of measuring the model's
+  ranking, and one seed's AUC rests on about 35 independent labels (standard error about 0.1).
+  That check moved to the 20 null seeds: the mean AUC of `p_raw` within 0.05 of 0.5 (standard
+  error of the mean about 0.022), a bound fixed before it was run. It gave 0.504. The shuffled and
+  purged k-fold checks of the demonstration and its pipeline log-loss checks are unchanged.
+
+**Null process, per seed** (deep random forest; stitched test log loss against climatology, each
+fold's training base rate on its test rows; folds falling back of folds trained; run 1 with
+validation halves, run 2 with the purged k-fold, the committed design):
+
+| seed | climatology | run 1 loss (excess) | run 1 fallbacks | run 2 loss (excess) | run 2 fallbacks | run 2 AUC of `p_raw` |
+|---|---|---|---|---|---|---|
+| 0 | 0.6731 | 0.6724 (-0.0007) | 5/7 | 0.6776 (+0.0045) | 2/7 | 0.435 |
+| 1 | 0.7721 | 0.7541 (-0.0180) | 2/7 | 0.7541 (-0.0180) | 2/7 | 0.593 |
+| 2 | 0.6199 | 0.6187 (-0.0012) | 6/7 | 0.6218 (+0.0020) | 5/7 | 0.630 |
+| 3 | 0.7190 | 0.7160 (-0.0030) | 5/7 | 0.7159 (-0.0031) | 3/7 | 0.511 |
+| 4 | 0.7232 | 0.7335 (+0.0104) | 3/7 | 0.7335 (+0.0104) | 3/7 | 0.397 |
+| 5 | 0.7048 | 0.7088 (+0.0040) | 4/7 | 0.7089 (+0.0041) | 2/7 | 0.412 |
+| 6 | 0.7334 | 0.7262 (-0.0072) | 5/7 | 0.7222 (-0.0112) | 4/7 | 0.471 |
+| 7 | 0.7395 | 0.7333 (-0.0062) | 6/7 | 0.7336 (-0.0059) | 5/7 | 0.614 |
+| 8 | 0.6998 | 0.6989 (-0.0009) | 3/7 | 0.6944 (-0.0054) | 3/7 | 0.468 |
+| 9 | 0.6898 | 0.6868 (-0.0029) | 6/7 | 0.6877 (-0.0021) | 4/7 | 0.635 |
+| 10 | 0.7398 | 0.7420 (+0.0022) | 4/7 | 0.7420 (+0.0022) | 4/7 | 0.507 |
+| 11 | 0.7294 | 0.7284 (-0.0010) | 6/7 | 0.7297 (+0.0003) | 4/7 | 0.512 |
+| 12 | 0.6949 | 0.6942 (-0.0007) | 5/7 | 0.6986 (+0.0037) | 3/7 | 0.400 |
+| 13 | 0.7263 | 0.7249 (-0.0014) | 5/7 | 0.7194 (-0.0069) | 4/7 | 0.429 |
+| 14 | 0.7261 | 0.7262 (+0.0000) | 6/7 | 0.7250 (-0.0011) | 5/7 | 0.489 |
+| 15 | 0.6996 | 0.7019 (+0.0023) | 3/7 | 0.7038 (+0.0041) | 2/7 | 0.544 |
+| 16 | 0.7219 | 0.7228 (+0.0009) | 4/7 | 0.7223 (+0.0004) | 3/7 | 0.406 |
+| 17 | 0.7319 | 0.7298 (-0.0021) | 3/7 | 0.7265 (-0.0054) | 6/7 | 0.566 |
+| 18 | 0.7585 | 0.7575 (-0.0010) | 5/7 | 0.7534 (-0.0051) | 3/7 | 0.515 |
+| 19 | 0.7378 | 0.7378 (+0.0000) | 7/7 | 0.7373 (-0.0005) | 5/7 | 0.539 |
+**Run 2 (committed): 19 of 20 seeds within climatology + 0.01** (seed 4: +0.0104). The acceptance
+(at least 18 of 20) is met. Mean AUC of `p_raw` 0.504. Before C-34 the same process gave
+0.75–1.30 against about 0.66.
+
+**Planted-signal process, per seed:**
+
+| family | seed | climatology | run 1 loss (vs climatology) | run 1 fallbacks | run 2 loss (vs climatology) | run 2 fallbacks |
+|---|---|---|---|---|---|---|
+| logistic | 0 | 0.6920 | 0.6636 (-0.0283) | 1/10 | 0.6619 (-0.0300) | 0/10 |
+| logistic | 1 | 0.6971 | 0.6601 (-0.0371) | 0/10 | 0.6601 (-0.0371) | 0/10 |
+| logistic | 2 | 0.6902 | 0.6648 (-0.0253) | 2/10 | 0.6616 (-0.0286) | 1/10 |
+| logistic | 3 | 0.6945 | 0.6797 (-0.0148) | 1/10 | 0.6797 (-0.0148) | 1/10 |
+| logistic | 4 | 0.7011 | 0.6628 (-0.0383) | 0/10 | 0.6628 (-0.0383) | 0/10 |
+| random_forest | 0 | 0.6920 | 0.6762 (-0.0157) | 1/10 | 0.6757 (-0.0163) | 0/10 |
+| random_forest | 1 | 0.6971 | 0.6732 (-0.0239) | 1/10 | 0.6731 (-0.0240) | 0/10 |
+| random_forest | 2 | 0.6902 | 0.6717 (-0.0185) | 2/10 | 0.6702 (-0.0200) | 1/10 |
+| random_forest | 3 | 0.6945 | 0.6886 (-0.0059) | 3/10 | 0.6867 (-0.0078) | 1/10 |
+| random_forest | 4 | 0.7011 | 0.6734 (-0.0277) | 0/10 | 0.6734 (-0.0277) | 0/10 |
+**Run 2: the pipeline beats climatology in all 10 runs**, by 0.008–0.038. **4 of the 100 folds
+fell back** (logistic seeds 2 and 3, forest seeds 2 and 3, one fold each), each with a
+cross-fitted validation loss 0.0001–0.0023 above the base rate's (validation `n_eff` 24–72: weak
+evidence either way). So "fallback not triggered" holds per run (no run is carried by the
+fallback; the test asserts fewer than half of each run's folds) but **not per fold**. Meeting it
+per fold would need a choice the owner has not made (a margin or a minimum `n_eff` before falling
+back, a larger validation share, or a stronger planted signal); it is listed for the owner as
+C-37 (1) in `docs/STATUS.md`. It is not tuned here.
+
+Tests: `tests/unit/models/test_no_skill_fallback.py` (both acceptances; a fallback fold predicts
+its fitting rows' mean; the shrinkage factor and map; weighted training),
+`tests/unit/models/test_persistence.py` (a fallback fold reloads to its base rate; its card says
+so), `tests/unit/models/test_pipeline.py` (the demonstration).
+
+### (2) No filling at model time, with dropped rows reported
+
+**Decision.** Approved; report dropped-row counts in fold results.
+
+**Implementation.** Every `TrainedFold` carries `dropped`: window rows with a missing input,
+window rows with an unknown target (inputs finite; a row with both counts once, as a missing
+input), usable rows purged between the fitting and validation rows, test rows left unpredicted
+for a missing input, and input columns constant in the fitting rows (set to 0).
+`PipelineOutput.fold_table()` lists them per fold with the row counts and C-34 (1)'s base rate,
+shrinkage and fallback, and the model card records them. Tested in
+`tests/unit/models/test_pipeline.py` (every count by hand on a fold with planted gaps) and
+`tests/unit/models/test_persistence.py` (on the card).
+
+### (3) Regime cut-off quantiles
+
+**Decision.** Approved; the cut-offs (`config/regimes.yaml`) were fixed before any result and
+stay so. No change.
+
+### (4) What a trial is (changed)
+
+**Decision** (supersedes the owner's earlier "every evaluated configuration is a trial", and the
+plan's ML-003 line "every configuration counted by the trial counter"): the deflated Sharpe
+ratio's trial count is the number of **distinct pipeline specifications** (model family x
+feature set x target x target-set version) evaluated on outer test folds. Inner HPO
+configurations are recorded per fold (count, seeds, best parameters) but do not increment the
+trial counter.
+
+**Implementation** (`xq.models.hpo`, `xq.models.pipeline`, `xq.tracking.trials`):
+
+1. `PipelineSpec(model, feature_set, target, target_set_version)` is the unit.
+   `record_pipeline_trial(run, family_id, spec)` records it once per hypothesis family,
+   `evaluated_on_test=True` (with its Sharpe ratio and returns when given, for the effective trial
+   count). Evaluating the same specification again, in the same run or another one, with other
+   hyperparameters or seeds, returns the trial already recorded (`find_family_trial`, by the
+   specification's configuration hash). `trial_recorder` is removed.
+2. A search returns a `SearchResult` (chosen parameters, configurations evaluated, the sampler's
+   seed, the chosen configuration's inner loss), and each fold keeps it as `TrainedFold.hpo`.
+   `record_hpo(run, output, spec, directory)` writes the metrics `hpo_n_configs`, `hpo_seed` and
+   `hpo_best_inner_loss` per fold and `hpo_<model>.json` (the specification and every fold's
+   summary) as an artifact of kind `hpo`. It records no trial.
+3. Consequence: a 50-configuration search on 40 folds no longer adds 2,000 trials to the family;
+   the selection inside a fold is protected by the inner purged CV and its out-of-sample cost is
+   paid on the outer test folds, where the specification is the trial. Choosing among
+   specifications by their test results is what the trial count charges for.
+4. Tests: `tests/integration/models/test_ml_trials.py` (a searched run counts no trial until its
+   specification is recorded, then exactly one; every fold's count, seed and chosen parameters are
+   recorded as metrics and an artifact; five distinct specifications count five, a repeat in the
+   same run or another run counts nothing, a sixth specification in a second run counts one),
+   `tests/unit/models/test_hpo.py` (a search reports its budget, seed and best loss).
+
+### (5) Library drift refuses a load, with an explicit diagnostic override
+
+**Decision.** Approved, plus an explicit `--allow-library-drift` override that labels outputs
+"diagnostic, library drift" and refuses them as evidence.
+
+**Implementation** (`xq.models.persistence`, `xq model` in the CLI):
+
+1. `load_model(directory)` still refuses a model whose card names other library versions; the
+   message names the override. `load_model(directory, allow_library_drift=True)` (the parameter
+   was `allow_version_drift`) loads it with its drift recorded (`PersistedModel.drift`) and the
+   label `DIAGNOSTIC_LABEL = "diagnostic, library drift"`; every prediction frame it returns
+   carries the label as a `label` column (which survives a Parquet round trip) and in
+   `attrs["label"]`.
+2. `require_evidence(model_or_predictions)` raises `NotEvidenceError` for anything so labelled.
+   `record_pipeline_trial(..., predictions=)` calls it, so diagnostic output cannot be counted as
+   a trial on test.
+3. CLI: `xq model check MODEL_DIR` verifies a stored model and prints whether it is evidence;
+   `xq model predict MODEL_DIR INPUTS.parquet OUTPUT.parquet` writes its predictions. Both refuse
+   drift (exit code 2) unless `--allow-library-drift` is given, and then print the label, the
+   drifted libraries and "not evidence"; the written predictions carry the label.
+4. Tests: `tests/unit/models/test_persistence.py` (refusal by default; the override's label,
+   drift and identical numbers; refusal as evidence of the model, its predictions and their
+   Parquet copy), `tests/integration/models/test_model_cli.py` (both commands with and without
+   the flag), `tests/integration/models/test_ml_trials.py` (a trial refused for diagnostic
+   predictions).
 
 ## Consequences
 

@@ -1,9 +1,14 @@
 """ML-002: the in-fold pipeline. The purging demonstration (the plan's test): on synthetic data
 with overlapping labels and no signal, unpurged shuffled cross-validation shows spurious skill,
-while purged k-fold and the purged walk-forward pipeline rank at chance (AUC near 0.5) and the
-pipeline shows no out-of-sample skill. Its log loss is worse than chance, not at chance: see
-ADR 0068, ML-002 item 4, for that and for how the thresholds were set (lowered after a
-three-seed exploratory run)."""
+while purged k-fold ranks at chance (AUC near 0.5) and the purged walk-forward pipeline shows no
+out-of-sample skill. See ADR 0068, ML-002 item 4, for how the thresholds were set (lowered after a
+three-seed exploratory run).
+
+C-34 (1) moved one check: the pipeline's single-seed AUC of ``p_cal``. With the no-skill fallback,
+``p_cal`` is the fold's training base rate in most null folds, so a pooled AUC ranks folds by their
+base rates rather than measuring the model's ranking; and one seed's AUC rests on ~35 independent
+labels. The pipeline's ranking is checked instead over 20 seeds in ``test_no_skill_fallback.py``.
+"""
 
 import math
 from datetime import date
@@ -12,9 +17,9 @@ import numpy as np
 import pandas as pd
 from sklearn.model_selection import KFold
 
+from helpers.ml_processes import FOREST, HORIZON, no_signal, walk_forward_folds
 from helpers.pipeline import REPO
 from xq.core.config import MlPipelineConfig, load_config
-from xq.core.seeds import make_rng
 from xq.models.base import build_forecaster
 from xq.models.pipeline import (
     FoldData,
@@ -26,37 +31,10 @@ from xq.models.pipeline import (
     train_fold,
 )
 from xq.validation.forecast_eval import auc, log_loss
-from xq.validation.splitters import PurgedKFold, WalkForwardConfig, WalkForwardSplitter
+from xq.validation.splitters import PurgedKFold
 
 CFG = load_config("research", config_dir=REPO / "config")
 PIPELINE = CFG.ml_config().pipeline
-HORIZON = 48  # hours: each label spans the next 48 hourly returns, so neighbours overlap
-FOREST = {"n_estimators": 100, "max_depth": None, "min_samples_leaf": 5, "max_samples": 0.5}
-
-
-def no_signal(n: int = 2400, seed: int = 9) -> FoldData:
-    """Hourly samples: two slowly drifting inputs unrelated to the returns, and the sign of the
-    next 48 hourly returns as the label (overlapping labels, no signal)."""
-    rng = make_rng(seed)
-    times = pd.date_range("2024-01-01", periods=n, freq="h", tz="UTC")
-    returns = rng.normal(size=n + HORIZON)
-    forward = np.array([returns[t + 1 : t + 1 + HORIZON].sum() for t in range(n)])
-    y = pd.Series((forward > 0).astype(float), index=times)
-    y.iloc[-HORIZON:] = np.nan  # the data ends before these labels do
-    drift = np.zeros((n, 2))
-    shocks = rng.normal(size=(n, 2))
-    for t in range(1, n):
-        drift[t] = 0.995 * drift[t - 1] + shocks[t]
-    x = pd.DataFrame(drift, index=times, columns=["drift_a", "drift_b"])
-    label_end = pd.Series(times + pd.Timedelta(hours=HORIZON), index=times)
-    return FoldData(x, y, label_end)
-
-
-def walk_forward_folds(data: FoldData, embargo: str = "3D") -> list:
-    config = WalkForwardConfig.model_validate(
-        {"min_train": "30D", "test_len": "10D", "embargo": embargo}
-    )
-    return WalkForwardSplitter(config).split(pd.DatetimeIndex(data.x.index), data.label_end)
 
 
 def test_purging_gives_chance_while_shuffled_cv_shows_spurious_skill() -> None:
@@ -95,7 +73,6 @@ def test_purging_gives_chance_while_shuffled_cv_shows_spurious_skill() -> None:
     oos_climatology = log_loss(oos["y_true"], np.full(len(oos), oos["y_true"].mean()))
     pipeline_loss = log_loss(oos["y_true"], oos["p_cal"])
     assert pipeline_loss > oos_climatology - 0.01  # no skill out of sample
-    assert abs(auc(oos["y_true"], oos["p_cal"]) - 0.5) < 0.1
     assert pipeline_loss > shuffled_loss + 0.1
 
 
@@ -199,3 +176,35 @@ def test_too_few_fitting_rows_skip_the_fold() -> None:
     assert out.skipped == [f.fold_id for f in folds]
     assert isinstance(PIPELINE, MlPipelineConfig)
     assert date(2024, 1, 1) <= data.x.index[0].date()
+
+
+def test_every_fold_reports_what_it_left_out() -> None:
+    sample = no_signal(n=1500, seed=11)
+    fold = walk_forward_folds(sample)[0]
+    x = sample.x.assign(flat=1.0)  # constant in every fitting row
+    y = sample.y.copy()
+    window = np.union1d(fold.train_idx, fold.val_idx)
+    x.iloc[window[[10, 20, 30]], 0] = np.nan  # three window rows with a missing input
+    y.iloc[window[[40, 50]]] = np.nan  # two window rows with an unknown target
+    x.iloc[window[[60]], 1] = np.nan  # a row with both: counted once, as a missing input
+    y.iloc[window[[60]]] = np.nan
+    x.iloc[fold.test_idx[[0, 5]], 1] = np.inf  # two test rows left unpredicted
+    data = FoldData(x, y, sample.label_end)
+    embargo = pd.Timedelta(hours=HORIZON)
+    trained = train_fold("logistic", fold, data, PIPELINE, embargo=embargo, seed=1, params={})
+    assert trained is not None
+    usable = len(window) - 6
+    assert trained.dropped == {
+        "missing_input": 4,
+        "unknown_target": 2,
+        "purged": usable - trained.n_fit - trained.n_val,
+        "test_unpredicted": 2,
+        "constant_columns": 1,
+    }
+    assert trained.dropped["purged"] > 0  # 48-hour labels: the validation start purges fitting rows
+    assert trained.n_test == len(fold.test_idx) - 2
+    out = run_pipeline("logistic", data, [fold], PIPELINE, embargo=embargo, seed=1, params={})
+    table = out.fold_table()
+    assert table.loc[fold.fold_id, "dropped_missing_input"] == 4
+    assert table.loc[fold.fold_id, "dropped_test_unpredicted"] == 2
+    assert {"n_fit", "n_val", "n_test", "dropped_purged", "fallback"} <= set(table.columns)

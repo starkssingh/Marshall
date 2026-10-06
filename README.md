@@ -96,8 +96,12 @@ calendar; `core.v1` is retired, ADR 0070) waits for the repeated quality run. Th
 last data-independent tasks (ADR 0068) add rule regimes with training-fold cut-offs (REG-001) and
 the ML research layer: the `Forecaster` protocol and wrappers, the in-fold pipeline with purged
 inner cross-validation and calibration on validation (its purging demonstration shows chance on
-purged CV and spurious skill on shuffled CV), seeded Optuna search counting every configuration
-as a trial, and model persistence with model cards. Synthetic data only.
+purged CV and spurious skill on shuffled CV), seeded Optuna search, and model persistence with
+model cards. After the owner's review (C-34, ADR 0068) calibrated probabilities shrink towards
+the training base rate and a fold without skill on validation predicts it, every fold reports
+what it dropped, a trial is a distinct pipeline specification evaluated on test (search
+configurations are recorded per fold), and a model with library drift loads only as a labelled
+diagnostic. Synthetic data only.
 See
 [`CHANGELOG.md`](CHANGELOG.md) for
 completed backlog tasks and [`docs/STATUS.md`](docs/STATUS.md) for the current sprint, open
