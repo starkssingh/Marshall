@@ -73,6 +73,15 @@ calendar's weekly close at 22:00 UTC (17:00 New York, EST). Whether Dukascopy's 
 an hour early every week, only in winter, or only that day is for DQ-004 on the full download and
 the DQ-008 review; the calendar stays as it is until then (decision 5).
 
+> **Correction (2026-10-06, DQ-008).** The observation above is wrong and no conclusion should be
+> drawn from it. The last tick on Friday 2024-03-01 was at **21:59:59.793 UTC**
+> (`timestamp 1709330399793` in `XAUUSD_2024-03.csv`), that is 16:59:59 New York EST — one second
+> before the calendar's close, not an hour before it. DQ-004 on the full download settles the
+> question the observation raised: over 595 weekends and 3,028 trading days (2014-01-02 …
+> 2025-09-25) the weekly and daily close is 16:59 New York and the open 18:00 New York in both DST
+> regimes, so `market.open`, `market.close` and `market.week_open` are confirmed as they stand.
+> See [`docs/data/quality-review-2026-10.md`](../data/quality-review-2026-10.md) §4.1 and §4.2.
+
 ## C-27 — Sprint 13
 
 1. A bundle reaches paper only through R1, R2 and R3; if no bundle passes R2, the paper

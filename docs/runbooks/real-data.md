@@ -21,6 +21,13 @@ The flags that work are `-r 3 -re -fr`:
 An hour skipped after its retries is missing from the CSV. `xq validate`'s gap checks report
 missing market hours; export that month again if one appears.
 
+**This happens often enough to matter.** In the 2014-01 … 2025-11 download, 1,203 whole hours are
+missing inside market hours — 1.81 % of the pre-vault market minutes — and they are recognisable
+because each gap begins and ends within five seconds of a whole UTC hour and lasts one, two or
+three hours (`docs/data/quality-review-2026-10.md` §5.3). 2016 has none, so a clean export of this
+feed is possible; 2014-10 lost 205 hours and is the worst month in the window. Raising `-r` above
+3 and re-exporting any month that `xq validate` reports holes in is worth the time.
+
 The owner's loop downloads one month per export, from 2014-01 (the year before `ds_base`'s start
 on 2015-01-01, for warm-up) to the last complete month. A month whose CSV already exists is
 skipped, so the loop can be stopped and started again. When an export fails, its partial file is
@@ -92,11 +99,31 @@ uv run xq validate --source dukascopy        # reports/quality/<run id>/report.m
 `xq validate` grades every ingested trading day before the vault (`--start` and `--end` narrow
 it). Vault days are never read without a gate token.
 
+Measured on the full 143-month download (520,973,737 ticks, 24.85 GB of CSV) on the owner's Mac:
+ingest 24 m 51 s, clean 16 m 39 s, build-bars 4 m 35 s, spread-stats 1 m 21 s, validate 3 m 48 s.
+Budget disk space before starting: the stores come to about **1.87×** the CSV bytes — the raw copy
+is verbatim (1.00×), plus the zstd Parquet mirror (0.55×), the clean store (0.30×) and the bars
+(0.02×).
+
+**`data/raw` is the only copy of the market data.** The downloaded CSVs were deleted after ingest,
+once `xq verify-raw` and an independent re-hash of both copies of all 143 months confirmed that
+each CSV, its read-only raw copy (mode 0444) and its `raw_files` manifest row carry the same
+SHA-256; every deletion is logged with size and digest in `data/deleted_csvs.log`. The raw store is
+not backed up by this repository (`data/` is git-ignored) — **backing it up is the owner's step**.
+`xq verify-raw` re-hashes the whole store in about 17 s and should be run before relying on it.
+
 ## 3. What a real-data session may do now
 
-Until the DQ-008 review, nothing runs on real data beyond the pipeline above and `xq validate`
-(see "Not allowed yet" in `docs/STATUS.md`). The C-8 session reads the quality report per check
-and per year, compares the calendar with Dukascopy's real hours (ADR 0057, decision 4) and
-prepares the DQ-008 human review. It starts with one observation from March 2024: the last
-Friday tick on 2024-03-01 was at 20:59:59 UTC, an hour before the calendar's 22:00 UTC weekly
-close (EST) (ADR 0062). The calendar is not changed before that review.
+Until the DQ-008 review is signed off, nothing runs on real data beyond the pipeline above and
+`xq validate` (see "Not allowed yet" in `docs/STATUS.md`).
+
+The C-8 session has run: the whole 2014-01 … 2025-11 download was ingested, cleaned, barred and
+graded, and the review is in [`docs/data/quality-review-2026-10.md`](../data/quality-review-2026-10.md).
+It found the trading boundaries correct and the holiday early closes wrong; its calendar and
+threshold proposals wait for the owner (ADR 0069, status "proposed"). The calendar is not changed
+before the owner decides.
+
+The March 2024 observation this session was told to start from — "the last Friday tick on
+2024-03-01 was at 20:59:59 UTC, an hour before the calendar's weekly close" — was **wrong**: the
+tick was at 21:59:59.793 UTC, 16:59:59 New York EST, one second before the close. Over 595
+weekends the close is 16:59 New York in both DST regimes (review §4.2).
