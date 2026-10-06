@@ -105,6 +105,13 @@ Budget disk space before starting: the stores come to about **1.87×** the CSV b
 is verbatim (1.00×), plus the zstd Parquet mirror (0.55×), the clean store (0.30×) and the bars
 (0.02×).
 
+The rebuild under the DQ-008 decisions (clean rules `c2`, calendar `s2`) was measured on the same
+machine in C-36, from the raw store with nothing re-downloaded: clean 18 m 41 s, build-bars
+3 m 49 s, spread-stats 1 m 15 s, validate 2 m 44 s. A clean store is about 6.9 GB and a bar set
+about 0.43 GB, so a rules or calendar change costs that much again until the retired store is
+removed — `clean` re-checks each partition file on disk, so deleting a retired store's files is
+safe and its manifest rows can stay as the record (`data/removed_stores.log`).
+
 **`data/raw` is the only copy of the market data.** The downloaded CSVs were deleted after ingest,
 once `xq verify-raw` and an independent re-hash of both copies of all 143 months confirmed that
 each CSV, its read-only raw copy (mode 0444) and its `raw_files` manifest row carry the same
@@ -121,16 +128,32 @@ bars and `xq validate` read only the replacement from then on.
 
 ```bash
 # The old file's raw_file_id is the prefix of its stored name (data/raw/<source>/<instrument>/...).
-ls data/raw/dukascopy/xauusd/2014/10/        # e.g. 0123456789abcdef__XAUUSD_ticks_2014-10.csv
-uv run xq ingest --source dukascopy --path data/downloads/reexport/XAUUSD_ticks_2014-10.csv \
-  --supersedes 0123456789abcdef \
-  --reason "re-export of 2014-10: the first export skipped 205 whole UTC hours (DQ-008 review 5.3)"
+ls data/raw/dukascopy/xauusd/2014/10/        # e.g. 583c06b72da3bd70__XAUUSD_2014-10.csv
+uv run xq ingest --source dukascopy --path data/downloads/reexport/XAUUSD_2014-10.csv \
+  --supersedes 583c06b72da3bd70 \
+  --reason "re-export: whole-hour holes"
 uv run xq verify-raw                          # both files are still checked
 uv run xq clean --source dukascopy            # the affected trading days are rebuilt
 uv run xq build-bars --source dukascopy
 uv run xq spread-stats --source dukascopy
 uv run xq validate --source dukascopy
 ```
+
+**In bulk.** C-36 found 103 of the 141 pre-vault months damaged (1,304 whole hours, 82,620 market
+minutes; DQ-008 review §9.4) and wrote `data/reexport.zsh` for them: worst first, ten retries per
+hour with a 2 s pause (`-r 10 -rp 2000 -re -fr`), into `data/downloads/reexport/`, a month already
+re-exported skipped, a failed month's partial file deleted, and a clean stop if free space falls
+below 5 GB. It is not committed (`data/` is git-ignored) and the owner runs it:
+
+```bash
+caffeinate -i zsh data/reexport.zsh 2>&1 | tee data/reexport.log
+```
+
+Re-export only, then ingest month by month: `--supersedes` takes one file per call, and a
+re-export is worth ingesting **only if it has fewer missing market minutes than the file it
+replaces** — otherwise keep the old file. Budget disk space for both versions of every month
+re-exported, or free it by deleting the superseded files' Parquet mirror parts, which are derived
+data that nothing reads once the supersession is recorded.
 
 `--path` must be the one re-exported file. The ingest is refused, with nothing stored, without a
 reason, for an unknown or already superseded raw file id, for a file of another source, for a

@@ -1076,6 +1076,24 @@ IDs from `docs/specs/development-plan.md`.
 
 ### Changed
 
+- DQ-008 (C-36 Phase 1): the real stores rebuilt under the accepted decisions and re-graded, on
+  the owner's Mac, from `data/raw` with nothing re-downloaded — clean rules `c2-5b9e432f`
+  (ADR 0069's 1 bp spike floor) on calendar `s2` (ADR 0070), bar build `b1-8bac6104`, and quality
+  run `01M48QC50R94T5RX5FAW3D4DMT` over the same 3,028 pre-vault trading days:
+  **48,741 pass, 1,974 warn, 855 fail** against the old run's 44,940 / 3,341 / 3,285.
+  `tick.spikes` 1,652 failures -> **0** (median 67 events per million usable ticks against a warn
+  level of 2,000; the only two warning days are 2020-03-24 and 2020-03-25); `tick.stale_quotes`
+  651 -> **0**, its metric 0.0 on every day; `cal.closed_market_ticks` 37 -> **1**,
+  `cal.holiday_behaviour` 36 -> **1**, `cal.gap_location` 191 -> **152**; `bar.extreme_returns`
+  and `tick.spread_outliers` unchanged. The 1 bp floor cut the flagged tick count from 1,030,837
+  to 195,979; bar row counts are identical, since neither `SPIKE` nor `CLOSED_MARKET` is excluded
+  from bars. Every remaining failure is explained (export holes, C8's unmodelled irregular closes,
+  US release minutes, the 2020 dislocation). The comparison per check and per year, the remaining
+  failures' attribution and the export-hole inventory (1,304 hour-aligned holes, 82,620 market
+  minutes, 103 of 141 pre-vault months) are section 9 of
+  `docs/data/quality-review-2026-10.md`. No code or configuration changed and no threshold was
+  re-tuned; the re-export, the exclusion list and the DQ-008 close are C-36 Phase 2.
+
 - C-33 (owner's decision, ADR 0067), DS-001: `experiments/configs/ds_core.yaml`, `ds_base`'s
   window, source, bars and targets with the feature set `core.v1`; a spec only, not built until
   the DQ-008 review. `ds_base` stays on `base.v1`.

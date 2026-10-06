@@ -759,3 +759,224 @@ most days.
 data" until the owner rules on §7. Once the calendar (§7.1) and the threshold ADR (§7.2) are
 decided and a quality run has been repeated under them, DQ-008 is closed and Phase 2 can be marked
 validated on real data; ADR 0013 item 5 is then met.
+
+---
+
+## 9. Phase 1 of the rebuild under the accepted rules (C-36, 2026-10-06)
+
+The owner's decisions on §7 were taken in C-35 and implemented: ADR 0069 (thresholds, the one
+change ADR 0013 item 1 allowed, now spent), ADR 0070 (the calendar, version **s2**) and ADR 0071
+(re-export supersession and the exclusion list). This section records the rebuild and re-grading
+those decisions require. **Phase 2 — the re-export, the exclusion list and the closing verdict —
+is not done yet**; this section is Phase 1 only.
+
+### 9.1 Observed — the rebuild
+
+| Step | Runtime | Result |
+| --- | --- | --- |
+| `xq clean` | 18 m 41 s | clean rules **`c2-5b9e432f`** (spike floor 0.125 bp, calendar s2): 3,075 trading days, 520,973,737 ticks, **195,979 flagged** (c1: 1,030,837), **0 dropped** |
+| `xq build-bars` | 3 m 49 s | build **`b1-8bac6104`**: 144 months; 1m 4,134,802 · 5m 827,430 · 15m 275,847 · 30m 137,953 · 1h 69,006 · 4h 18,410 · 1d 3,075 — identical counts to `b1-95614b4b` |
+| `xq spread-stats` | 1 m 15 s | 115 hours of week from 504,272,444 pre-vault ticks, cut at `vault.start` |
+| `xq validate` | 2 m 44 s | quality run **`01M48QC50R94T5RX5FAW3D4DMT`**, 3,028 pre-vault trading days: **48,741 pass, 1,974 warn, 855 fail** (was 44,940 / 3,341 / 3,285) |
+
+`--include-vault` was never used and no analysis in this section read a trading day after
+2025-09-25. Before the old store was removed, the new one was checked day for day and tick for
+tick against it: both hold 3,075 partitions, the same 2014-01-02 … 2025-12-01 span and the same
+520,973,737 ticks, and no `c1` day is absent from `c2`. The bar row counts are identical because
+neither `SPIKE` nor `CLOSED_MARKET` is in `bars.exclude_flags` — the two changes alter flags and
+grades, not bar prices. `xq verify-raw` passes. The retired `c1-9215d40e` clean store and the
+`b1-95614b4b` bars were then deleted (7.34 GB of derived data, rebuildable from `data/raw`) and
+logged in `data/removed_stores.log`; their manifest rows are kept as the record of the run that
+produced `01M47ZDA2E631VVD7703MXWMQN`.
+
+### 9.2 Evidence — pass / warn / fail per check per year, old run against new
+
+Cells are `pass/warn/fail`. `old c1/s1` is run `01M47ZDA2E631VVD7703MXWMQN`; `new c2/s2` is
+`01M48QC50R94T5RX5FAW3D4DMT`. Both graded the same 3,028 trading days with the same 18 checks.
+
+| Check | Run | 2014 | 2015 | 2016 | 2017 | 2018 | 2019 | 2020 | 2021 | 2022 | 2023 | 2024 | 2025 |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| `bar.basis_consistency` | old c1/s1 | 258/0/0 | 258/0/0 | 258/0/0 | 257/0/0 | 258/0/0 | 258/0/0 | 259/0/0 | 258/0/0 | 258/0/0 | 257/0/0 | 259/0/0 | 190/0/0 |
+|  | **new c2/s2** | 258/0/0 | 258/0/0 | 258/0/0 | 257/0/0 | 258/0/0 | 258/0/0 | 259/0/0 | 258/0/0 | 258/0/0 | 257/0/0 | 259/0/0 | 190/0/0 |
+| `bar.duplicate_starts` | old c1/s1 | 258/0/0 | 258/0/0 | 258/0/0 | 257/0/0 | 258/0/0 | 258/0/0 | 259/0/0 | 258/0/0 | 258/0/0 | 257/0/0 | 259/0/0 | 190/0/0 |
+|  | **new c2/s2** | 258/0/0 | 258/0/0 | 258/0/0 | 257/0/0 | 258/0/0 | 258/0/0 | 259/0/0 | 258/0/0 | 258/0/0 | 257/0/0 | 259/0/0 | 190/0/0 |
+| `bar.extreme_returns` | old c1/s1 | 151/103/4 | 149/103/6 | 194/60/4 | 199/56/2 | 225/33/0 | 194/60/4 | 226/32/1 | 206/47/5 | 211/44/3 | 207/49/1 | 217/41/1 | 179/11/0 |
+|  | **new c2/s2** | 151/103/4 | 149/103/6 | 194/60/4 | 199/56/2 | 225/33/0 | 194/60/4 | 226/32/1 | 206/47/5 | 211/44/3 | 207/49/1 | 217/41/1 | 179/11/0 |
+| `bar.missing_minutes` | old c1/s1 | 160/6/92 | 240/4/14 | 251/6/1 | 245/4/8 | 184/6/68 | 175/6/77 | 135/5/119 | 147/6/105 | 240/1/17 | 218/3/36 | 176/0/83 | 181/2/7 |
+|  | **new c2/s2** | 164/2/92 | 244/2/12 | 258/0/0 | 250/2/5 | 189/1/68 | 180/3/75 | 140/1/118 | 154/0/104 | 241/0/17 | 218/1/38 | 177/0/82 | 181/1/8 |
+| `bar.ohlc_consistency` | old c1/s1 | 258/0/0 | 258/0/0 | 258/0/0 | 257/0/0 | 258/0/0 | 258/0/0 | 259/0/0 | 258/0/0 | 258/0/0 | 257/0/0 | 259/0/0 | 190/0/0 |
+|  | **new c2/s2** | 258/0/0 | 258/0/0 | 258/0/0 | 257/0/0 | 258/0/0 | 258/0/0 | 259/0/0 | 258/0/0 | 258/0/0 | 257/0/0 | 259/0/0 | 190/0/0 |
+| `bar.zero_range` | old c1/s1 | 258/0/0 | 258/0/0 | 258/0/0 | 257/0/0 | 258/0/0 | 258/0/0 | 259/0/0 | 258/0/0 | 258/0/0 | 257/0/0 | 259/0/0 | 190/0/0 |
+|  | **new c2/s2** | 258/0/0 | 258/0/0 | 258/0/0 | 257/0/0 | 258/0/0 | 258/0/0 | 259/0/0 | 258/0/0 | 258/0/0 | 257/0/0 | 259/0/0 | 190/0/0 |
+| `cal.closed_market_ticks` | old c1/s1 | 256/0/2 | 256/1/1 | 258/0/0 | 257/0/0 | 255/0/3 | 254/2/2 | 257/0/2 | 257/0/1 | 252/0/6 | 252/0/5 | 250/0/9 | 184/0/6 |
+|  | **new c2/s2** | 254/4/0 | 252/6/0 | 253/5/0 | 255/2/0 | 256/2/0 | 254/4/0 | 259/0/0 | 258/0/0 | 258/0/0 | 257/0/0 | 258/0/1 | 190/0/0 |
+| `cal.gap_location` | old c1/s1 | 210/6/42 | 247/5/6 | 251/6/1 | 248/5/4 | 232/6/20 | 235/4/19 | 230/5/24 | 233/6/19 | 249/1/8 | 244/2/11 | 226/2/31 | 183/1/6 |
+|  | **new c2/s2** | 218/0/40 | 253/2/3 | 258/0/0 | 253/3/1 | 240/1/17 | 240/1/17 | 237/0/22 | 240/1/17 | 256/0/2 | 249/0/8 | 234/1/24 | 189/0/1 |
+| `cal.holiday_behaviour` | old c1/s1 | 6/1/1 | 6/1/1 | 6/0/0 | 6/0/0 | 6/0/3 | 4/2/2 | 6/0/2 | 6/0/1 | 1/0/6 | 2/0/5 | 0/0/9 | 1/0/6 |
+|  | **new c2/s2** | 4/4/0 | 2/6/0 | 2/5/0 | 5/2/0 | 7/2/0 | 4/4/0 | 8/0/0 | 7/0/0 | 8/0/0 | 8/0/0 | 8/0/1 | 7/0/0 |
+| `cal.missing_open_data` | old c1/s1 | 188/57/13 | 251/7/0 | 257/1/0 | 251/6/0 | 230/28/0 | 212/45/1 | 187/70/2 | 191/66/1 | 255/3/0 | 241/15/1 | 208/51/0 | 189/1/0 |
+|  | **new c2/s2** | 188/57/13 | 253/5/0 | 258/0/0 | 254/3/0 | 231/27/0 | 213/45/0 | 187/71/1 | 192/66/0 | 255/3/0 | 239/17/1 | 209/50/0 | 188/2/0 |
+| `tick.duplicates_diff_price` | old c1/s1 | 258/0/0 | 258/0/0 | 258/0/0 | 257/0/0 | 258/0/0 | 258/0/0 | 259/0/0 | 258/0/0 | 258/0/0 | 257/0/0 | 259/0/0 | 190/0/0 |
+|  | **new c2/s2** | 258/0/0 | 258/0/0 | 258/0/0 | 257/0/0 | 258/0/0 | 258/0/0 | 259/0/0 | 258/0/0 | 258/0/0 | 257/0/0 | 259/0/0 | 190/0/0 |
+| `tick.duplicates_exact` | old c1/s1 | 258/0/0 | 258/0/0 | 258/0/0 | 257/0/0 | 258/0/0 | 258/0/0 | 259/0/0 | 258/0/0 | 258/0/0 | 257/0/0 | 259/0/0 | 190/0/0 |
+|  | **new c2/s2** | 258/0/0 | 258/0/0 | 258/0/0 | 257/0/0 | 258/0/0 | 258/0/0 | 259/0/0 | 258/0/0 | 258/0/0 | 257/0/0 | 259/0/0 | 190/0/0 |
+| `tick.nonpositive_crossed` | old c1/s1 | 258/0/0 | 258/0/0 | 258/0/0 | 257/0/0 | 258/0/0 | 258/0/0 | 259/0/0 | 258/0/0 | 258/0/0 | 257/0/0 | 259/0/0 | 190/0/0 |
+|  | **new c2/s2** | 258/0/0 | 258/0/0 | 258/0/0 | 257/0/0 | 258/0/0 | 258/0/0 | 259/0/0 | 258/0/0 | 258/0/0 | 257/0/0 | 259/0/0 | 190/0/0 |
+| `tick.ordering` | old c1/s1 | 258/0/0 | 258/0/0 | 258/0/0 | 257/0/0 | 258/0/0 | 258/0/0 | 259/0/0 | 258/0/0 | 258/0/0 | 257/0/0 | 259/0/0 | 190/0/0 |
+|  | **new c2/s2** | 258/0/0 | 258/0/0 | 258/0/0 | 257/0/0 | 258/0/0 | 258/0/0 | 259/0/0 | 258/0/0 | 258/0/0 | 257/0/0 | 259/0/0 | 190/0/0 |
+| `tick.rate_anomalies` | old c1/s1 | 100/142/16 | 239/19/0 | 256/2/0 | 249/8/0 | 155/101/2 | 135/121/2 | 101/150/8 | 107/146/5 | 226/32/0 | 208/47/2 | 136/121/2 | 180/10/0 |
+|  | **new c2/s2** | 100/143/15 | 240/18/0 | 257/1/0 | 250/7/0 | 155/102/1 | 135/122/1 | 101/151/7 | 107/147/4 | 226/32/0 | 207/49/1 | 136/121/2 | 179/11/0 |
+| `tick.spikes` | old c1/s1 | 64/191/3 | 2/115/141 | 14/100/144 | 34/41/182 | 0/4/254 | 0/21/237 | 0/117/142 | 0/119/139 | 3/148/107 | 10/231/16 | 4/72/183 | 0/86/104 |
+|  | **new c2/s2** | 258/0/0 | 258/0/0 | 258/0/0 | 257/0/0 | 258/0/0 | 258/0/0 | 257/2/0 | 258/0/0 | 258/0/0 | 257/0/0 | 259/0/0 | 190/0/0 |
+| `tick.spread_outliers` | old c1/s1 | 258/0/0 | 258/0/0 | 258/0/0 | 257/0/0 | 258/0/0 | 258/0/0 | 249/5/5 | 257/1/0 | 258/0/0 | 257/0/0 | 257/2/0 | 183/7/0 |
+|  | **new c2/s2** | 258/0/0 | 258/0/0 | 258/0/0 | 257/0/0 | 258/0/0 | 258/0/0 | 249/5/5 | 257/1/0 | 258/0/0 | 257/0/0 | 257/2/0 | 183/7/0 |
+| `tick.stale_quotes` | old c1/s1 | 153/11/94 | 239/5/14 | 250/6/2 | 243/4/10 | 175/12/71 | 144/35/79 | 135/1/123 | 143/4/111 | 237/3/18 | 213/6/38 | 176/0/83 | 181/1/8 |
+|  | **new c2/s2** | 258/0/0 | 258/0/0 | 258/0/0 | 257/0/0 | 258/0/0 | 258/0/0 | 259/0/0 | 258/0/0 | 258/0/0 | 257/0/0 | 259/0/0 | 190/0/0 |
+
+Totals by check:
+
+| Check | Old fail | New fail | Old warn | New warn |
+| --- | --- | --- | --- | --- |
+| `tick.spikes` | 1,652 | **0** | 1,245 | **2** |
+| `tick.stale_quotes` | 651 | **0** | 88 | **0** |
+| `cal.holiday_behaviour` | 36 | **1** | 4 | 23 |
+| `cal.closed_market_ticks` | 37 | **1** | 3 | 23 |
+| `cal.gap_location` | 191 | **152** | 49 | 9 |
+| `bar.missing_minutes` | 627 | 619 | 49 | 13 |
+| `cal.missing_open_data` | 18 | 15 | 350 | 346 |
+| `tick.rate_anomalies` | 37 | 31 | 899 | 904 |
+| `bar.extreme_returns` | 31 | 31 | 639 | 639 |
+| `tick.spread_outliers` | 5 | 5 | 15 | 15 |
+| the eight checks that never fired | 0 | 0 | 0 | 0 |
+
+### 9.3 Interpretation — did the accepted changes do what they were meant to do?
+
+**The calendar fixes removed the failures they targeted.** `cal.closed_market_ticks` went from 37
+failures to 1 and `cal.holiday_behaviour` from 36 to 1. The 51 `cal.gap_location` failures §4.4
+attributed to the calendar are gone; the 152 that remain are 146 export holes at a day boundary
+(including 2015-07-01's 165-minute hole, which is not a whole number of hours) and 6 of the
+irregular closes C8 chose to leave unmodelled: 2019-07-04 (236.8 min), 2022-01-17, 2023-01-16,
+2025-07-04 (91.0 min each, MLK Day and Independence Day ending ~12:58 New York against the 14:30
+rule), 2023-11-23 (90.1 min) and 2019-09-02 (77.5 min).
+
+The 23 new warnings on each of the two holiday checks are **a boundary convention, not a calendar
+error**: between 1 and 5 ticks landing exactly on the closing instant (17:00:00, 18:00:00 or
+18:45:00 UTC), which a half-open `[open, close)` interval counts as outside hours. The four larger
+warnings — 2019-11-29 (64 ticks), 2018-02-19 (40), 2019-07-04 (20), 2019-09-02 (10) — are C8
+irregulars again.
+
+**One failure is left on each holiday check, and it is the same day: 2024-11-29.** The day after
+Thanksgiving closed at **14:43:59 New York** that year against the 13:45 rule C6 set, leaving
+7,094 ticks (3.16 % of the day) outside hours. C6 is right for nine of the eleven years in the
+window — 13:43–13:45 in 2014, 2015, 2016, 2017, 2018, 2020, 2021, 2022 — and the exceptions are
+2019-11-29 (14:05), 2023-11-24 (12:43) and 2024-11-29 (14:43). These three belong to the same
+family as C8's irregular dates, which the owner decided to leave unmodelled and let the checks
+flag. **A reading for the owner:** either extend C8's list with these three dates so the intent is
+written down, or leave it; no calendar change is proposed, and nothing was changed.
+
+**`tick.spikes` now discriminates.** The metric (reverting spike events per million usable ticks)
+has a median of 67 across the 3,028 days against a warn level of 2,000, and its yearly medians are
+flat — 34 to 117, where the old per-day count ranged from 9 to 228. **Zero days fail, and the only
+two days that warn are 2020-03-24 (2,827) and 2020-03-25 (2,532)** — the COVID gold dislocation,
+the two days every other check also singles out. T1 and T2 together achieved this: the
+per-million unit made the measure comparable across a feed whose rate triples, and the 1 bp floor
+removed the bid/ask bounce that made 2018 look pathological. ADR 0069 §1 predicted that these two
+days would stop firing on this check because of their high tick count; with the `c2` floor in
+place they are instead the top of the distribution, which is a better outcome than the ADR
+expected and is recorded here as such.
+
+**`tick.stale_quotes` is now silent, exactly as predicted.** Not merely zero failures: the metric
+is **0.0 on all 3,028 days** — no quote anywhere in twelve years repeats unchanged for more than
+120 s inside an active session. The 651 old failures were missing data in every case, and the
+check is now a genuine frozen-feed detector with nothing to detect.
+
+**The export holes are untouched, as expected**: `bar.missing_minutes` 627 → 619,
+`cal.missing_open_data` 18 → 15, `tick.rate_anomalies` 37 → 31. The small falls are the three
+Thanksgiving Fridays and a few boundary days the calendar now describes correctly. Nothing but a
+re-export can move these.
+
+**The two correctly calibrated checks did not move at all**: `bar.extreme_returns` 31 fail / 639
+warn and `tick.spread_outliers` 5 fail / 15 warn, byte for byte as before. That is the right
+result — they were measuring the market, and the market did not change.
+
+### 9.4 Evidence — the export-hole inventory for the re-export
+
+From run `01M48QC50R94T5RX5FAW3D4DMT`, counting the recorded 1-minute bar gaps that begin and end
+on a whole UTC hour, last one to six hours and cover market minutes under calendar `s2`:
+**1,304 holes, 82,620 market minutes, in 103 of the 141 pre-vault months.** 38 months are clean,
+among them every month of 2016 and 2017-02 … 2018-01.
+
+| Year | Holes | Market minutes | Months affected | Worst months |
+| --- | --- | --- | --- | --- |
+| 2014 | 246 | 16,440 | 12 | 2014-10, 2014-03, 2014-04 … |
+| 2015 | 19 | 1,140 | 6 | 2015-01, 2015-02, 2015-03 … |
+| 2017 | 7 | 480 | 1 | 2017-01 |
+| 2018 | 123 | 7,740 | 11 | 2018-10, 2018-09, 2018-12 … |
+| 2019 | 157 | 9,600 | 12 | 2019-11, 2019-01, 2019-06 … |
+| 2020 | 241 | 15,540 | 12 | 2020-12, 2020-05, 2020-09 … |
+| 2021 | 221 | 13,860 | 12 | 2021-11, 2021-08, 2021-06 … |
+| 2022 | 33 | 1,980 | 11 | 2022-06, 2022-01, 2022-03 … |
+| 2023 | 67 | 4,110 | 10 | 2023-12, 2023-11, 2023-07 … |
+| 2024 | 180 | 11,070 | 11 | 2024-04, 2024-10, 2024-07 … |
+| 2025 | 10 | 660 | 5 | 2025-03, 2025-08, 2025-01 … |
+
+The 25 worst months, which the re-export script runs first:
+
+| Month | Holes | Market minutes missing | Superseded raw file |
+| --- | --- | --- | --- |
+| 2014-10 | 70 | 5,520 | `583c06b72da3bd70` |
+| 2020-12 | 31 | 2,100 | `88e4f6466b30eb77` |
+| 2020-05 | 30 | 1,980 | `14dcca04a08023a9` |
+| 2024-04 | 30 | 1,980 | `3148c91ce3641589` |
+| 2021-11 | 31 | 1,920 | `82e4404b4f643936` |
+| 2023-12 | 28 | 1,740 | `e583b38520e279bf` |
+| 2020-09 | 26 | 1,680 | `cc221d62ae55bf5d` |
+| 2024-10 | 26 | 1,620 | `2c014bb4c03c8830` |
+| 2014-03 | 26 | 1,560 | `af74e9a2b6e33dbe` |
+| 2014-04 | 25 | 1,500 | `9fc14c15b9480c24` |
+| 2021-08 | 24 | 1,440 | `0cda44a606f0944d` |
+| 2021-06 | 23 | 1,440 | `58b644b565a08c26` |
+| 2020-08 | 22 | 1,380 | `7804eb0e5fdfa404` |
+| 2021-03 | 20 | 1,380 | `90f4778c385df539` |
+| 2024-07 | 22 | 1,350 | `94741dae21bc2b60` |
+| 2014-02 | 22 | 1,320 | `97271a6cce3cb6a7` |
+| 2020-03 | 21 | 1,320 | `71387f90587db928` |
+| 2021-07 | 21 | 1,320 | `0222f9e1a892d85d` |
+| 2018-10 | 21 | 1,260 | `57a785f52cb4f620` |
+| 2024-02 | 21 | 1,260 | `2a7c3fe93e204f97` |
+| 2024-05 | 21 | 1,260 | `32294e0b578a4d6c` |
+| 2020-01 | 20 | 1,260 | `329fd80802b54aa1` |
+| 2019-11 | 19 | 1,260 | `31dd9fa42ab05ecf` |
+| 2020-04 | 18 | 1,200 | `29008213f9c77927` |
+| 2024-08 | 19 | 1,140 | `b7d9b956d32c268e` |
+
+### 9.5 Limitations of Phase 1
+
+- **The vault is not assessed.** The inventory covers pre-vault months only, so 2025-10 and
+  2025-11 are absent from the re-export list although they were downloaded with the same flags and
+  are presumably damaged in the same way. 2025-12 … 2026-09 are not downloaded at all.
+- A hole and a genuine one-hour venue outage are still indistinguishable from the data; the
+  re-export is the test. A month that comes back with the same hole is evidence that the hour has
+  no data at the vendor.
+- The hole count here (1,304 holes, 82,620 market minutes) is measured from bar gaps under
+  calendar `s2`; §5.3's figure (1,203 holes, 75,720 minutes) was measured from tick gaps under
+  `s1`. The two definitions differ at day boundaries and on the holiday hours the calendar now
+  describes correctly, so the numbers are not directly comparable; neither is wrong.
+- `tick.rate_anomalies` still grades early 2014 against a thin hour-of-week norm, and
+  `tick.duplicates_*` is still uninformative with one format ingested.
+- No returns analysis, EDA, dataset build, regime cut or model run was performed, and no strategy
+  result exists. The thresholds were not re-tuned: ADR 0069 fixed them and this run was graded
+  against them unchanged.
+
+### 9.6 Action
+
+- Done: the `c2` / `s2` rebuild, the re-grading, the comparison above, and
+  `data/reexport.zsh` — the re-export of the 103 damaged months, worst first, with
+  `-r 10 -rp 2000 -re -fr`, **written but not run** (the owner runs it).
+- Open: Phase 2 — ingest each re-export that improves on the file it replaces (`--supersedes`),
+  re-clean and re-bar the affected days, re-run `validate`, fill `config/exclusions.yaml` under
+  the 20 % rule from the run that follows, and close DQ-008 if every remaining failure is
+  explained.
+- A reading for the owner, repeated: the three irregular days after Thanksgiving (2019-11-29,
+  2023-11-24, 2024-11-29) are the only calendar-shaped failures left. They can join C8's
+  unmodelled list or stay as they are.
