@@ -21,7 +21,11 @@ for now, with no execution venue. Sprints 11 and 12 A ran ahead of Sprints 7-10 
 pending (ADR 0048, ADR 0051). Sprint 2 (clean ticks, bars and data quality) is implemented and
 tested on synthetic data but **not validated**: its quality report must first run on at least one
 year of real ticks, followed by the human review (DQ-008); the owner's decisions on its open
-questions are in ADR 0013. Sprint 3 (datasets, leakage harness, experiment registry, forward-return
+questions are in ADR 0013. The review ran on 143 months of real Dukascopy ticks
+(`docs/data/quality-review-2026-10.md`) and the owner decided it (C-35): the one allowed threshold
+change (ADR 0069), the calendar `s2` with date-dependent holiday early closes (ADR 0070), and
+re-exports that supersede damaged raw files plus a config-driven exclusion list (ADR 0071); the
+real stores are rebuilt and re-graded under them in the next local session. Sprint 3 (datasets, leakage harness, experiment registry, forward-return
 targets) and Sprint 4 (walk-forward, cost model and screener, Sharpe inference, DSR, forecast
 comparison, the evidence gates in `config/gates.yaml`, and the baseline board) are implemented and
 tested on synthetic data only. Sprint 5 is build-only because no real data exists: the
@@ -87,7 +91,8 @@ automatically and fails on a registered feature no set uses. Nothing was selecte
 data, and no feature set has been materialized on real data. Synthetic data only.
 After the owner's review (C-33, ADR 0067) a dataset's features warm up on quality-gated bars
 before its start (nothing is filled), the VWAP distance waits for FEAT-007 before any model may
-use it, and `experiments/configs/ds_core.yaml` (ds_base with `core.v1`) waits for DQ-008. The
+use it, and `experiments/configs/ds_core.yaml` (ds_base with `core.v2`, `core.v1` on the DQ-008
+calendar; `core.v1` is retired, ADR 0070) waits for the repeated quality run. The
 last data-independent tasks (ADR 0068) add rule regimes with training-fold cut-offs (REG-001) and
 the ML research layer: the `Forecaster` protocol and wrappers, the in-fold pipeline with purged
 inner cross-validation and calibration on validation (its purging demonstration shows chance on
@@ -228,3 +233,7 @@ uv run xq build-bars --source dukascopy
 uv run xq spread-stats --source dukascopy
 uv run xq validate --source dukascopy        # quality report in reports/quality/ (pre-vault)
 ```
+
+A re-exported month replaces the earlier raw file without touching it:
+`uv run xq ingest --source dukascopy --path <file> --supersedes <raw_file_id> --reason "..."`
+(ADR 0071; `docs/runbooks/real-data.md`).

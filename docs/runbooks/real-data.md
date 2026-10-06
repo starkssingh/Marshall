@@ -153,14 +153,26 @@ the `cal.missing_open_data` metric of that day in the new run. One-hour holes st
 
 ## 3. What a real-data session may do now
 
-Until the DQ-008 review is signed off, nothing runs on real data beyond the pipeline above and
+Until the quality run repeated under the DQ-008 decisions exists and the exclusion list is filled
+from it (C-36), nothing runs on real data beyond the pipeline above, re-exports and
 `xq validate` (see "Not allowed yet" in `docs/STATUS.md`).
 
 The C-8 session has run: the whole 2014-01 … 2025-11 download was ingested, cleaned, barred and
 graded, and the review is in [`docs/data/quality-review-2026-10.md`](../data/quality-review-2026-10.md).
-It found the trading boundaries correct and the holiday early closes wrong; its calendar and
-threshold proposals wait for the owner (ADR 0069, status "proposed"). The calendar is not changed
-before the owner decides.
+The owner decided its proposals (C-35): ADR 0069 (thresholds, clean rules `c2`), ADR 0070 (the
+calendar, version `s2`) and ADR 0071 (re-export supersession, the exclusion list).
+
+**The C-36 session** applies them, in this order:
+
+1. `uv sync`, then rebuild the whole history under `c2` and `s2` — `xq clean`, `xq build-bars`,
+   `xq spread-stats` (step 2's commands). The rules version changes, so these write a new clean
+   store and new bar builds next to the old ones (about 21 minutes for clean and bars, measured
+   under `c1`); budget the disk space.
+2. Re-export the damaged months (review §7.3; 2014-10 first) and ingest each with `--supersedes`
+   ("Re-exporting a damaged month" above); `xq clean` and `xq build-bars` again.
+3. `xq validate`, and compare the new run with `01M47ZDA2E631VVD7703MXWMQN` check by check.
+4. Fill `config/exclusions.yaml` from the new run ("Filling the exclusion list" above).
+5. Back up `data/raw`.
 
 The March 2024 observation this session was told to start from — "the last Friday tick on
 2024-03-01 was at 20:59:59 UTC, an hour before the calendar's weekly close" — was **wrong**: the
