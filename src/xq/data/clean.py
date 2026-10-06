@@ -131,17 +131,24 @@ class CleanBuildResult:
     dropped: int = 0
 
 
-def rules_version(cfg: CleaningConfig) -> str:
-    """``<label>-<hash>`` over the rule parameters, `CLEAN_CODE_VERSION` and the mirror schema."""
+def rules_version(cfg: CleaningConfig, calendar: str) -> str:
+    """``<label>-<hash>`` over the rule parameters, `CLEAN_CODE_VERSION`, the mirror schema and the
+    calendar version, which decides ``CLOSED_MARKET`` (ADR 0070): a new calendar is a new store."""
     payload = json.dumps(
         {
             "code": CLEAN_CODE_VERSION,
             "mirror": MIRROR_VERSION,
             "rules": cfg.model_dump(mode="json"),
+            "calendar": calendar,
         },
         sort_keys=True,
     )
     return f"{cfg.version}-{hashlib.sha256(payload.encode()).hexdigest()[:8]}"
+
+
+def clean_rules_version(cfg: AppConfig) -> str:
+    """The rules version of the configured cleaning rules on the configured calendar."""
+    return rules_version(cfg.cleaning_config(), cfg.sessions_config().version)
 
 
 def clean_ticks(ticks: pd.DataFrame, cfg: CleaningConfig, market: MarketWindow) -> CleaningOutcome:
@@ -217,7 +224,7 @@ def build_clean(
     """
     source = cfg.source(source_id)
     cleaning = cfg.cleaning_config()
-    version = rules_version(cleaning)
+    version = rules_version(cleaning, cfg.sessions_config().version)
     data_dir = cfg.paths.resolve(cfg.paths.data_dir)
     mirror_root = data_dir / MIRROR_DIR / source_id / source.instrument
     clean_root = data_dir / CLEAN_DIR / source_id / source.instrument / f"rules={version}"

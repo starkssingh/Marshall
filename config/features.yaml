@@ -9,9 +9,15 @@
 # before any result. Nothing was selected, ranked or tuned on data (build-only, synthetic data
 # only); sigma units use the EWMA volatility of the timeframe's one-bar log returns, span 96 on
 # the base bars (one trading day of 15m bars, as the interim sigma-hat of fwd_returns.v1).
+# RETIRED (ADR 0070): it is bound to calendar s1, which the DQ-008 review replaced, and was never
+# built on real data. Kept as the definition core.v2 repeats; any use of it is refused.
+#
+# core.v2 (ADR 0070): core.v1's features and parameters exactly, on calendar s2 (C-35). The
+# calendar is the only change (ADR 0067 (5): a changed calendar means a new feature-set version).
 core:
-  v1:
+  v1: &core_v1
     description: Phase 8 price, momentum, volatility, structure and time features, with context
+    calendar: s1                # retired: the configured calendar is s2
     base_columns: true          # base.v1's decision bar, context bars and calendar columns too
     features:
       # FEAT-002 price structure
@@ -94,3 +100,7 @@ core:
       # C-33 (4): tick-count weights are a quote-activity proxy on one feed; computed and
       # leakage-checked, refused as a model input until FEAT-007 admits them (DATA-011)
       - {feature: session_vwap, params: {sigma_span: 96}}
+  v2:
+    <<: *core_v1                # the same features and parameters as core.v1
+    description: core.v1 on calendar s2 (ADR 0070)
+    calendar: s2

@@ -15,7 +15,7 @@ from helpers.pipeline import REPO, config
 from xq.core.time import utc_now
 from xq.core.types import Timeframe
 from xq.data.bars import bar_set_dir, build_version
-from xq.data.clean import rules_version
+from xq.data.clean import clean_rules_version
 from xq.datasets.builder import build_dataset, load_dataset
 from xq.quality.gate import QualityGateError, gate_partitions
 from xq.quality.validate import validate_source
@@ -137,7 +137,7 @@ def test_the_gate_blocks_a_partition_with_an_injected_ohlc_error(
     """Plan acceptance for DQ-007: an injected OHLC error blocks its partition from datasets."""
     cfg = config(tmp_path)
     engine = validated_pipeline(cfg, clean_week_dir, run_id="01QRUN0000000000000000OK01")
-    build = build_version(cfg.bars_config(), rules_version(cfg.cleaning_config()))
+    build = build_version(cfg.bars_config(), clean_rules_version(cfg))
     path = bar_set_dir(cfg, "mt5_primary", Timeframe.M1, build) / "year=2024" / "month=03"
     part = path / "part.parquet"
     bars = pd.read_parquet(part)

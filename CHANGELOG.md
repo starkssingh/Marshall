@@ -1381,6 +1381,21 @@ IDs from `docs/specs/development-plan.md`.
   synthetic ticks only; the clean store, bars and quality run are rebuilt on real data in the
   owner's local session.
 
+- DQ-008 / DQ-004 / DATA-002 (owner's decision C-35, ADR 0070): the calendar decisions C1–C8,
+  calendar version `s2` (`config/sessions.yaml` `version`, required). Market hours and the three
+  full-close holidays unchanged (C1, C2); holiday early closes are date-dependent — 13:00 New York
+  through 2021-12-31, 14:30 from 2022-01-01 (C3, a schema change: `TimeSchedule`, a bare `"HH:MM"`
+  or `{since, time}` entries, and `time_on`; ADR 0002's one schedule for every year superseded);
+  12-31 a full day (C4); 12-24 at 13:45 (C5, `early_close_dates` now maps `MM-DD` to a schedule);
+  the day after Thanksgiving at 13:45 (C6, `early_close_after`); the National Days of Mourning full
+  trading days as named exceptions (C7, `full_days`); the irregular dates unmodelled (C8).
+  `MarketCalendar.early_close` takes the earliest applicable close. The clean rules version now
+  includes the calendar version (`rules_version(cleaning, calendar)`, `clean_rules_version`), so a
+  new calendar is a new clean store. Feature sets name their calendar (`FeatureSetConfig.calendar`)
+  and are refused on another (`FeatureSetCalendarError`): `core.v1` (calendar `s1`) is retired
+  before any build on real data, `core.v2` repeats its features on `s2`, and `ds_core` and the
+  regime rules name `core.v2` (ADR 0067 (5)). Synthetic data only.
+
 ### Fixed
 
 - DQ-004 / DQ-008: the observation recorded in ADR 0062, `docs/STATUS.md` and

@@ -249,12 +249,12 @@ def test_base_spec_is_valid() -> None:
     assert [tf.value for tf in spec.context_timeframes] == ["1h", "4h", "1d"]
 
 
-def test_core_spec_is_ds_base_with_the_feature_set_core_v1() -> None:
+def test_core_spec_is_ds_base_with_the_feature_set_core_v2() -> None:
     # C-33 (ADR 0067): a spec only, not built until DQ-008; ds_base stays on base.v1
     base = load_spec(REPO / "experiments" / "configs" / "ds_base.yaml")
     core = load_spec(REPO / "experiments" / "configs" / "ds_core.yaml")
     assert core.name == "ds_core"
-    assert str(core.feature_set) == "core.v1"
+    assert str(core.feature_set) == "core.v2"
     assert str(base.feature_set) == "base.v1"
     same = base.model_dump(exclude={"name", "feature_set"})
     assert core.model_dump(exclude={"name", "feature_set"}) == same

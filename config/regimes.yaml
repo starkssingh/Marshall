@@ -1,7 +1,7 @@
 # Regime research settings (Phase 7). Fixed before any result; changes need an ADR.
 #
 # REG-001 rule regimes (ADR 0068): every cut-off is a quantile of the TRAINING FOLD's own rows of
-# a causal feature column of core.v1 (config/features.yaml), recomputed for every fold; test rows
+# a causal feature column of core.v2 (config/features.yaml), recomputed for every fold; test rows
 # are labelled with the cut-offs of the fold they belong to. No cut-off is ever computed on the
 # full sample or on test rows.
 rules:

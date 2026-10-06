@@ -20,6 +20,7 @@ own file: no other layer can change a threshold.
 from __future__ import annotations
 
 import hashlib
+import itertools
 import json
 import math
 import os
@@ -275,15 +276,76 @@ class MarketHoursConfig(FrozenModel):
     trading_weekdays: list[Weekday]
 
 
+class DatedTime(FrozenModel):
+    """A local time that applies from `since` (inclusive; ``None``: from the start of history)."""
+
+    since: date | None = None
+    time: LocalTime
+
+
+def _schedule_from_time(value: object) -> object:
+    # A bare "HH:MM" is one time for every date.
+    return [{"time": value}] if isinstance(value, str | time) else value
+
+
+def _check_schedule(value: tuple[DatedTime, ...]) -> tuple[DatedTime, ...]:
+    if not value:
+        raise ValueError("a time schedule needs at least one entry")
+    if value[0].since is not None:
+        raise ValueError("the first entry of a time schedule must have no `since` date")
+    starts = [entry.since for entry in value[1:] if entry.since is not None]
+    increasing = all(a < b for a, b in itertools.pairwise(starts))
+    if len(starts) != len(value) - 1 or not increasing:
+        raise ValueError("later entries of a time schedule need strictly increasing `since` dates")
+    return value
+
+
+#: A local time that may change on given dates (ADR 0070): a bare ``"HH:MM"``, or a list of
+#: ``{since, time}`` entries, the first without ``since``.
+TimeSchedule = Annotated[
+    tuple[DatedTime, ...],
+    BeforeValidator(_schedule_from_time),
+    AfterValidator(_check_schedule),
+]
+
+
+def time_on(schedule: tuple[DatedTime, ...], day: date) -> time:
+    """The time `schedule` gives for calendar date `day`: its latest entry starting on or before."""
+    current = schedule[0].time
+    for entry in schedule[1:]:
+        if entry.since is not None and entry.since <= day:
+            current = entry.time
+    return current
+
+
 class HolidayConfig(FrozenModel):
-    """Holiday rules. US holidays come from the `holidays` package's financial calendar."""
+    """Holiday rules (ADR 0002, amended by ADR 0070). US holidays come from the `holidays`
+    package's financial calendar; names are matched by prefix, so "(observed)" dates match too.
+
+    - `closed`: US-calendar holidays with no trading at all;
+    - `full_days`: US-calendar holidays the market trades through in full (named exceptions);
+    - `early_close_time`: when every other US-calendar holiday closes, by date;
+    - `early_close_dates`: fixed calendar dates (``MM-DD``) that close early, with their close;
+    - `early_close_after`: the trading day after a named US-calendar holiday closes early.
+    """
 
     us_calendar: str = "NYSE"
     uk_country: str = "GB"
     uk_subdiv: str = "ENG"
     closed: list[str]
-    early_close_time: LocalTime
-    early_close_dates: list[MonthDay] = []
+    full_days: list[str] = []
+    early_close_time: TimeSchedule
+    early_close_dates: dict[MonthDay, TimeSchedule] = {}
+    early_close_after: dict[str, TimeSchedule] = {}
+
+    @model_validator(mode="after")
+    def _disjoint(self) -> HolidayConfig:
+        names = [n.casefold() for n in self.closed]
+        full = [n.casefold() for n in self.full_days]
+        clash = [n for n in full if any(n.startswith(c) or c.startswith(n) for c in names)]
+        if clash:
+            raise ValueError(f"holidays both closed and full trading days: {clash}")
+        return self
 
 
 class SessionWindow(FrozenModel):
@@ -342,6 +404,9 @@ class SessionsConfig(FrozenModel):
     around the event anchor of the same name, or a `ClockWindow`.
     """
 
+    #: The calendar's version (ADR 0070). Any change to the market hours or holiday rules needs
+    #: a new one; feature sets name the calendar they are computed on (ADR 0067 (5)).
+    version: str = Field(min_length=1)
     market: MarketHoursConfig
     holidays: HolidayConfig
     sessions: dict[str, SessionWindow]
@@ -544,6 +609,9 @@ class FeatureSetConfig(FrozenModel):
     hash-locked on first use: a change needs a new version."""
 
     description: str = ""
+    #: The calendar version (``config/sessions.yaml`` `version`) the set is computed on. A
+    #: configured set must name it and is refused on any other calendar (ADR 0067 (5), ADR 0070).
+    calendar: str | None = None
     #: Also carry the base columns (decision bar, context bars, calendar; ``base.v1``).
     base_columns: bool = True
     features: list[FeatureInstanceConfig] = Field(min_length=1)

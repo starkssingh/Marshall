@@ -40,8 +40,9 @@ def advance(when: str, duration: pd.Timedelta) -> pd.Timestamp:
         ("2024-03-08 21:00", 2 * H, "2024-03-10 23:00"),
         # Good Friday (29 March) is closed: Thursday's close to Sunday's open.
         ("2024-03-28 20:00", 2 * H, "2024-03-31 23:00"),
-        # Martin Luther King Jr. Day closes early at 13:30 EST and reopens at 18:00 EST.
-        ("2024-01-15 18:00", H, "2024-01-15 23:30"),
+        # Martin Luther King Jr. Day closes early at 14:30 EST (from 2022, ADR 0070) and reopens
+        # at 18:00 EST.
+        ("2024-01-15 19:00", H, "2024-01-15 23:30"),
     ],
 )
 def test_advance_counts_only_market_open_time(

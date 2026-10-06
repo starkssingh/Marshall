@@ -234,12 +234,13 @@ def test_only_duplicates_non_positive_and_crossed_may_be_dropped(cfg: CleaningCo
 
 
 def test_rules_version_tracks_parameters(cfg: CleaningConfig) -> None:
-    version = rules_version(cfg)
+    version = rules_version(cfg, "s2")
     assert version.startswith(f"{cfg.version}-")
-    assert rules_version(CleaningConfig.model_validate(cfg.model_dump())) == version
+    assert rules_version(CleaningConfig.model_validate(cfg.model_dump()), "s2") == version
     changed = cfg.model_dump()
     changed["spike"]["z_threshold"] = 9.0
-    assert rules_version(CleaningConfig.model_validate(changed)) != version
+    assert rules_version(CleaningConfig.model_validate(changed), "s2") != version
+    assert rules_version(cfg, "s3") != version  # a new calendar is a new clean store (ADR 0070)
 
 
 def test_rollover_spread_widening_is_not_a_spike(cfg: CleaningConfig) -> None:
@@ -293,4 +294,4 @@ def test_spike_floor_is_one_basis_point_in_a_quiet_market(
     )
     assert not flagged_ids(clean_ticks(small, cfg, MARKET).ticks, TickFlag.SPIKE)
     assert flagged_ids(clean_ticks(large, cfg, MARKET).ticks, TickFlag.SPIKE) == set(large_ids)
-    assert rules_version(old_floor) != rules_version(cfg)
+    assert rules_version(old_floor, "s2") != rules_version(cfg, "s2")

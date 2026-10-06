@@ -35,7 +35,7 @@ from xq.core.errors import XQError
 from xq.core.logging import get_logger
 from xq.core.time import from_ns, to_ns, trading_day_bounds, trading_days
 from xq.core.types import Timeframe
-from xq.data.clean import clean_partition_path, rules_version
+from xq.data.clean import clean_partition_path, clean_rules_version
 from xq.data.flags import TickFlag
 from xq.data.raw_store import sha256_file
 from xq.data.sessions import build_session_table
@@ -189,7 +189,7 @@ def build_bar_sets(
     """
     source = cfg.source(source_id)
     bars_cfg = cfg.bars_config()
-    clean_version = rules_version(cfg.cleaning_config())
+    clean_version = clean_rules_version(cfg)
     version = build_version(bars_cfg, clean_version)
     data_dir = cfg.paths.resolve(cfg.paths.data_dir)
     root = data_dir / BARS_DIR / source_id / source.instrument

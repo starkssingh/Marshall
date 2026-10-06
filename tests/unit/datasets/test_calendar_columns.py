@@ -119,7 +119,7 @@ def test_us_holiday_early_close_and_skipped_release(sessions: SessionsConfig) ->
     row = at(sessions, "2024-01-15 13:00").iloc[0]  # Martin Luther King Jr. Day, EST
     assert row["is_us_holiday"]
     assert row["is_early_close"]
-    assert row["minutes_to_market_close"] == 330  # 13:30 EST = 18:30 UTC
+    assert row["minutes_to_market_close"] == 390  # 14:30 EST = 19:30 UTC (from 2022)
     assert row["minutes_to_us_data_release"] == 1470  # none today; tomorrow 13:30 UTC
     assert row["minutes_since_us_data_release"] == 4290  # Friday 12 January 13:30 UTC
 

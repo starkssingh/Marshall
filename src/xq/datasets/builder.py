@@ -60,7 +60,7 @@ from xq.core.types import Timeframe
 from xq.data.bars import bar_set_id, build_version, exclude_mask
 from xq.data.calendar import NAT_NS, MarketClock, regular_trading_day
 from xq.data.catalog import Catalog
-from xq.data.clean import rules_version
+from xq.data.clean import clean_rules_version
 from xq.data.raw_store import sha256_file
 from xq.data.sessions import build_session_table
 from xq.datasets.base_features import (
@@ -171,7 +171,7 @@ def resolve_spec(cfg: AppConfig, engine: Engine, spec: DatasetSpec) -> DatasetSp
         NoDatasetDataError: if no such quality run exists (run `xq validate` first).
         ValueError: if the spec pins values that differ from what the stores provide.
     """
-    build = build_version(cfg.bars_config(), rules_version(cfg.cleaning_config()))
+    build = build_version(cfg.bars_config(), clean_rules_version(cfg))
     if spec.bar_build is not None and spec.bar_build != build:
         raise ValueError(
             f"spec pins bar_build={spec.bar_build!r}, but the configured bar build is {build!r}; "

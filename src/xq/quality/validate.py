@@ -30,7 +30,7 @@ from xq.core.logging import get_logger
 from xq.core.time import to_ns, trading_day_bounds, utc_now
 from xq.core.types import Timeframe
 from xq.data.bars import bar_set_dir, build_version
-from xq.data.clean import clean_partition_path, rules_version
+from xq.data.clean import clean_partition_path, clean_rules_version
 from xq.data.sessions import build_session_table
 from xq.data.spreads import NoSpreadDataError, hour_of_week, latest_spread_stats
 from xq.quality.checks.ticks import hourly_tick_counts
@@ -106,7 +106,7 @@ def validate_source(
     registry = load_builtin_checks()
     validate_thresholds(registry, quality)
     source = cfg.source(source_id)
-    clean_version = rules_version(cfg.cleaning_config())
+    clean_version = clean_rules_version(cfg)
     bars_version = build_version(cfg.bars_config(), clean_version)
     vault_ns = to_ns(pd.Timestamp(cfg.vault.start))
 

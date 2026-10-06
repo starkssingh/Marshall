@@ -149,8 +149,8 @@ def test_us_holiday_early_close(table: pd.DataFrame) -> None:
     assert row["is_open"]
     assert row["is_early_close"]
     assert row["holiday"] == "Thanksgiving Day"
-    assert row["market_close_utc"] == utc("2024-11-28 18:30")  # 13:30 EST
-    assert row["new_york_close_utc"] == utc("2024-11-28 18:30")  # clipped to the early close
+    assert row["market_close_utc"] == utc("2024-11-28 19:30")  # 14:30 EST (from 2022)
+    assert row["new_york_close_utc"] == utc("2024-11-28 19:30")  # clipped to the early close
     assert pd.isna(row["us_data_release_utc"])  # no US releases on US holidays
     assert pd.isna(row["comex_open_utc"])
     assert row["lbma_am_utc"] == utc("2024-11-28 10:30")  # London works as usual
@@ -161,7 +161,7 @@ def test_christmas_eve_early_close_and_single_lbma_auction(table: pd.DataFrame) 
     row = table.loc[date(2024, 12, 24)]
     assert row["is_early_close"]
     assert row["holiday"] is None
-    assert row["market_close_utc"] == utc("2024-12-24 18:30")
+    assert row["market_close_utc"] == utc("2024-12-24 18:45")  # 13:45 EST (C5)
     assert row["lbma_am_utc"] == utc("2024-12-24 10:30")
     assert pd.isna(row["lbma_pm_utc"])
 

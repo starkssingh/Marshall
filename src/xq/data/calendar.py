@@ -1,8 +1,9 @@
 """Trading calendar: open days, holidays, early closes and market hours in UTC (DATA-002).
 
 Holiday dates come from the `holidays` package (US financial calendar, observed dates included;
-English bank holidays for LBMA). Which holidays close the market and when early closes happen is
-configuration (`config/sessions.yaml`), because it differs between venues.
+English bank holidays for LBMA). Which holidays close the market, which are traded in full and when
+early closes happen is configuration (`config/sessions.yaml`), because it differs between venues;
+early-close times may change on given dates (ADR 0070).
 
 `MarketClock` measures trading time — only the market-open intervals count — for horizons that
 skip the daily break, weekends and holidays (ADR 0026).
@@ -18,7 +19,7 @@ import numpy as np
 import numpy.typing as npt
 import pandas as pd
 
-from xq.core.config import WEEKDAYS, SessionsConfig
+from xq.core.config import WEEKDAYS, SessionsConfig, time_on
 from xq.core.errors import ConfigError
 from xq.core.time import local_time_to_utc, trading_day_bounds
 
@@ -58,6 +59,7 @@ class MarketCalendar:
         )
         self._years = range(first_year, last_year + 1)
         self._closed_prefixes = tuple(name.casefold() for name in rules.closed)
+        self._full_day_prefixes = tuple(name.casefold() for name in rules.full_days)
 
     @classmethod
     def for_range(cls, cfg: SessionsConfig, start: date, end: date) -> MarketCalendar:
@@ -83,7 +85,6 @@ class MarketCalendar:
     def status(self, day: date) -> DayStatus:
         """Return the market status of trading day `day`."""
         market = self._cfg.market
-        rules = self._cfg.holidays
         holiday = self.us_holiday(day)
         uk_holiday = self.uk_holiday(day)
         day_start, day_end = trading_day_bounds(day)
@@ -94,10 +95,11 @@ class MarketCalendar:
         if not self.is_trading_weekday(day) or closed_holiday:
             return DayStatus(day, False, holiday, uk_holiday, False, day_start, day_end, None, None)
 
-        early = holiday is not None or day.strftime("%m-%d") in rules.early_close_dates
+        early_close = self.early_close(day)
+        early = early_close is not None
         after_break = self.is_trading_weekday(day - timedelta(days=1))
         open_time = market.open if after_break else market.week_open
-        close_time = rules.early_close_time if early else market.close
+        close_time = early_close if early_close is not None else market.close
         market_open = self._within_day(day, open_time, closing=False)
         market_close = self._within_day(day, close_time, closing=True)
         if market_open >= market_close:
@@ -105,6 +107,27 @@ class MarketCalendar:
         return DayStatus(
             day, True, holiday, uk_holiday, early, day_start, day_end, market_open, market_close
         )
+
+    def early_close(self, day: date) -> time | None:
+        """The local early-close time of trading day `day`, or None for a regular close.
+
+        A US-calendar holiday that is neither closed nor a named full trading day closes at
+        `early_close_time` for its date; a configured ``MM-DD`` date, or the day after a
+        configured holiday, at its own time. When several apply, the earliest wins.
+        """
+        rules = self._cfg.holidays
+        holiday = self.us_holiday(day)
+        times: list[time] = []
+        if holiday is not None and not holiday.casefold().startswith(self._full_day_prefixes):
+            times.append(time_on(rules.early_close_time, day))
+        dated = rules.early_close_dates.get(day.strftime("%m-%d"))
+        if dated is not None:
+            times.append(time_on(dated, day))
+        before: str | None = self._us.get(day - timedelta(days=1))
+        for name, schedule in rules.early_close_after.items():
+            if before is not None and before.casefold().startswith(name.casefold()):
+                times.append(time_on(schedule, day))
+        return min(times) if times else None
 
     def _within_day(self, day: date, at: time, *, closing: bool) -> pd.Timestamp:
         """Place local time `at` on the calendar date that puts it inside trading day `day`."""
