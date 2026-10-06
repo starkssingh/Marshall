@@ -2,7 +2,8 @@
 # graded: FAIL if metric > fail, WARN if metric > warn, else PASS; null means "never". A warn of 0
 # means "warn on any". Thresholds are fixed before results are seen and change only with an ADR.
 # "plan" marks the development plan's defaults (Phase 2 table); "proposed" marks values chosen
-# here where the plan gives none, to be confirmed or changed (with an ADR) after DQ-008.
+# here where the plan gives none. The one change ADR 0013 item 1 allowed after the DQ-008 review
+# is ADR 0069 (accepted): no threshold may change again without superseding ADR 0013.
 
 active_sessions: [london, new_york]   # sessions (config/sessions.yaml) where liquidity is expected
 top_anomalies: 20                     # anomalies kept per check and day for the report and review
@@ -38,11 +39,11 @@ checks:
       multiple: 10.0            # plan
   tick.spikes:                  # reverting spike events (cleaning rule SPIKE, 8 robust sigma)
     severity: major
-    unit: events per day
-    warn: 5                     # plan
-    fail: 50                    # plan
-  tick.stale_quotes:            # seconds in active sessions covered by quote-unchanged periods
-    severity: major
+    unit: events per million usable ticks   # ADR 0069 item 1 (was events per day, warn 5, fail 50)
+    warn: 2000                  # ADR 0069: 0.2 % of ticks; fixed, not re-calibrated after T2
+    fail: 4000                  # ADR 0069: 0.4 % of ticks
+  tick.stale_quotes:            # seconds in active sessions of ticks repeating an unchanged quote;
+    severity: major             # silences (no tick for over stale_seconds) do not count (ADR 0069)
     unit: seconds per day
     warn: 0                     # plan: any stale quote over the limit
     fail: 1800                  # plan: 30 minutes per day

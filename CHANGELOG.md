@@ -1370,6 +1370,17 @@ IDs from `docs/specs/development-plan.md`.
   stays declared as an optional source. The README's quick start runs on the synthetic Dukascopy
   fixtures.
 
+- DQ-008 / DQ-002 / DATA-007 (owner's decision C-35, ADR 0069 **accepted**): the one threshold
+  change ADR 0013 item 1 allows, T1–T6 together. `tick.spikes` is graded in reverting spike
+  events **per million usable ticks**, warn 2000, fail 4000 (fixed now, not re-calibrated after
+  the clean-store rebuild); `cleaning.spike.min_scale_bps` 0.05 → 0.125 bp (no spike under 1 bp
+  with `z_threshold` 8), a new clean rules version `c2`; `tick.stale_quotes` counts only time
+  covered by ticks repeating an unchanged quote — an interval of more than `stale_seconds` with no
+  tick at all is missing data, not staleness — thresholds unchanged; every other threshold and
+  the hourly spread buckets unchanged. The allowance of ADR 0013 item 1 is spent. Tested on
+  synthetic ticks only; the clean store, bars and quality run are rebuilt on real data in the
+  owner's local session.
+
 ### Fixed
 
 - DQ-004 / DQ-008: the observation recorded in ADR 0062, `docs/STATUS.md` and

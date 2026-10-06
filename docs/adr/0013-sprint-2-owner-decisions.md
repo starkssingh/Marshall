@@ -51,3 +51,8 @@ its calendar are unnamed. This ADR records the answers so later work does not re
   deliberately worded confirmation, and every use leaves a warning in the logs.
 - Research may proceed on synthetic data, but no result is described as validated on real data
   until item 5 is met.
+
+## Note (2026-10-06)
+
+The one threshold change item 1 allows has been made: ADR 0069, accepted by the owner after the
+DQ-008 review (C-35). No quality threshold may change again without superseding this decision.

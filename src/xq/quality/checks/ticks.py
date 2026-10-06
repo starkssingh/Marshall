@@ -138,14 +138,19 @@ class SpreadOutliers:
 
 @register
 class RevertingSpikes:
-    """Number of reverting spike events (runs of consecutive SPIKE-flagged ticks)."""
+    """Reverting spike events (runs of consecutive SPIKE-flagged ticks) per million usable ticks.
+
+    The rate, not the count, is graded (ADR 0069 item 1): the feed's tick rate tripled over the
+    history, so the same daily count means something different in different years.
+    """
 
     check_id = "tick.spikes"
     scope = Scope.TICK
-    description = "reverting whole-quote spikes above the cleaning rule's robust z threshold"
+    description = "reverting whole-quote spikes per million usable ticks"
 
     def measure(self, data: PartitionData, params: Mapping[str, Any]) -> Measurement | None:
-        if data.ticks.empty:
+        usable = int((~flag_mask(data.ticks, UNUSABLE)).sum())
+        if usable == 0:
             return None
         mask = flag_mask(data.ticks, TickFlag.SPIKE)
         starts = mask & ~np.concatenate(([False], mask[:-1]))
@@ -156,16 +161,27 @@ class RevertingSpikes:
             for i in np.flatnonzero(starts)
             if i > 0
         ]
-        return Measurement(float(events), {"events": events, "ticks": int(mask.sum())}, anomalies)
+        return Measurement(
+            events * 1e6 / usable,
+            {"events": events, "ticks": int(mask.sum()), "usable_ticks": usable},
+            anomalies,
+        )
 
 
 @register
 class StaleQuotes:
-    """Seconds within the active sessions during which the quote did not change for too long."""
+    """Seconds within the active sessions during which ticks kept arriving with an unchanged quote.
+
+    Only time covered by ticks counts (ADR 0069 item 3): the interval between two consecutive
+    usable ticks belongs to the quote of the first, unless the ticks are more than `stale_seconds`
+    apart — then nothing arrived at all, which is missing data (``bar.missing_minutes``,
+    ``cal.missing_open_data``), not a frozen quote. A run of one quote counts when its covered time
+    inside a session exceeds `stale_seconds`.
+    """
 
     check_id = "tick.stale_quotes"
     scope = Scope.TICK
-    description = "time in active sessions covered by quote-unchanged periods over the limit"
+    description = "time in active sessions during which ticks repeated an unchanged quote too long"
 
     def measure(self, data: PartitionData, params: Mapping[str, Any]) -> Measurement | None:
         sessions = windows(data, params["active_sessions"])
@@ -178,18 +194,28 @@ class StaleQuotes:
         ask = ticks["ask"].to_numpy(dtype=np.float64)
         changed = np.ones(len(ts), dtype=bool)
         changed[1:] = (bid[1:] != bid[:-1]) | (ask[1:] != ask[:-1])
-        change_times = ts[changed]
+        run = np.cumsum(changed) - 1  # the quote run each tick belongs to
+        # Interval i is [ts[i], ts[i + 1]): covered by run[i] unless it is a silence.
+        begins, ends = ts[:-1], ts[1:]
+        covered = (ends - begins) <= limit_ns
 
         stale_ns = 0
         anomalies: list[Anomaly] = []
         for start, end in sessions:
-            inside = change_times[(change_times > start) & (change_times < end)]
-            points = np.concatenate(([start], inside, [end]))
-            lengths = np.diff(points)
-            for begin, length in zip(points[:-1], lengths, strict=True):
-                if length > limit_ns:
-                    stale_ns += int(length)
-                    anomalies.append(Anomaly(utc(begin), length / 1e9, "seconds without change"))
+            lo = np.clip(begins[covered], start, end)
+            hi = np.clip(ends[covered], start, end)
+            inside = hi > lo
+            if not inside.any():
+                continue
+            runs = run[:-1][covered][inside]
+            lengths = np.bincount(runs, weights=(hi - lo)[inside]).astype(np.int64)
+            first = np.full(len(lengths), np.iinfo(np.int64).max, dtype=np.int64)
+            np.minimum.at(first, runs, lo[inside])
+            for r in np.flatnonzero(lengths > limit_ns):
+                stale_ns += int(lengths[r])
+                anomalies.append(
+                    Anomaly(utc(first[r]), lengths[r] / 1e9, "seconds of ticks without change")
+                )
         return Measurement(stale_ns / 1e9, {"sessions": list(params["active_sessions"])}, anomalies)
 
 

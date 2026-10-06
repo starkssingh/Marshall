@@ -80,7 +80,7 @@ cleaning:
   # Non-destructive tick cleaning (DATA-007, ADR 0006). Every rule sets a flag bit; the rules
   # version written to data/clean/.../rules=<version>/ is this label plus a hash of the parameters
   # below and of the cleaning code version, so changing any of them creates a new clean store.
-  version: c1
+  version: c2                # c2: spike floor 0.125 bp (ADR 0069 item 2); c1 retired
   drop: []                   # only DUP_EXACT, NONPOSITIVE, CROSSED may be listed
   log_flag_actions: true     # also log flags (drops are always logged) in cleaning_actions
   spread_outlier:
@@ -93,7 +93,7 @@ cleaning:
     z_threshold: 8.0         # matches the DQ spike check (reverting spikes above 8 robust sigma)
     reversal_ticks: 5
     reversal_fraction: 0.5
-    min_scale_bps: 0.05      # floor on the robust return scale in quiet markets
+    min_scale_bps: 0.125     # floor on the robust scale: with z 8, no spike under 1 bp (ADR 0069)
   stale:
     seconds: 120             # matches the DQ stale-quote limit
 
