@@ -5,16 +5,23 @@ sprint and whenever a decision or carry-over item changes; anything decided in c
 recorded in an ADR and here in the same session. If a memory of an earlier conversation conflicts
 with the repository, the repository wins.
 
-- **Last updated:** 2026-10-05, at the end of the second session on branch
-  `claude/c29-c30-sprint7-features-ncwssz`: the owner's decisions on C-33 (ADR 0067), then the
-  last data-independent tasks REG-001, ML-001, ML-002, ML-003 and ML-009 (ADR 0068), in review.
-  PR #20 (C-29, C-30 and Sprint 7 part 2) was merged during this session, after its work was
-  done; this session's commits were rebased onto `main` and go to a new pull request from the
-  same branch.
+- **Last updated:** 2026-10-06, at the end of the **C-8 real-data session** on branch
+  `claude/dq-008-real-data-review` (the owner's Mac): the whole 2014-01 … 2025-11 Dukascopy
+  download ingested, cleaned, barred and graded, and the DQ-008 human review written
+  ([`docs/data/quality-review-2026-10.md`](data/quality-review-2026-10.md)). Its calendar and
+  threshold proposals are **open owner decisions** (C-35); ADR 0069 is a draft with status
+  "proposed". The previous session (C-33, REG-001, ML-001 … ML-003, ML-009) was merged in PR #21.
 - **Merged to `main`:** Sprints 1–7, 9, 11, 12 A, 12 B and 13, the Dukascopy data session, the
-  C-15 session and the C-29/C-30 decisions, with the revised H-0001 draft and the Sprint 5 and
-  Sprint 6 review fixes (PRs #2, #3, #6, #7, #8, #9, #10, #11, #12, #13, #14, #15, #16, #17, #18,
-  #19, #20).
+  C-15 session, the C-29/C-30 decisions and the C-33/REG/ML session, with the revised H-0001 draft
+  and the Sprint 5 and Sprint 6 review fixes (PRs #2, #3, #6, #7, #8, #9, #10, #11, #12, #13, #14,
+  #15, #16, #17, #18, #19, #20, #21).
+- **Real market data now exists.** 143 monthly Dukascopy XAUUSD tick CSVs, 2014-01 … 2025-11,
+  520,973,737 ticks, ingested into `data/raw` on the owner's Mac. **`data/raw` is the only copy:**
+  the downloaded CSVs were deleted after ingest on the owner's instruction, once `xq verify-raw`
+  and an independent re-hash of both copies of all 143 months confirmed CSV = raw copy = manifest
+  SHA-256 (raw files read-only, mode 0444); each deletion is logged with size and digest in
+  `data/deleted_csvs.log`. **Owner's step: back up `data/raw`** — `data/` is git-ignored and
+  nothing else holds this data. 2025-12 … 2026-09 are still not downloaded (vault-only).
 - **Where sessions run:** real-data sessions run in Claude Code on the owner's Mac, where the data
   is (`data/` is git-ignored and never leaves that machine). Cloud sessions work on synthetic data
   only (ADR 0062).
@@ -64,35 +71,52 @@ with the repository, the repository wins.
 - **Earlier:** C-15, the revised H-0001 in the board runner (ADR 0061, PR #18); Sprint 13 (the
   registry and the release gates, ADR 0060, PR #17) and the Dukascopy primary feed (ADR 0057,
   PR #16), all synthetic only; their open points were decided in C-28, C-27 and C-26.
-- **Owner's next step (C-8):** download and ingest on your Mac, from the repository root, with
-  the dukascopy-node CSV route (ADR 0062): the monthly loop from 2014-01 in
-  [`docs/runbooks/real-data.md`](runbooks/real-data.md) (`-r 3 -re -fr`, one CSV per month,
-  partial files deleted on failure, `caffeinate`, a log). Market data stays under `data/`, which
-  is git-ignored. March 2024 has already run end to end (328 pass / 25 warn / 3 fail, reported by
-  the owner).
-
-  ```bash
-  uv sync
-  uv run xq ingest --source dukascopy --path data/downloads/csv
-  ```
-
-  - Then the C-8 session runs in Claude Code on the owner's Mac, where `data/` is:
-
-    ```bash
-    uv run xq clean --source dukascopy
-    uv run xq build-bars --source dukascopy
-    uv run xq spread-stats --source dukascopy
-    uv run xq validate --source dukascopy
-    ```
-
-    `xq validate` grades every ingested trading day before the vault (`--start`/`--end` narrow
-    it); the report is written to `reports/quality/<run id>/report.md`. That session reads the
-    report per check and per year, compares the calendar with Dukascopy's real hours (ADR 0057,
-    decision 4; the March 2024 observation below), then prepares the DQ-008 human review. It
-    runs nothing else on the data.
-  - **Observation for DQ-004 / DQ-008** (the calendar is not changed yet, ADR 0062): Dukascopy
-    XAUUSD's last Friday tick on 2024-03-01 was at 20:59:59 UTC, an hour before the calendar's
-    22:00 UTC weekly close (17:00 New York, EST).
+- **C-8 (the real-data pipeline and DQ-008) — done, awaiting the owner's decisions.** The whole
+  pipeline ran on the owner's Mac with no error: ingest 24 m 51 s (142 files, 1 skipped by
+  SHA-256), clean 16 m 39 s (3,056 trading days, 1,029,287 ticks flagged, **0 dropped**),
+  build-bars 4 m 35 s (144 months; 4,134,802 1m bars, 3,075 daily bars), spread-stats 1 m 21 s
+  (115 hours of week from 504,272,444 pre-vault ticks, cut at `vault.start`), validate 3 m 48 s.
+  `--include-vault` was never used and no analysis read a vault day.
+  - **Quality run `01M47ZDA2E631VVD7703MXWMQN`**, 3,028 pre-vault trading days (2014-01-02 …
+    2025-09-25): **44,940 pass, 3,341 warn, 3,285 fail**;
+    `reports/quality/01M47ZDA2E631VVD7703MXWMQN/report.md`.
+  - **DQ-008 review:** [`docs/data/quality-review-2026-10.md`](data/quality-review-2026-10.md) —
+    pass/warn/fail per check per year, top 20 anomalies per failing check, the DQ-004 calendar
+    comparison, the spread profile by hour of week per year, tick density per year, and the
+    artefact/event/rule triage. Findings:
+    - **the feed is structurally pristine**: zero out-of-order ticks, zero DST artefacts, zero
+      duplicates, zero crossed or non-positive quotes, zero OHLC, basis, duplicate-start or
+      zero-range bar failures over 504 million ticks; `STALE` fires on **9 ticks** and
+      `SPREAD_OUTLIER` on 1,079;
+    - **the trading boundaries are confirmed exactly**: over 3,028 days and 595 weekends the
+      trading day opens at 18:00 and closes at 16:59 New York in **both** DST regimes, the daily
+      break 17:00–18:00 New York is empty in every year, and the three full-close holidays have
+      zero ticks on all 34 occurrences. `market.open`, `market.close`, `market.week_open` and the
+      `dukascopy` source's `UTC` clock need no change;
+    - **the holiday early closes are wrong in four ways** (review §4.4): the early-close time was
+      13:00 New York to 2021 and 14:30 from 2022 (ADR 0002's "one schedule for every year" cannot
+      express this); 12-31 is a full day, not an early close; 12-24 closes at 13:45, not 13:30;
+      the day after Thanksgiving is an unconfigured early close at ~13:45; and the two National
+      Days of Mourning are not gold holidays. These account for all 37 `cal.closed_market_ticks`
+      and all 36 `cal.holiday_behaviour` failures and 51 of the 191 `cal.gap_location` failures;
+    - **1,203 whole hours are missing from the download** — 75,720 market minutes, 1.81 % of the
+      pre-vault market minutes — each gap starting and ending within five seconds of a whole UTC
+      hour, the signature of `-fr` skipping an hour whose retries were spent. They cause 597 of
+      627 `bar.missing_minutes`, 625 of 651 `tick.stale_quotes`, 140 of 191 `cal.gap_location`,
+      31 of 37 `tick.rate_anomalies` and 15 of 18 `cal.missing_open_data` failures. 2016 has none;
+      2014-10 lost 205 hours;
+    - **`tick.spikes` does not discriminate on this feed**: 1,652 of 3,028 days fail and the
+      typical flagged event is a ~1 bp mid move reverting within five ticks;
+      **`tick.stale_quotes` re-detects the missing hours** rather than a frozen feed;
+    - **`bar.extreme_returns` and `tick.spread_outliers` are correctly calibrated**: the extreme
+      minutes concentrate on 08:30 New York (the release minute), 10:00 and 14:00 (FOMC), and all
+      five spread failures are 2020-03-24 … 2020-04-07.
+  - **The March 2024 observation that motivated a possible calendar change was wrong.** The last
+    tick on Friday 2024-03-01 was at **21:59:59.793 UTC** (16:59:59 New York EST), one second
+    before the calendar's close — not an hour before it. Corrected in ADR 0062 (a correction
+    note), this file and the runbook; the calendar it questioned is confirmed.
+  - **Nothing was applied.** No threshold, calendar value or exclusion changed; no data was
+    repaired. The proposals are review §7 and ADR 0069 (status **proposed**).
 - **Working system:** library code and CLI, exercised by the tests.
   - **Event backtester** (`run_event_backtest`, tick or bar mode). It runs the whole chain the
     plan prescribes:
@@ -204,12 +228,14 @@ with the repository, the repository wins.
     vault evaluation, before a candidate exists and the owner allows it (the vault is opened once
     per bundle, ever);
   - running anything on real Dukascopy data beyond the data pipeline and `xq validate` before the
-    DQ-008 review (materializing the new target sets or `core.v1`, or `xq exp wf-report` on a
-    real run, included);
+    owner has decided the DQ-008 review's proposals (review §7, ADR 0069; materializing the new
+    target sets or `core.v1`, or `xq exp wf-report` on a real run, included). The review itself is
+    written — what is still missing is the owner's ruling on the calendar, the thresholds and the
+    exclusion list, and a quality run repeated under whatever is decided;
   - feature selection, importance or ranking on any data, real or synthetic (owner's instruction
     for Sprint 7; FEAT-010 reports importance only within folds and only when stable);
   - building `ds_core`, cutting regimes, or training or tuning a model on real data before the
-    DQ-008 review and the owner's go-ahead (ML-004 onwards);
+    owner's decisions on the DQ-008 review and their go-ahead (ML-004 onwards);
   - committing market data (it stays under the git-ignored `data/`);
   - treating Dukascopy's spreads as execution costs (no venue; costs stay placeholders,
     ADR 0057);
@@ -259,6 +285,7 @@ with the repository, the repository wins.
 | C-32 | The event-tier R3 evaluation (owner's requirement C-27 (3), ADR 0062): R3 recomputed with the event backtester and the real risk engine, recorded with `evidence_tier: event`. The transition rule is enforced (migration 0016); the evaluator is not built, so no subject can reach `paper` | ADR 0062 | Claude, when a candidate runs on the event tier | open |
 | C-33 | Owner review of Sprint 7 part 2's readings (ADR 0066): (1) `core.v1`'s conventional parameter values, fixed before results; (2) sigma units from the timeframe's own trailing EWMA (`bar_sigma`), VOL-006's per-fold sigma-hat kept at model time; (3) features missing until their warm-up, nothing filled — ds_base's 10-day warm-up leaves 20-day 1d features missing for its first weeks; (4) the VWAP's tick weights gated by FEAT-007; (5) calendar features on a calendar DQ-004/DQ-008 must still confirm. Whether a dataset spec should name `core.v1` | Sprint 7 part 2 | Owner | decided (ADR 0067): (1), (2), (5) approved — a changed calendar means a new feature-set version; (3) no filling, the dataset's feature warm-up reads quality-gated pre-start bars, its length the set's longest lookback (`30a9592`); (4) the VWAP distance gated out of model inputs until FEAT-007 (`fcbe538`); `ds_core.yaml` (core.v1, not built until DQ-008; `61b625e`) |
 | C-34 | Owner review of ADR 0068's readings: (1) calibration weighted by the validation labels' raw uniqueness, Platt's slope with a unit L2 penalty; (2) no filling at model time (rows with a missing input dropped or unpredicted, a column constant in training set to 0); (3) REG-001's cut-off quantiles; (4) the HPO budget counted per fold (50 trials × folds in the family); (5) a model load refused on library drift | Sprint 8/10 data-independent tasks | Owner | open |
+| C-35 | Owner decisions on the DQ-008 review ([`docs/data/quality-review-2026-10.md`](data/quality-review-2026-10.md) §7): (1) the eight calendar proposals C1–C8, of which C3 (a date-dependent holiday early-close time, 13:00 to 2021 and 14:30 from 2022) needs a schema change because ADR 0002 assumes one schedule for every year; (2) the one allowed threshold change, drafted as ADR 0069 "proposed" — `tick.spikes` graded per million ticks (warn 2000, fail 4000), `cleaning.spike.min_scale_bps` 0.05 → 0.125 bp (a clean-store rebuild), `tick.stale_quotes` to stop counting silence as staleness, everything else unchanged, spread buckets kept hourly; (3) the 15 trading days proposed for exclusion (11 of them the run 2014-10-13 … 2014-10-31); (4) whether to re-export the damaged months | DQ-008, this session | Owner | open |
 
 ## Open owner decisions
 
@@ -274,6 +301,7 @@ with the repository, the repository wins.
 | Risk budget | per-trade risk, drawdown halt | 0.5 % per trade, halt at 15 % drawdown (plan default; the gates' 0.15 drawdown limits match it) |
 | Vault | holdout start | `2025-09-25T21:00:00Z`, the last 12 months at project start (fixed) |
 | Replacing the interim sigma-hat (C-18) | the forecaster `select_forecaster` picks on real data; keep the interim EWMA | interim EWMA, span 96 base bars (`fwd_returns.v1`); nothing promoted (ADR 0044) |
+| DQ-008: the holiday calendar, the one allowed threshold change, the exclusion list (C-35) | review §7 proposals C1–C8 and ADR 0069 (proposed); or keep everything as it is and accept `tick.spikes` failing on 55 % of days | **unchanged**: `config/sessions.yaml` and `config/quality.yaml` exactly as they were before this session; quality run `01M47ZDA2E631VVD7703MXWMQN` is the one DQ-007 would gate on |
 
 Decided at the Sprint 4 hold point (ADR 0032): the evidence gates, the meaning of `1d`, decisions
 taken while the market is closed, financing on both sides, and verifying the Docker image in CI.
@@ -345,11 +373,11 @@ ML-009), synthetic only.
 | Assumption | Value in use | Where | Confirmed by |
 | --- | --- | --- | --- |
 | Execution venue | none (data-only project); the MT5 broker of the optional `mt5_primary` is unnamed | ADR 0057, `config/base.yaml` | the owner choosing a venue |
-| Source clocks | `dukascopy`: `UTC` (the vendor's hour files are UTC hours); optional `mt5_primary`: `NY+7` (UTC+2/+3, US DST dates) | ADR 0003, ADR 0004, ADR 0057 | DQ-004 gap locations on real Dukascopy data |
-| Dukascopy file format | `.bi5` = LZMA "alone" stream of 20-byte big-endian records (ms offset, ask, bid, ask volume, bid volume), XAUUSD points / 1000, URL months from 00, first tick 2003-05-05; CSV = dukascopy-node's `timestamp,askPrice,bidPrice,askVolume,bidVolume` | `xq.data.adapters.dukascopy`, `config/base.yaml`, ADR 0057 (from dukascopy-node's source; the vendor was unreachable) | the first real download and ingest (plausible prices, no refused files) |
-| Download pace | one request at a time, ≥ 0.5 s apart, 30 s timeout, 4 attempts (backoff 2, 4, 8 s), empty market hours asked again after 5 s and recorded only once confirmed, 24 in a row stop the run | `sources.dukascopy.download`, ADR 0057 | the owner's first download |
+| Source clocks | `dukascopy`: `UTC` — **confirmed** by DQ-004 on 3,028 real trading days (a misdeclared clock would move every boundary by an hour and fail `cal.gap_location` on nearly every day, not on 191); optional `mt5_primary`: `NY+7` (UTC+2/+3, US DST dates), unconfirmed | ADR 0003, ADR 0004, ADR 0057, review §4.2 | done for `dukascopy`; a named broker for `mt5_primary` |
+| Dukascopy file format | CSV = dukascopy-node's `timestamp,askPrice,bidPrice,askVolume,bidVolume` — **confirmed** on 143 real months (every header exact, UTC ms timestamps, plausible prices per year, no refused file); `.bi5` = LZMA "alone" stream of 20-byte big-endian records, XAUUSD points / 1000, first tick 2003-05-05 — still unconfirmed, no `.bi5` file was ever downloaded | `xq.data.adapters.dukascopy`, `config/base.yaml`, ADR 0057, review §1 | done for CSV; a reachable `.bi5` endpoint for the rest |
+| Download pace | `sources.dukascopy.download` (one request at a time, ≥ 0.5 s apart, 30 s timeout, 4 attempts, backoff 2/4/8 s, 24 empty open hours stop the run) — never exercised: the real download used dukascopy-node with `-r 3 -re -fr`, whose three retries left 1,203 market hours missing (review §5.3) | `sources.dukascopy.download`, ADR 0057, `docs/runbooks/real-data.md` | a reachable `.bi5` endpoint, or a re-export with a higher `-r` |
 | Contract terms | tick 0.01, 100 oz per lot, lot step 0.01, max 100 | `config/instruments/xauusd.yaml` | broker contract spec |
-| Trading calendar | 18:00–17:00 New York, NYSE holidays, 13:30 early closes, one schedule for every year | ADR 0002, `config/sessions.yaml`; re-checked against Dukascopy in ADR 0057 (its hours pages were unreachable) | DQ-004 on real Dukascopy data, read per year, then DQ-008 |
+| Trading calendar | 18:00–17:00 New York: **confirmed** on 3,028 days and 595 weekends, both DST regimes, plus the empty 17:00–18:00 break and the three full-close holidays (zero ticks, 34 occurrences). The rest is **wrong and unchanged pending C-35**: the 13:30 early close (really 13:00 to 2021, 14:30 from 2022), 12-31 (a full day), 12-24 (13:45), the unconfigured day after Thanksgiving, the two National Days of Mourning (full days), and "one schedule for every year" (cannot express the 2022 change) | ADR 0002, `config/sessions.yaml`, ADR 0057; review §4 | the owner's decision on review §7.1 (C-35), then a repeated quality run |
 | Costs (commission, slippage, financing) | placeholder model, PROVISIONAL: commission 3.5 USD/lot/side; slippage 0.5 bp + 0.1·σ̂₁ₘ, ×3 rollover window, ×2 US release; financing 6 %/yr long, 2 %/yr short (both a cost, required while provisional), act/360, triple Wednesday; spread fallback p90 | `config/costs/placeholder.yaml`, ADR 0029, ADR 0032 | broker terms, paper trading |
 | Execution latency | 1 s (market time from ADR 0026) | `config/targets.yaml` `fwd_returns.v1`, cost model | BT-001, paper trading |
 | Event-tier execution rules | margin 5 % of notional (1:20); limit orders fill at their price, never better, and only when the price trades through them by at least one tick; bar mode (no ticks) resolves a bar touching both bracket legs to the stop; entry blackouts: rollover window, US release window, last 60 min before a weekly close; optional weekend exit 30 min before it (off) | `config/base.yaml` `backtest.event`, ADR 0049, ADR 0050 (defaults approved by the owner) | broker terms, paper trading |
@@ -358,7 +386,7 @@ ML-009), synthetic only.
 | Regime filter | PLACEHOLDER pass-through: accepts a `RegimeState`, blocks nothing, says so in every signal record | `xq.signals.filters`, ADR 0051, ADR 0052 | REG-007 (Sprint 8) |
 | Maximum fill delay | 300 s | `fwd_returns.v1`, cost model | ADR 0026: kept, provisional |
 | Bar publication latency | 0 ms | `config/base.yaml` `bars` | live feed measurement |
-| Quality thresholds | ratified provisional; one change allowed after DQ-008 | `config/quality.yaml`, ADR 0013 | DQ-008 review |
+| Quality thresholds | ratified provisional and **unchanged**; the one change ADR 0013 item 1 allows is drafted in ADR 0069, status "proposed" (C-35) and **not applied**. Ten of eighteen checks need no change; `tick.spikes` and `tick.stale_quotes` do | `config/quality.yaml`, ADR 0013, ADR 0069 (proposed) | the owner's decision (C-35) |
 | Event windows | US release −5/+30 min; rollover 16:45–18:15 New York (ADR 0026) | `config/sessions.yaml` | EDA |
 | Trial clustering | \|ρ\| 0.7 (absolute correlation, C-25), 60 common trading days; frozen with the gates (ADR 0032); Sharpe variance across clusters (ADR 0058) | `config/base.yaml` `experiments` | fixed before results |
 | Sigma-hat | interim EWMA, span 96 base bars | `fwd_returns.v1` | a VOL-006 selection on real data, approved by the owner and recorded in an ADR (C-18) |
@@ -378,14 +406,37 @@ ML-009), synthetic only.
 
 ## Known issues and technical debt
 
-- No real market data exists. Sprints 2–6 and 11 are tested only on synthetic data (Sprints 5 and
-  6 also on simulated processes); nothing is validated on real data (C-8).
+- Real market data now exists (143 months, 2014-01 … 2025-11) and the data layer and the quality
+  checks have run on it (C-8). Sprints 3–6 and 11 are still tested only on synthetic data
+  (Sprints 5 and 6 also on simulated processes); **no research result exists on real data** — no
+  dataset has been built, no EDA, statistical, volatility, board, backtest or model run has
+  touched it.
+- **`data/raw` is the only copy of the market data** and is not backed up: the downloaded CSVs were
+  deleted after a full SHA-256 verification (`data/deleted_csvs.log`), and `data/` is git-ignored.
+  Re-downloading 143 months is slow. Backing it up is the owner's step; `xq verify-raw` re-hashes
+  the whole store in about 17 s.
+- **1,203 whole hours are missing from the download** (75,720 market minutes, 1.81 % of the
+  pre-vault market minutes), the signature of dukascopy-node's `-fr` skipping an hour whose retries
+  were spent. 2016 has none; 2014-10 lost 205 hours and holds eleven of the fifteen days the review
+  proposes to exclude. Re-exporting the damaged months is proposed, not done (review §7.3); nothing
+  was fetched in this session.
+- **The holiday calendar is wrong** in four ways that the data shows clearly (review §4.4), and
+  ADR 0002's "one schedule for every year" cannot express the 2022 change in the holiday
+  early-close time. `config/sessions.yaml` is unchanged pending C-35, so `cal.closed_market_ticks`,
+  `cal.holiday_behaviour` and part of `cal.gap_location` will keep failing on those days.
+- **`tick.spikes` fails on 55 % of pre-vault trading days** and `tick.stale_quotes` re-detects the
+  missing hours rather than a frozen feed (review §6.1, §6.2). Until C-35, DQ-007 would block more
+  than half the history, so no dataset should be built on real data yet.
+- 2025-12 … 2026-09 are not downloaded. They are vault-only, so nothing before the release gate
+  needs them.
 - The Dukascopy `.bi5` endpoint (`datafeed.dukascopy.com`) answered HTTP 503 on the owner's
   machine on 2026-10-04 (reported to time out since 7 July 2026). The dukascopy-node CSV route
   is the working route (ADR 0062). `xq fetch dukascopy` is kept but tested only against a
   scripted vendor and a local HTTP server.
-- The calendar was not compared with Dukascopy's published hours or trading-breaks calendar: the
-  domain is blocked here. `xq validate` on real data settles it (ADR 0057, decision 4).
+- The calendar was never compared with Dukascopy's *published* hours or trading-breaks calendar:
+  the domain is unreachable (ADR 0057, decision 4). The DQ-008 comparison is against the ticks
+  themselves, which confirms the trading boundaries and finds the holiday rules wrong, but cannot
+  distinguish "the venue closed" from "the vendor stopped recording".
 - Dukascopy tick volumes are kept in the raw mirror only; canonical tick sizes are NaN (units
   undocumented). Ingesting both Dukascopy formats for the same period would duplicate ticks (the
   second copy is flagged `DUP_EXACT`).
@@ -406,8 +457,12 @@ ML-009), synthetic only.
   four default horizons until the admission list exists (ADR 0037).
 - EDA speed on real minute data is unmeasured: the bootstrap draws 1,000 resamples of about 700k
   one-minute returns one at a time, and the Student-t fit uses the full series.
-- The `SPREAD_OUTLIER` cleaning flag fires on rollover widening, and spread statistics use
-  hourly buckets that blur short spikes; to be revisited in the DQ-008 review (ADR 0013).
+- The `SPREAD_OUTLIER` cleaning flag was expected to fire on rollover widening and the hourly
+  spread buckets to blur short spikes (ADR 0013 item 2). **Measured and not observed:** the flag
+  fires on 1,079 of 504,272,444 ticks (0.0002 %), and a New York hour-of-week bucket understates
+  the worst 15 minutes inside the rollover hours by only ×1.06–×1.23 on the median, against a
+  check that fires at 10× the bucket median. ADR 0069 proposes keeping hourly buckets; the issue
+  closes with C-35 (review §5.1).
 - `ds_base` still names `base.v1` (bar values, context bars, calendar columns); `core.v1`
   (ADR 0066) is materialized only in a synthetic test, and switching a dataset to it is the
   owner's call (C-33). Sigma-hat is the interim EWMA of `fwd_returns.v1` until a VOL-006
@@ -511,8 +566,8 @@ ML-009), synthetic only.
 | Phase | Tasks done | Implemented | Tested (synthetic) | Validated on real data |
 | --- | --- | --- | --- | --- |
 | 0 Architecture | ARCH-001 … ARCH-008 | yes | yes (image verified in CI) | not applicable |
-| 1 Market data | DATA-001 … DATA-010, DATA-013 (Dukascopy adapter and `xq fetch dukascopy`, the primary feed) | yes | yes (synthetic `.bi5` and CSV fixtures, a scripted vendor, a local HTTP server) | no |
-| 2 Data quality | DQ-001 … DQ-004, DQ-006, DQ-007 (DQ-005, DQ-008 open) | yes | yes | no |
+| 1 Market data | DATA-001 … DATA-010, DATA-013 (Dukascopy adapter and `xq fetch dukascopy`, the primary feed) | yes | yes (synthetic `.bi5` and CSV fixtures, a scripted vendor, a local HTTP server) | **yes** — 143 months / 520,973,737 real ticks ingested, cleaned and barred with no error; zero out-of-order, DST, duplicate, crossed or non-positive quotes and zero bar-invariant failures over 504 M graded ticks. `xq fetch dukascopy` itself is still untested against the live vendor (503) |
+| 2 Data quality | DQ-001 … DQ-004, DQ-006, DQ-007; DQ-008 reviewed, awaiting the owner (C-35); DQ-005 not started | yes | yes | **partly** — the checks ran on 3,028 real trading days and the review is written, but ADR 0013 item 5 is not met until the owner rules on the calendar and the thresholds and a run is repeated under them |
 | 3 Datasets | DS-001 … DS-007 | yes | yes | no |
 | 4 Exploratory research | EDA-001 … EDA-006 (EDA-007 in Sprint 8) | yes | yes (synthetic data, simulated processes) | no (no report on real data yet, C-16) |
 | 5 Statistical time series | STAT-001, STAT-002, STAT-003, STAT-006, STAT-008 framework (STAT-004, STAT-005 in Sprint 8; STAT-007 gated) | yes | yes (simulated processes, recovery registry) | no (no verdict report on real data, C-18) |

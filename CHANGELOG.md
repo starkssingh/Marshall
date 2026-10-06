@@ -1051,6 +1051,29 @@ IDs from `docs/specs/development-plan.md`.
   tampered artifact or library drift. Tested: a reload reproduces the pipeline's test
   predictions within 1e-9. ADR 0068.
 
+- DQ-008: the human review of the first quality report on real data,
+  `docs/data/quality-review-2026-10.md`. The whole 2014-01 … 2025-11 Dukascopy download
+  (143 monthly CSVs, 520,973,737 ticks) was ingested, cleaned, barred and graded on the owner's
+  Mac with no error; quality run `01M47ZDA2E631VVD7703MXWMQN` covers 3,028 pre-vault trading days
+  (44,940 pass, 3,341 warn, 3,285 fail) and `--include-vault` was never used. The review records
+  pass/warn/fail per check per year, the top 20 anomalies per failing check with timestamps, the
+  DQ-004 calendar comparison per weekday and year, the Friday close and Sunday open across US DST,
+  the daily break, holidays and early closes, the spread profile by New York hour of week per year
+  (and at 15-minute resolution around the rollover, answering ADR 0013 item 2), tick density per
+  year, and a triage of every failing check into real market events, feed artefacts and rules
+  unsuited to this feed. Findings: the feed is structurally pristine (zero out-of-order, DST,
+  duplicate, crossed or non-positive quotes; zero bar-invariant failures; `STALE` on 9 ticks of
+  504 million); the trading boundaries and the full-close holidays are confirmed exactly; the
+  holiday early-close rules are wrong in four ways and changed in 2022; 1,203 whole hours
+  (1.81 % of pre-vault market minutes) are missing from the download; `tick.spikes` fails on 55 %
+  of days on a ~1 bp reverting-move signature. The review is **proposals only** — no threshold,
+  calendar value or exclusion was changed and no data was repaired.
+
+- ADR 0069 (status **proposed**, not accepted): a draft of the one threshold change ADR 0013
+  item 1 allows — `tick.spikes` graded per million ticks (warn 2000, fail 4000),
+  `cleaning.spike.min_scale_bps` 0.05 → 0.125 bp, `tick.stale_quotes` to stop counting silence as
+  staleness, every other threshold unchanged, and spread buckets kept hourly.
+
 ### Changed
 
 - C-33 (owner's decision, ADR 0067), DS-001: `experiments/configs/ds_core.yaml`, `ds_base`'s
@@ -1348,6 +1371,15 @@ IDs from `docs/specs/development-plan.md`.
   fixtures.
 
 ### Fixed
+
+- DQ-004 / DQ-008: the observation recorded in ADR 0062, `docs/STATUS.md` and
+  `docs/runbooks/real-data.md` that Dukascopy XAUUSD's last tick on Friday 2024-03-01 was at
+  20:59:59 UTC, an hour before the calendar's weekly close, is **wrong**. It was at
+  21:59:59.793 UTC (16:59:59 New York EST), one second before the close, verified in the raw CSV.
+  It was the only evidence suggesting the weekly close needed changing; over 595 weekends and
+  3,028 trading days the close is 16:59 New York and the open 18:00 New York in both DST regimes,
+  so `market.open`, `market.close` and `market.week_open` are confirmed as they stand. Corrected
+  in all three documents, with a correction note appended to ADR 0062.
 
 - C-30 (3) (owner's decision, ADR 0065), TGT-006: the trade/no-trade label calls the backtester's
   own `CostModel` instead of mirroring it: the target set names a cost model (`cost_model:
