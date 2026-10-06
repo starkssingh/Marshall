@@ -61,6 +61,33 @@ also proposed 15 days for exclusion (§7.5), which the dataset spec could only l
   evidence of that quality run. The review's 15 proposed days were measured *before* the
   re-export and are not carried over.
 
+### 3. How the exclusion list is applied (implementation)
+
+- `ExclusionsConfig` (`rule`, `days` per source). The rule's `check` is fixed to
+  `cal.missing_open_data` and `max_missing_market_share` is 0.20. Each entry needs a
+  `trading_day`, a non-empty `reason`, its `missing_market_share` — which **must exceed** the rule
+  or the configuration does not load — and the `quality_run_id` that measured it. A day is listed
+  once per source; a source must be configured. `AppConfig.excluded_days(source)` returns the
+  list.
+- The dataset builder adds the listed days within the span a dataset reads to its exclusions
+  (warm-up included), with the reason `exclusion list (config/exclusions.yaml): <reason>`; a reason
+  the spec gives itself for the same day takes precedence. They appear in the manifest's
+  `excluded_partitions` with their failing checks, like any DQ-007 exclusion.
+- **Evidence check** (`check_exclusion_evidence`): before excluding, the builder reads the gating
+  quality run's `cal.missing_open_data` metric for each listed day; a day graded at or below the
+  rule refuses the build (`QualityGateError`). A day the run did not grade (no data at all) is not
+  contradicted.
+- The list enters the dataset's config digest — only when it names a day for the source, so
+  datasets built while it is empty keep their ids — so filling it changes the ids of the datasets
+  it affects.
+- Known truth: `tests/unit/core/test_exclusions_config.py` (the repository list is empty under
+  the 20 % rule; 20 % and 4.3 % are refused, 43.5 % accepted; reason and evidence required; a day
+  listed twice, another check or an unknown source refused; the list cannot come from a profile,
+  an override or an environment variable) and `tests/integration/datasets/test_exclusion_list.py`
+  (a listed day is dropped from the features, recorded in the manifest and changes the id; a day
+  outside the dataset is ignored; a spec's own reason wins; a gating run at the rule refuses the
+  build).
+
 ## Consequences
 
 - Re-exporting a damaged month is a routine, auditable step: ingest with `--supersedes`, then
@@ -68,7 +95,8 @@ also proposed 15 days for exclusion (§7.5), which the dataset spec could only l
   in the store and its backups; which one is used, and why, is in the manifest.
 - A superseded file's mirror parts stay on disk; they are derived data and are simply not read.
 - The quality run graded after the re-export (and under ADR 0069 and ADR 0070) is the evidence
-  for the exclusion list and the run DQ-007 gates datasets on.
+  for the exclusion list and the run DQ-007 gates datasets on. Filling the list is a commit that
+  names that run; every entry is checked against it again at every dataset build.
 - Known truth: `tests/integration/data/test_supersession.py` — a month exported with a missing
   hour and its re-export: after the supersession the damaged day is rebuilt from the re-export
   alone (the hole filled, no `DUP_EXACT`), the boundary day from the re-export and the next month;

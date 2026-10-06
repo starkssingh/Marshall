@@ -72,7 +72,7 @@ from xq.datasets.base_features import (
 from xq.datasets.spec import DatasetSpec, code_versions, dataset_id, dump_spec
 from xq.datasets.vault import GateToken, check_window, vault_start
 from xq.features import registry as feature_registry
-from xq.quality.gate import GateDecision, gate_partitions
+from xq.quality.gate import GateDecision, check_exclusion_evidence, gate_partitions
 from xq.targets.base import (
     Lookahead,
     TargetKind,
@@ -131,8 +131,9 @@ def config_digest(cfg: AppConfig, spec: DatasetSpec) -> str:
     """Hash of the configuration the builder reads besides the stores.
 
     Covers the calendar, the instrument, a configured feature set's definition (FEAT-001), the
-    bar exclusion flags (which ticks targets may fill at), the target set definition, if any, and
-    the cost model its kind prices trades with.
+    source's exclusion list when it names any day (ADR 0071), the bar exclusion flags (which ticks
+    targets may fill at), the target set definition, if any, and the cost model its kind prices
+    trades with.
     """
     payload: dict[str, Any] = {
         "sessions": cfg.sessions_config().model_dump(mode="json"),
@@ -141,6 +142,12 @@ def config_digest(cfg: AppConfig, spec: DatasetSpec) -> str:
     feature_definition = feature_registry.configured(cfg, spec.feature_set)
     if feature_definition is not None:
         payload["feature_set"] = feature_registry.definition_hash(feature_definition)
+    listed = cfg.excluded_days(spec.source)
+    if listed and cfg.exclusions is not None:  # only then, so other datasets keep their ids
+        payload["exclusions"] = {
+            "rule": cfg.exclusions.rule.model_dump(mode="json"),
+            "days": [e.model_dump(mode="json") for e in listed],
+        }
     if spec.target_set is not None:
         definition = cfg.target_set(spec.target_set.name, spec.target_set.version)
         payload["target_set"] = definition_hash(definition)
@@ -442,7 +449,8 @@ def _load_inputs(
         + spec.base_timeframe.duration
         + pd.Timedelta(milliseconds=cfg.bars_config().publication_latency_ms)
     )
-    excluded_days = {e.trading_day for e in spec.exclusions}
+    listed = {e.trading_day: e for e in cfg.excluded_days(spec.source)}  # ADR 0071
+    excluded_days = {e.trading_day for e in spec.exclusions} | set(listed)
     loaded: dict[str, pd.DataFrame] = {}
     for tf, start in starts.items():
         name = BASE_INPUT if tf == spec.base_timeframe else tf.value
@@ -484,6 +492,14 @@ def _load_inputs(
             days |= set(ahead["trading_day"])
     if spec.quality_run_id is None:
         raise ValueError("the spec must be resolved before its inputs are gated")
+    # The exclusion list's days within the span the dataset reads (ADR 0071), each checked
+    # against the gating run's evidence; a reason the spec gives itself takes precedence.
+    in_span = [d for d in listed if days and min(days) <= d <= max(days)]
+    if in_span and cfg.exclusions is not None:
+        check_exclusion_evidence(engine, spec.quality_run_id, in_span, cfg.exclusions.rule)
+    for day in in_span:
+        exclusions.setdefault(day, f"exclusion list (config/exclusions.yaml): {listed[day].reason}")
+    days |= set(in_span)
     decision = gate_partitions(engine, spec.quality_run_id, days, exclusions)
     excluded = {e.trading_day for e in decision.excluded}
     inputs = {

@@ -12,12 +12,13 @@ from sqlalchemy import Engine
 
 from helpers.datasets import dataset_spec, validated_pipeline
 from helpers.pipeline import REPO, config
+from xq.core.config import ExclusionRule
 from xq.core.time import utc_now
 from xq.core.types import Timeframe
 from xq.data.bars import bar_set_dir, build_version
 from xq.data.clean import clean_rules_version
 from xq.datasets.builder import build_dataset, load_dataset
-from xq.quality.gate import QualityGateError, gate_partitions
+from xq.quality.gate import QualityGateError, check_exclusion_evidence, gate_partitions
 from xq.quality.validate import validate_source
 from xq.tracking.db import create_db_engine, session_factory, upgrade_to_head
 from xq.tracking.models import DataSource, QualityResultRecord, QualityRunRecord
@@ -174,3 +175,10 @@ def test_the_gate_blocks_a_partition_with_an_injected_ohlc_error(
     day_end = pd.Timestamp("2024-03-13 21:00", tz="UTC")
     assert not ((features.index > day_start) & (features.index <= day_end)).any()
     engine.dispose()
+
+
+def test_exclusion_evidence_is_checked_only_where_the_run_graded_the_day(engine: Engine) -> None:
+    # ADR 0071: the run in this fixture has no cal.missing_open_data result, so it contradicts
+    # nothing; a listed day it graded at or below the rule is refused (test_exclusion_list.py).
+    rule = ExclusionRule(max_missing_market_share=0.2)
+    check_exclusion_evidence(engine, RUN, [D1, D4], rule)

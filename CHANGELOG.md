@@ -1408,6 +1408,17 @@ IDs from `docs/specs/development-plan.md`.
   reason, not exactly one file, an unknown, other-source or already superseded raw file, identical
   bytes, or a period that does not overlap. Runbook section "Re-exporting a damaged month".
 
+- DQ-007 / DQ-008 (owner's decision C-35, ADR 0071): a config-driven, documented exclusion list,
+  `config/exclusions.yaml` (`ExclusionsConfig`, `AppConfig.excluded_days`; file-only like the
+  gates). The approved rule: exclude a trading day only if more than 20 % of its calendar market
+  minutes are still missing after the re-export (`cal.missing_open_data`), so one-hour holes stay
+  warnings; every entry carries a reason, its missing share (which must exceed the rule) and the
+  quality run that measured it. The dataset builder adds the listed days a dataset reads to its
+  exclusions and manifest, checks each against its own gating run (`check_exclusion_evidence`;
+  a day graded at or below the rule refuses the build) and puts a non-empty list in the config
+  digest. **The list is empty**: the owner's local session fills it from the evidence of the run
+  after the re-export. Runbook section "Filling the exclusion list".
+
 ### Fixed
 
 - DQ-004 / DQ-008: the observation recorded in ADR 0062, `docs/STATUS.md` and

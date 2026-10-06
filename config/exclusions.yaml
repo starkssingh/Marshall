@@ -1,0 +1,22 @@
+# Trading days excluded from every dataset of a source (DQ-007, ADR 0071). Fixed before any result;
+# an entry is added only under the rule below, from evidence, and every change is a commit that
+# names the quality run it rests on.
+#
+# The rule (owner's decision C-35): exclude a trading day only if MORE than 20 % of its calendar
+# market minutes are still missing AFTER the damaged months were re-exported (ADR 0071). The share
+# is the metric of the quality check `cal.missing_open_data` (whole market-hours minutes without a
+# 1-minute bar) in a quality run graded after the re-export. A day with one missing hour (about
+# 4 % of a 23-hour day) is NOT excluded: it stays a warning in the dataset manifest.
+#
+# Each entry: trading_day, reason, missing_market_share (the run's cal.missing_open_data metric,
+# which must exceed the rule) and quality_run_id (that run). The dataset builder adds the listed
+# days a dataset reads to its exclusions, records them in the manifest with their failing checks,
+# and refuses the build if its own quality run contradicts an entry (the day's share at or below
+# the rule). An empty list excludes nothing.
+
+rule:
+  check: cal.missing_open_data
+  max_missing_market_share: 0.20   # exclude only above this share of calendar market minutes
+
+days:
+  dukascopy: []   # filled by the owner's local session from the run after the re-export

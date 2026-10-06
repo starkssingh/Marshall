@@ -137,6 +137,20 @@ reason, for an unknown or already superseded raw file id, for a file of another 
 byte-identical file, or for a file whose ticks do not overlap the old file's period. Back up
 `data/raw` again afterwards: it now holds both versions of the month.
 
+### Filling the exclusion list (ADR 0071)
+
+After the damaged months are re-exported and the quality run is repeated, a trading day may be
+excluded from datasets **only if more than 20 % of its calendar market minutes are still missing**:
+the `cal.missing_open_data` metric of that day in the new run. One-hour holes stay warnings.
+
+1. List the candidates from the run's results (`quality_results`, check `cal.missing_open_data`,
+   `metric_value > 0.2`), and set aside any day where the calendar, not the data, is at fault.
+2. Add each day to `config/exclusions.yaml` under its source with `trading_day`, a `reason` naming
+   the defect, its `missing_market_share` (the metric) and the run's `quality_run_id`. The file is
+   the only place the list can be set; an entry at or below 20 % does not load.
+3. Commit the change with the run id in the message. Every dataset build checks each listed day
+   against its own gating run and refuses an entry the run does not support.
+
 ## 3. What a real-data session may do now
 
 Until the DQ-008 review is signed off, nothing runs on real data beyond the pipeline above and

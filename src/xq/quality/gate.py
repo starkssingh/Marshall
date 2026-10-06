@@ -9,7 +9,9 @@ run:
 - a day without results in the run is refused (it was never validated);
 - a day with WARN results is included and listed, with its warning checks, in the manifest;
 - a day may also be excluded voluntarily (for example a known bad export); it is recorded the same
-  way.
+  way;
+- the source-wide exclusion list (``config/exclusions.yaml``, ADR 0071) is checked against the
+  run's evidence by `check_exclusion_evidence` before its days are excluded.
 
 The gate never alters data or thresholds; it only decides which partitions a dataset may use.
 """
@@ -24,6 +26,7 @@ from typing import Any
 
 from sqlalchemy import Engine, select
 
+from xq.core.config import ExclusionRule
 from xq.core.errors import XQError
 from xq.quality.registry import Status
 from xq.tracking.db import session_factory
@@ -143,3 +146,34 @@ def gate_partitions(
             "or re-run `xq validate` over the window"
         )
     return GateDecision(run_id, tuple(included), tuple(excluded), warnings)
+
+
+def check_exclusion_evidence(
+    engine: Engine, run_id: str, days: Iterable[date], rule: ExclusionRule
+) -> None:
+    """Refuse listed exclusions that quality run `run_id` contradicts (ADR 0071).
+
+    A day on the exclusion list may be excluded only if more than the rule's share of its calendar
+    market minutes is missing. Where the run graded the rule's check on the day, its metric must
+    exceed that share; a day the run did not grade (no data at all) is not contradicted.
+
+    Raises:
+        QualityGateError: naming every listed day whose metric is at or below the rule.
+    """
+    wanted = sorted(set(days))
+    with session_factory(engine)() as session:
+        rows = session.execute(
+            select(QualityResultRecord.trading_day, QualityResultRecord.metric_value).where(
+                QualityResultRecord.run_id == run_id,
+                QualityResultRecord.check_id == rule.check,
+                QualityResultRecord.trading_day.in_(wanted),
+            )
+        ).all()
+    limit = rule.max_missing_market_share
+    contradicted = [f"{day} ({metric:.1%})" for day, metric in sorted(rows) if not metric > limit]
+    if contradicted:
+        raise QualityGateError(
+            f"the exclusion list names days that quality run {run_id} does not support: "
+            f"{', '.join(contradicted)} of market minutes missing, not more than {limit:.0%} "
+            f"({rule.check}); remove them from config/exclusions.yaml"
+        )
