@@ -1396,6 +1396,18 @@ IDs from `docs/specs/development-plan.md`.
   before any build on real data, `core.v2` repeats its features on `s2`, and `ds_core` and the
   regime rules name `core.v2` (ADR 0067 (5)). Synthetic data only.
 
+- DQ-008 / DATA-004 / DATA-007 (owner's decision C-35, ADR 0071): re-export support with raw data
+  kept immutable. A re-exported file is ingested as a new raw file that **supersedes** the earlier
+  raw file(s) of the same source and period, with a reason: `xq ingest --path <file> --supersedes
+  <raw_file_id> --reason "..."` (`ingest(..., supersedes=, reason=)`). The supersession is recorded
+  in the manifest table `raw_file_supersessions` (migration 0018: both ids, source, the superseded
+  file's period, reason, ingest run, time) in the same transaction as the new `raw_files` row.
+  Clean, the bar build's coverage and the quality run's coverage read only active files
+  (`active_raw_files`), so a trading day is built from the superseding file and never from both;
+  `xq verify-raw` still re-hashes both. Refused with nothing stored (`SupersessionError`): no
+  reason, not exactly one file, an unknown, other-source or already superseded raw file, identical
+  bytes, or a period that does not overlap. Runbook section "Re-exporting a damaged month".
+
 ### Fixed
 
 - DQ-004 / DQ-008: the observation recorded in ADR 0062, `docs/STATUS.md` and

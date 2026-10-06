@@ -150,6 +150,28 @@ class RawFile(Base):
     ingested_at: Mapped[pd.Timestamp]
 
 
+class RawFileSupersession(Base):
+    """A raw file replaced by a re-export of the same source and period (ADR 0071).
+
+    Both files stay in the raw store, immutable and in the manifest; clean, bars and the quality
+    checks read only files that are not superseded, so the two are never mixed. A file is
+    superseded at most once.
+    """
+
+    __tablename__ = "raw_file_supersessions"
+
+    superseded_raw_file_id: Mapped[str] = mapped_column(
+        ForeignKey("raw_files.raw_file_id"), primary_key=True
+    )
+    superseding_raw_file_id: Mapped[str] = mapped_column(ForeignKey("raw_files.raw_file_id"))
+    source_id: Mapped[str] = mapped_column(ForeignKey("data_sources.source_id"))
+    period_start_utc: Mapped[pd.Timestamp]
+    period_end_utc: Mapped[pd.Timestamp]
+    reason: Mapped[str] = mapped_column(Text)
+    ingest_run_id: Mapped[str] = mapped_column(ForeignKey("ingest_runs.run_id"))
+    recorded_at: Mapped[pd.Timestamp]
+
+
 class CleanPartition(Base):
     """One trading day of clean ticks built with one cleaning-rules version (DATA-007)."""
 

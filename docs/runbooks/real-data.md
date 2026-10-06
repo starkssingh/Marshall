@@ -112,6 +112,31 @@ SHA-256; every deletion is logged with size and digest in `data/deleted_csvs.log
 not backed up by this repository (`data/` is git-ignored) — **backing it up is the owner's step**.
 `xq verify-raw` re-hashes the whole store in about 17 s and should be run before relying on it.
 
+### Re-exporting a damaged month (ADR 0071)
+
+A month the downloader left whole-hour holes in is re-exported with the same command as in step 1
+and ingested as a **new raw file that supersedes the old one**. Nothing in the raw store is
+deleted or rewritten; the manifest records which file replaced which, when and why, and clean,
+bars and `xq validate` read only the replacement from then on.
+
+```bash
+# The old file's raw_file_id is the prefix of its stored name (data/raw/<source>/<instrument>/...).
+ls data/raw/dukascopy/xauusd/2014/10/        # e.g. 0123456789abcdef__XAUUSD_ticks_2014-10.csv
+uv run xq ingest --source dukascopy --path data/downloads/reexport/XAUUSD_ticks_2014-10.csv \
+  --supersedes 0123456789abcdef \
+  --reason "re-export of 2014-10: the first export skipped 205 whole UTC hours (DQ-008 review 5.3)"
+uv run xq verify-raw                          # both files are still checked
+uv run xq clean --source dukascopy            # the affected trading days are rebuilt
+uv run xq build-bars --source dukascopy
+uv run xq spread-stats --source dukascopy
+uv run xq validate --source dukascopy
+```
+
+`--path` must be the one re-exported file. The ingest is refused, with nothing stored, without a
+reason, for an unknown or already superseded raw file id, for a file of another source, for a
+byte-identical file, or for a file whose ticks do not overlap the old file's period. Back up
+`data/raw` again afterwards: it now holds both versions of the month.
+
 ## 3. What a real-data session may do now
 
 Until the DQ-008 review is signed off, nothing runs on real data beyond the pipeline above and

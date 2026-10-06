@@ -14,6 +14,13 @@ Ingesting a source file:
 
 ``raw_file_id`` is the first 16 hex digits of the file's SHA-256, so it is the same whenever the
 same file is ingested, and a rebuilt store reproduces the same ids.
+
+A **re-export** of a period (a month the downloader left holes in, say) is ingested as a new raw
+file that names the raw file(s) it *supersedes*, with a reason (ADR 0071). Nothing is deleted or
+rewritten: both files stay in the store and the manifest, and `verify_raw_store` checks both. The
+supersession is recorded in ``raw_file_supersessions`` together with the new file's manifest row,
+and every later stage reads only the *active* files (`active_raw_files`), so a trading day is
+never built from both.
 """
 
 from __future__ import annotations
@@ -22,6 +29,7 @@ import hashlib
 import os
 import shutil
 import stat
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -33,13 +41,13 @@ from sqlalchemy import Engine, select
 from sqlalchemy.orm import Session
 
 from xq.core.config import AppConfig, config_hash
-from xq.core.errors import RawStoreIntegrityError
+from xq.core.errors import RawStoreIntegrityError, SupersessionError
 from xq.core.logging import get_logger
 from xq.core.time import from_ns, utc_now
 from xq.data.adapters import RawFileRef, SourceAdapter, build_adapter
 from xq.data.provenance import register_source
 from xq.tracking.db import session_factory
-from xq.tracking.models import IngestRun, RawFile
+from xq.tracking.models import IngestRun, RawFile, RawFileSupersession
 
 RAW_DIR = "raw"
 MIRROR_DIR = "raw_parquet"
@@ -88,17 +96,34 @@ def raw_file_id_for(sha256: str) -> str:
 
 
 def ingest(
-    cfg: AppConfig, source_id: str, path: Path, *, engine: Engine, run_id: str, git_sha: str
+    cfg: AppConfig,
+    source_id: str,
+    path: Path,
+    *,
+    engine: Engine,
+    run_id: str,
+    git_sha: str,
+    supersedes: Sequence[str] = (),
+    reason: str | None = None,
 ) -> IngestResult:
     """Ingest every file of `source_id` found at `path` into the raw store.
 
-    The metadata database must already be at the current migration (``xq db upgrade``).
+    With `supersedes`, `path` must hold exactly one new file: a re-export that replaces the named
+    raw files of the same source and period, for `reason` (ADR 0071). The metadata database must
+    already be at the current migration (``xq db upgrade``).
+
+    Raises:
+        SupersessionError: if a supersession is malformed: no reason, not exactly one new file,
+            an unknown, already superseded or other-source raw file, identical bytes, or a file
+            whose period does not overlap the one it supersedes. Nothing is stored then.
     """
     adapter = build_adapter(cfg, source_id)
     source = cfg.source(source_id)
     instrument = cfg.instrument(source.instrument, source.venue)
     data_dir = cfg.paths.resolve(cfg.paths.data_dir)
     refs = adapter.discover(path)
+    if supersedes:
+        _check_supersession_request(engine, source_id, refs, supersedes, reason)
     started = utc_now()
     ingested: list[str] = []
     skipped: list[str] = []
@@ -113,7 +138,12 @@ def ingest(
             status="running",
             git_sha=git_sha,
             config_hash=config_hash(cfg),
-            params_json={"source_id": source_id, "path": str(path), "files_found": len(refs)},
+            params_json={
+                "source_id": source_id,
+                "path": str(path),
+                "files_found": len(refs),
+                **({"supersedes": list(supersedes), "reason": reason} if supersedes else {}),
+            },
         )
         session.add(run)
         session.commit()
@@ -126,9 +156,20 @@ def ingest(
                     skipped.append(existing.raw_file_id)
                     _log_skip(ref, existing, source_id)
                     continue
+                replaced = [session.get(RawFile, rid) for rid in supersedes]
                 record = _ingest_file(
-                    session, adapter, ref, digest, data_dir, source_id, source.instrument, run_id
+                    session,
+                    adapter,
+                    ref,
+                    digest,
+                    data_dir,
+                    source_id,
+                    source.instrument,
+                    run_id,
+                    [r for r in replaced if r is not None],
                 )
+                if supersedes:
+                    _record_supersessions(session, record, supersedes, reason or "", run_id)
                 session.commit()
                 ingested.append(record.raw_file_id)
                 rows += record.row_count
@@ -184,6 +225,114 @@ def verify_raw_store(cfg: AppConfig, engine: Engine) -> list[IntegrityProblem]:
     return problems
 
 
+def active_raw_files(session: Session, source_id: str) -> list[RawFile]:
+    """The raw files of `source_id` that no re-export supersedes, by id: what clean reads."""
+    superseded = select(RawFileSupersession.superseded_raw_file_id)
+    return list(
+        session.scalars(
+            select(RawFile)
+            .where(RawFile.source_id == source_id, RawFile.raw_file_id.not_in(superseded))
+            .order_by(RawFile.raw_file_id)
+        )
+    )
+
+
+def _check_supersession_request(
+    engine: Engine,
+    source_id: str,
+    refs: Sequence[RawFileRef],
+    supersedes: Sequence[str],
+    reason: str | None,
+) -> None:
+    """Refuse a supersession before anything is copied (ADR 0071)."""
+    if reason is None or not reason.strip():
+        raise SupersessionError("a re-export that supersedes raw files needs a reason")
+    if len(refs) != 1:
+        raise SupersessionError(
+            f"a supersession ingests exactly one re-exported file; found {len(refs)} at the path"
+        )
+    if len(set(supersedes)) != len(supersedes):
+        raise SupersessionError(f"raw files named twice: {list(supersedes)}")
+    digest = sha256_file(refs[0].path)
+    with session_factory(engine)() as session:
+        same = session.scalar(select(RawFile).where(RawFile.sha256 == digest))
+        if same is not None:
+            raise SupersessionError(
+                f"{refs[0].path} is byte-identical to raw file {same.raw_file_id}: nothing to "
+                "supersede with"
+            )
+        for raw_file_id in supersedes:
+            old = session.get(RawFile, raw_file_id)
+            if old is None:
+                raise SupersessionError(f"unknown raw file {raw_file_id!r}")
+            if old.source_id != source_id:
+                raise SupersessionError(
+                    f"raw file {raw_file_id} belongs to source {old.source_id!r}, not "
+                    f"{source_id!r}: a re-export supersedes files of its own source only"
+                )
+            earlier = session.get(RawFileSupersession, raw_file_id)
+            if earlier is not None:
+                raise SupersessionError(
+                    f"raw file {raw_file_id} is already superseded by "
+                    f"{earlier.superseding_raw_file_id}; supersede that file instead"
+                )
+
+
+def _check_same_period(
+    ref: RawFileRef,
+    first: pd.Timestamp | None,
+    last: pd.Timestamp | None,
+    replaced: Sequence[RawFile],
+) -> None:
+    """The re-export must cover the period of every file it supersedes, at least in part."""
+    for old in replaced:
+        if first is None or last is None or old.first_ts_utc is None or old.last_ts_utc is None:
+            raise SupersessionError(f"{ref.path} or raw file {old.raw_file_id} has no ticks")
+        if first > old.last_ts_utc or old.first_ts_utc > last:
+            raise SupersessionError(
+                f"{ref.path} spans {first} to {last}, which does not overlap raw file "
+                f"{old.raw_file_id} ({old.first_ts_utc} to {old.last_ts_utc}): not the same period"
+            )
+        if first > old.first_ts_utc or last < old.last_ts_utc:
+            log.warning(
+                "superseding_file_shorter",
+                file=str(ref.path),
+                superseded=old.raw_file_id,
+                detail=(
+                    f"the re-export spans {first} to {last}; raw file {old.raw_file_id} spanned "
+                    f"{old.first_ts_utc} to {old.last_ts_utc}, and its ticks outside the "
+                    "re-export are no longer read"
+                ),
+            )
+
+
+def _record_supersessions(
+    session: Session, record: RawFile, supersedes: Sequence[str], reason: str, run_id: str
+) -> None:
+    for raw_file_id in supersedes:
+        old = session.get(RawFile, raw_file_id)
+        if old is None or old.first_ts_utc is None or old.last_ts_utc is None:  # pragma: no cover
+            raise SupersessionError(f"raw file {raw_file_id} disappeared during the ingest")
+        session.add(
+            RawFileSupersession(
+                superseded_raw_file_id=raw_file_id,
+                superseding_raw_file_id=record.raw_file_id,
+                source_id=record.source_id,
+                period_start_utc=old.first_ts_utc,
+                period_end_utc=old.last_ts_utc,
+                reason=reason.strip(),
+                ingest_run_id=run_id,
+                recorded_at=utc_now(),
+            )
+        )
+        log.info(
+            "raw_file_superseded",
+            superseded=raw_file_id,
+            superseding=record.raw_file_id,
+            reason=reason.strip(),
+        )
+
+
 def _ingest_file(
     session: Session,
     adapter: SourceAdapter,
@@ -193,6 +342,7 @@ def _ingest_file(
     source_id: str,
     instrument_id: str,
     run_id: str,
+    replaced: Sequence[RawFile] = (),
 ) -> RawFile:
     raw_file_id = raw_file_id_for(digest)
     stored_name = f"{raw_file_id}__{ref.original_name}"
@@ -210,6 +360,11 @@ def _ingest_file(
     mirror = mirror_frame(adapter, raw, raw_file_id)
     first = from_ns(int(mirror["ts_utc"].min())) if len(raw) else None
     last = from_ns(int(mirror["ts_utc"].max())) if len(raw) else None
+    try:
+        _check_same_period(ref, first, last, replaced)
+    except SupersessionError:
+        incoming.unlink()
+        raise
     period = first.strftime("%Y/%m") if first is not None else "undated"
     final = source_root / period / stored_name
     _place_read_only(incoming, final, digest)

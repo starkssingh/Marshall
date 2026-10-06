@@ -31,6 +31,7 @@ from xq.core.time import to_ns, trading_day_bounds, utc_now
 from xq.core.types import Timeframe
 from xq.data.bars import bar_set_dir, build_version
 from xq.data.clean import clean_partition_path, clean_rules_version
+from xq.data.raw_store import active_raw_files
 from xq.data.sessions import build_session_table
 from xq.data.spreads import NoSpreadDataError, hour_of_week, latest_spread_stats
 from xq.quality.checks.ticks import hourly_tick_counts
@@ -49,7 +50,6 @@ from xq.tracking.models import (
     CleanPartition,
     QualityResultRecord,
     QualityRunRecord,
-    RawFile,
 )
 
 QUALITY_DIR = "quality"
@@ -130,13 +130,9 @@ def validate_source(
             .group_by(CleanPartition.trading_day, CleaningAction.rule_id)
         ).all()
         spans = [
-            (to_ns(first), to_ns(last))
-            for first, last in session.execute(
-                select(RawFile.first_ts_utc, RawFile.last_ts_utc).where(
-                    RawFile.source_id == source_id
-                )
-            )
-            if first is not None and last is not None
+            (to_ns(r.first_ts_utc), to_ns(r.last_ts_utc))
+            for r in active_raw_files(session, source_id)
+            if r.first_ts_utc is not None and r.last_ts_utc is not None
         ]
     days = [d for d in days if (start is None or d >= start) and (end is None or d <= end)]
     vault_days = [d for d in days if to_ns(trading_day_bounds(d)[1]) > vault_ns]

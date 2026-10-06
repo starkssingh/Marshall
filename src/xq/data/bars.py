@@ -37,10 +37,10 @@ from xq.core.time import from_ns, to_ns, trading_day_bounds, trading_days
 from xq.core.types import Timeframe
 from xq.data.clean import clean_partition_path, clean_rules_version
 from xq.data.flags import TickFlag
-from xq.data.raw_store import sha256_file
+from xq.data.raw_store import active_raw_files, sha256_file
 from xq.data.sessions import build_session_table
 from xq.tracking.db import session_factory
-from xq.tracking.models import BarGap, BarSet, CleanPartition, RawFile
+from xq.tracking.models import BarGap, BarSet, CleanPartition
 
 #: Bump when bar logic changes; it is part of every build version hash.
 BAR_CODE_VERSION = 1
@@ -211,11 +211,9 @@ def build_bar_sets(
                 "run `xq clean` first"
             )
         coverage_end = max(
-            to_ns(ts)
-            for ts in session.scalars(
-                select(RawFile.last_ts_utc).where(RawFile.source_id == source_id)
-            )
-            if ts is not None
+            to_ns(r.last_ts_utc)
+            for r in active_raw_files(session, source_id)
+            if r.last_ts_utc is not None
         )
         mask = exclude_mask(bars_cfg)
         latency = bars_cfg.publication_latency_ms * 1_000_000

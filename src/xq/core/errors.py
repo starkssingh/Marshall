@@ -33,6 +33,10 @@ class RawStoreIntegrityError(XQError):
     """A file in the immutable raw store differs from its manifest entry."""
 
 
+class SupersessionError(XQError):
+    """A re-export cannot supersede the raw files it names (ADR 0071)."""
+
+
 class MirrorVersionError(XQError):
     """A raw-store mirror part predates the schema a later stage needs; rebuild the mirror."""
 

@@ -40,7 +40,7 @@ import numpy.typing as npt
 import pandas as pd
 import pyarrow as pa
 import pyarrow.parquet as pq
-from sqlalchemy import Engine, delete, select
+from sqlalchemy import Engine, delete
 from sqlalchemy.orm import Session
 
 from xq.core.config import AppConfig, CleaningConfig
@@ -49,10 +49,16 @@ from xq.core.logging import get_logger
 from xq.core.time import from_ns, to_ns, trading_day
 from xq.data.adapters.base import TICK_SCHEMA, validate_tick_frame
 from xq.data.flags import FLAG_DTYPE, TickFlag
-from xq.data.raw_store import MIRROR_DIR, MIRROR_VERSION, MIRROR_VERSION_KEY, sha256_file
+from xq.data.raw_store import (
+    MIRROR_DIR,
+    MIRROR_VERSION,
+    MIRROR_VERSION_KEY,
+    active_raw_files,
+    sha256_file,
+)
 from xq.data.sessions import build_session_table
 from xq.tracking.db import session_factory
-from xq.tracking.models import CleaningAction, CleanPartition, RawFile
+from xq.tracking.models import CleaningAction, CleanPartition
 
 #: Bump when rule logic changes; it is part of every rules version hash.
 CLEAN_CODE_VERSION = 2
@@ -219,8 +225,10 @@ def build_clean(
 ) -> CleanBuildResult:
     """Clean every trading day of `source_id` that has ingested data (optionally within dates).
 
-    A partition is rebuilt only if its contributing raw files changed, its file is missing or
-    altered, or `force` is set; rebuilding the same inputs reproduces the same bytes.
+    Only active raw files are read: a file superseded by a re-export is never mixed with the file
+    that replaces it (ADR 0071). A partition is rebuilt only if its contributing raw files changed
+    (a supersession changes them), its file is missing or altered, or `force` is set; rebuilding
+    the same inputs reproduces the same bytes.
     """
     source = cfg.source(source_id)
     cleaning = cfg.cleaning_config()
@@ -231,7 +239,7 @@ def build_clean(
     result = CleanBuildResult(rules_version=version)
 
     with session_factory(engine)() as session:
-        records = list(session.scalars(select(RawFile).where(RawFile.source_id == source_id)))
+        records = active_raw_files(session, source_id)  # never a superseded file (ADR 0071)
         spans = [
             (r.raw_file_id, to_ns(r.first_ts_utc), to_ns(r.last_ts_utc))
             for r in records
